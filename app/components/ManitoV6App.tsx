@@ -119,6 +119,7 @@ export default function ManitoV6App() {
   const [orders, setOrders] = useState<V6Order[]>([]);
   const [tab, setTab] = useState<Tab>('home');
   const [loading, setLoading] = useState(() => isV6SupabaseConfigured());
+  const [profileLoading, setProfileLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatOrder, setChatOrder] = useState<V6Order | null>(null);
@@ -126,18 +127,24 @@ export default function ManitoV6App() {
   const [isStandalone, setIsStandalone] = useState(() => isInstalledDisplayMode());
 
   const loadData = useCallback(async (userId: string) => {
-    const [nextProfile, nextServices, nextOrders] = await Promise.all([
-      getV6Profile(userId),
-      listV6Services(),
-      listV6Orders(),
-    ]);
-    setProfile(nextProfile);
-    setServices(nextServices);
-    setOrders(nextOrders);
-    if (nextProfile.role === 'professional') {
-      setProServices(await listV6ProfessionalServices(userId));
-    } else {
-      setProServices([]);
+    setProfileLoading(true);
+    try {
+      const [nextProfile, nextServices, nextOrders] = await Promise.all([
+        getV6Profile(userId),
+        listV6Services(),
+        listV6Orders(),
+      ]);
+      setError(null);
+      setProfile(nextProfile);
+      setServices(nextServices);
+      setOrders(nextOrders);
+      if (nextProfile.role === 'professional') {
+        setProServices(await listV6ProfessionalServices(userId));
+      } else {
+        setProServices([]);
+      }
+    } finally {
+      setProfileLoading(false);
     }
   }, []);
 
@@ -174,8 +181,11 @@ export default function ManitoV6App() {
       (_event, nextSession) => {
         setSession(nextSession);
         if (nextSession?.user.id) {
-          void loadData(nextSession.user.id);
+          void loadData(nextSession.user.id).catch((caught) =>
+            setError(caught instanceof Error ? caught.message : 'No se pudo cargar tu perfil.'),
+          );
         } else {
+          setProfileLoading(false);
           setProfile(null);
           setOrders([]);
           setProServices([]);
@@ -264,14 +274,14 @@ export default function ManitoV6App() {
     return <SetupScreen onConnected={() => setConfigured(true)} />;
   }
 
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <main className="v6-app v6-center">
         <section className="v6-card">
           <p className="v6-live">
             <CircleDot size={14} aria-hidden="true" /> MANITO V6
           </p>
-          <h1>Cargando backend...</h1>
+          <h1>{profileLoading ? 'Cargando perfil...' : 'Cargando backend...'}</h1>
         </section>
       </main>
     );
