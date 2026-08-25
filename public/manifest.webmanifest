@@ -1,0 +1,18 @@
+{
+  "name": "MANITO",
+  "short_name": "MANITO",
+  "description": "Contratacion y seguimiento de servicios del hogar en Argentina.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fffdfa",
+  "theme_color": "#0f4b3f",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
