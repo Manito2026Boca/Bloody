@@ -122,6 +122,36 @@ pnpm test
 pnpm build
 ```
 
+## Deploy en Vercel
+
+El proyecto tambien queda preparado para Vercel. La configuracion esta en
+`vercel.json` y usa:
+
+```bash
+pnpm vercel-build
+```
+
+Variables a cargar en Vercel, en Project Settings > Environment Variables:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://taovmzxqvacrtjefgbsd.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_txzdjLhKue77cWaozTxlbA_Awq0H16s
+NEXT_PUBLIC_APP_URL=https://tu-dominio-de-vercel.vercel.app
+```
+
+Cuando Vercel entregue el dominio final, agregalo tambien en Supabase:
+
+```bash
+Authentication > URL Configuration > Site URL
+https://tu-dominio-de-vercel.vercel.app
+
+Authentication > URL Configuration > Redirect URLs
+https://tu-dominio-de-vercel.vercel.app/**
+```
+
+Nunca cargues la database password, `service_role` ni claves secretas como
+variables `NEXT_PUBLIC_*`.
+
 ## Pendiente para produccion
 
 V6 demuestra el primer backend compartido real. Antes de operar comercialmente

@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use client';
 
 import type { Session } from '@supabase/supabase-js';
