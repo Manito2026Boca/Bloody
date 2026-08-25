@@ -3,9 +3,15 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'MANITO',
+  applicationName: 'MANITO',
   description:
     'Contrata, segui y gestiona servicios para el hogar en Argentina.',
   manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    title: 'MANITO',
+    statusBarStyle: 'default',
+  },
   openGraph: {
     title: 'MANITO',
     description:

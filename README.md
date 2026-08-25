@@ -16,7 +16,7 @@ contrato backend:
 - Vinext/Next sobre Vite y React 19.
 - TypeScript.
 - Supabase Auth, PostgreSQL, Realtime y RLS.
-- PWA con manifest y service worker basico.
+- PWA instalable como app web descargable desde un navegador compatible.
 
 ## Estructura V6
 
@@ -41,6 +41,19 @@ URL y Publishable key y las guarda solo en ese navegador.
 
 Nunca uses `service_role`, secret keys ni claves administrativas en variables
 `NEXT_PUBLIC_*`.
+
+## App web descargable
+
+MANITO esta preparada como PWA:
+
+- manifest con `display: standalone`, `scope`, `start_url` e iconos PNG 192/512;
+- service worker para cachear el shell de la app;
+- boton `Instalar app` cuando el navegador dispara el prompt de instalacion;
+- hosting HTTPS, requisito para instalacion fuera de `localhost`.
+
+En iPhone/iPad, Safari no expone el prompt automatico: la instalacion se hace
+desde Compartir > Agregar a pantalla de inicio. Para publicar en App Store o
+Google Play mas adelante, la misma base puede empaquetarse con Capacitor.
 
 ## Supabase
 

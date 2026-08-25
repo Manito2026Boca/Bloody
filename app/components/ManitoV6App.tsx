@@ -6,6 +6,7 @@ import {
   BriefcaseBusiness,
   Check,
   CircleDot,
+  Download,
   Home,
   KeyRound,
   LocateFixed,
@@ -60,6 +61,11 @@ import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 
 type Tab = 'home' | 'orders' | 'profile' | 'account';
 type AuthMode = 'login' | 'signup';
+type NavigatorWithStandalone = Navigator & { standalone?: boolean };
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+};
 
 const statusFlow: V6OrderStatus[] = [
   'accepted',
@@ -96,6 +102,14 @@ function pendingProfileKey(email: string) {
   return `manito_v6_pending_profile:${email.toLowerCase()}`;
 }
 
+function isInstalledDisplayMode() {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    Boolean((window.navigator as NavigatorWithStandalone).standalone)
+  );
+}
+
 export default function ManitoV6App() {
   const [configured, setConfigured] = useState(() => isV6SupabaseConfigured());
   const [session, setSession] = useState<Session | null>(null);
@@ -108,6 +122,8 @@ export default function ManitoV6App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatOrder, setChatOrder] = useState<V6Order | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [isStandalone, setIsStandalone] = useState(() => isInstalledDisplayMode());
 
   const loadData = useCallback(async (userId: string) => {
     const [nextProfile, nextServices, nextOrders] = await Promise.all([
@@ -186,6 +202,40 @@ export default function ManitoV6App() {
       void navigator.serviceWorker.register('/sw.js');
     }
   }, []);
+
+  useEffect(() => {
+    function handleBeforeInstallPrompt(event: Event) {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    }
+
+    function handleInstalled() {
+      setInstallPrompt(null);
+      setIsStandalone(true);
+      setNotice('MANITO instalado.');
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleInstalled);
+    };
+  }, []);
+
+  const installApp = useCallback(async () => {
+    if (!installPrompt) return;
+    try {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        setNotice('MANITO instalado.');
+      }
+      setInstallPrompt(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo instalar.');
+    }
+  }, [installPrompt]);
 
   const clientOrders = useMemo(
     () => orders.filter((order) => order.client_id === profile?.id),
@@ -321,7 +371,12 @@ export default function ManitoV6App() {
         )}
 
         {tab === 'account' && (
-          <AccountPanel profile={profile} setNotice={setNotice} />
+          <AccountPanel
+            profile={profile}
+            canInstall={Boolean(installPrompt) && !isStandalone}
+            onInstall={installApp}
+            setNotice={setNotice}
+          />
         )}
       </div>
 
@@ -992,9 +1047,13 @@ function ProfilePanel({
 
 function AccountPanel({
   profile,
+  canInstall,
+  onInstall,
   setNotice,
 }: {
   profile: V6Profile;
+  canInstall: boolean;
+  onInstall: () => void;
   setNotice: (message: string) => void;
 }) {
   async function logout() {
@@ -1014,6 +1073,11 @@ function AccountPanel({
         <p>{profile.email} · {profile.role === 'professional' ? 'Cuenta profesional' : 'Cuenta cliente'}</p>
       </section>
       <section className="v6-menu">
+        {canInstall && (
+          <button type="button" onClick={onInstall}>
+            <Download size={17} aria-hidden="true" /> Instalar app
+          </button>
+        )}
         <button type="button" onClick={logout}>
           <LogOut size={17} aria-hidden="true" /> Cerrar sesion
         </button>

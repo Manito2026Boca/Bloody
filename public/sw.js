@@ -1,5 +1,11 @@
-const CACHE_NAME = 'manito-shell-v1';
-const CORE_ASSETS = ['/', '/manifest.webmanifest', '/favicon.svg'];
+const CACHE_NAME = 'manito-shell-v2';
+const CORE_ASSETS = [
+  '/',
+  '/manifest.webmanifest',
+  '/favicon.svg',
+  '/icon-192.png',
+  '/icon-512.png',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -24,7 +30,10 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
+  const requestUrl = new URL(event.request.url);
+  if (event.request.method !== 'GET' || requestUrl.origin !== self.location.origin) {
+    return;
+  }
 
   event.respondWith(
     fetch(event.request)
