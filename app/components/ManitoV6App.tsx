@@ -2,11 +2,16 @@
 
 import type { Session } from '@supabase/supabase-js';
 import {
+  BadgeCheck,
+  Banknote,
   Bell,
   BriefcaseBusiness,
+  Camera,
   Check,
   CircleDot,
+  CreditCard,
   Download,
+  Heart,
   Home,
   KeyRound,
   LocateFixed,
@@ -17,7 +22,11 @@ import {
   Save,
   SendHorizontal,
   Settings,
+  ShieldCheck,
+  Star,
   UserCircle,
+  Users,
+  Wallet,
   Wrench,
 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
@@ -61,10 +70,32 @@ import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 
 type Tab = 'home' | 'orders' | 'profile' | 'account';
 type AuthMode = 'login' | 'signup';
+type AssignmentMode = 'auto' | 'manual';
+type PaymentMethod = 'card' | 'wallet' | 'cash';
 type NavigatorWithStandalone = Navigator & { standalone?: boolean };
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+};
+type SavedAddress = {
+  id: string;
+  label: string;
+  line: string;
+  lat: number | null;
+  lng: number | null;
+};
+type FeaturedProfessional = {
+  id: string;
+  name: string;
+  trade: string;
+  rating: number;
+  jobs: number;
+  distance: string;
+  etaMinutes: number;
+  specialties: string[];
+  verified: boolean;
+  pro: boolean;
+  priceDelta: number;
 };
 
 const statusFlow: V6OrderStatus[] = [
@@ -72,6 +103,54 @@ const statusFlow: V6OrderStatus[] = [
   'en_camino',
   'en_sitio',
   'completed',
+];
+const deployedAppUrl =
+  'https://manito-v6-real.eaeb3861-253b-4861-ab40-75d3f3ded9cb.chatgpt.site';
+const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: ReactNode }> = [
+  { id: 'card', label: 'Tarjeta', icon: <CreditCard size={17} aria-hidden="true" /> },
+  { id: 'wallet', label: 'Billetera', icon: <Wallet size={17} aria-hidden="true" /> },
+  { id: 'cash', label: 'Efectivo', icon: <Banknote size={17} aria-hidden="true" /> },
+];
+const featuredProfessionals: FeaturedProfessional[] = [
+  {
+    id: 'pro-martin',
+    name: 'Martin Ledesma',
+    trade: 'Plomeria y gas',
+    rating: 4.9,
+    jobs: 186,
+    distance: '1,8 km',
+    etaMinutes: 28,
+    specialties: ['Urgencias', 'Perdidas', 'Termotanques'],
+    verified: true,
+    pro: true,
+    priceDelta: 2500,
+  },
+  {
+    id: 'pro-sofia',
+    name: 'Sofia Pereira',
+    trade: 'Electricidad',
+    rating: 4.8,
+    jobs: 143,
+    distance: '2,4 km',
+    etaMinutes: 35,
+    specialties: ['Tableros', 'Cortos', 'Instalaciones'],
+    verified: true,
+    pro: false,
+    priceDelta: 0,
+  },
+  {
+    id: 'pro-diego',
+    name: 'Diego Mena',
+    trade: 'Mantenimiento',
+    rating: 4.7,
+    jobs: 98,
+    distance: '3,1 km',
+    etaMinutes: 42,
+    specialties: ['Cerrajeria', 'Hogar', 'Reparaciones'],
+    verified: true,
+    pro: false,
+    priceDelta: -1000,
+  },
 ];
 
 function money(value: number | null | undefined) {
@@ -100,6 +179,37 @@ function serviceIcon(slug: string) {
 
 function pendingProfileKey(email: string) {
   return `manito_v6_pending_profile:${email.toLowerCase()}`;
+}
+
+function savedAddressesKey(profileId: string) {
+  return `manito_v6_addresses:${profileId}`;
+}
+
+function getAuthRedirectUrl() {
+  if (typeof window === 'undefined') return deployedAppUrl;
+  const configuredUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (configuredUrl) return configuredUrl;
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return deployedAppUrl;
+  }
+  return window.location.origin;
+}
+
+function loadSavedAddresses(profileId: string): SavedAddress[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(savedAddressesKey(profileId));
+    return raw ? (JSON.parse(raw) as SavedAddress[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function makeClientId(prefix: string) {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now().toString(36)}`;
 }
 
 function isInstalledDisplayMode() {
@@ -474,10 +584,12 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [localNotice, setLocalNotice] = useState<string | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setLocalNotice(null);
     try {
       const supabase = getV6Supabase();
       if (mode === 'login') {
@@ -498,14 +610,15 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         password,
         options: {
           data: { full_name: fullName },
-          emailRedirectTo: window.location.origin,
+          emailRedirectTo: getAuthRedirectUrl(),
         },
       });
       if (signupError) throw signupError;
       if (data.session) {
         await completeV6Profile({ fullName, role });
       } else {
-        setNotice('Cuenta creada. Revisa tu email si la confirmacion esta activa.');
+        setLocalNotice('Cuenta creada. Te mandamos un email para confirmar y entrar a MANITO.');
+        setNotice('Cuenta creada. Revisa tu email para confirmar el acceso.');
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo ingresar.');
@@ -561,6 +674,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
             />
           </label>
           {error && <p className="v6-alert">{error}</p>}
+          {localNotice && <p className="v6-note">{localNotice}</p>}
           <button className="v6-primary" type="submit">
             {mode === 'login' ? 'Ingresar' : 'Crear cuenta'}
           </button>
@@ -593,6 +707,29 @@ function ClientHome({
   const [mode, setMode] = useState<V6Mode>('immediate');
   const [scheduledAt, setScheduledAt] = useState('');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>(() =>
+    loadSavedAddresses(profile.id),
+  );
+  const [addressLabel, setAddressLabel] = useState('Casa');
+  const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>('auto');
+  const [selectedProfessionalId, setSelectedProfessionalId] = useState(featuredProfessionals[0].id);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('card');
+  const [photoNames, setPhotoNames] = useState<string[]>([]);
+  const selectedProfessional = featuredProfessionals.find(
+    (professional) => professional.id === selectedProfessionalId,
+  );
+  const selectedBasePrice = selectedService?.base_price ?? 0;
+  const estimatedPrice = selectedService
+    ? selectedBasePrice +
+      (mode === 'scheduled' ? 2000 : 0) +
+      (assignmentMode === 'manual' ? selectedProfessional?.priceDelta || 0 : 0)
+    : null;
+  const etaText =
+    mode === 'scheduled'
+      ? 'Horario reservado'
+      : selectedProfessional
+        ? `${selectedProfessional.etaMinutes} min`
+        : '30-45 min';
 
   async function createOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -601,19 +738,33 @@ function ClientHome({
       return;
     }
     try {
+      const orderDescription = [
+        description,
+        `Asignacion: ${
+          assignmentMode === 'manual' && selectedProfessional
+            ? `prefiero a ${selectedProfessional.name}`
+            : 'automatica MANITO'
+        }`,
+        `Pago: ${paymentOptions.find((option) => option.id === paymentMethod)?.label}`,
+        photoNames.length ? `Fotos cargadas: ${photoNames.join(', ')}` : null,
+        'Garantia MANITO: 7 dias',
+      ]
+        .filter(Boolean)
+        .join('\n');
       await createV6Order({
         clientId: profile.id,
         serviceId: selectedService.id,
-        description,
+        description: orderDescription,
         address,
         mode,
         scheduledAt: mode === 'scheduled' && scheduledAt ? new Date(scheduledAt).toISOString() : null,
-        price: selectedService.base_price,
+        price: estimatedPrice,
         lat: coords?.lat || null,
         lng: coords?.lng || null,
       });
       setOrders(await listV6Orders());
       setNotice('Pedido publicado. Ya puede verlo un profesional disponible.');
+      setPhotoNames([]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo publicar.');
     }
@@ -629,6 +780,41 @@ function ClientHome({
       () => setError('No se pudo obtener GPS.'),
       { enableHighAccuracy: true, timeout: 10000 },
     );
+  }
+
+  function saveAddress() {
+    if (!address.trim()) {
+      setError('Escribi una direccion para guardarla.');
+      return;
+    }
+    const nextAddress: SavedAddress = {
+      id: makeClientId('addr'),
+      label: addressLabel.trim() || 'Direccion',
+      line: address.trim(),
+      lat: coords?.lat || null,
+      lng: coords?.lng || null,
+    };
+    const nextAddresses = [nextAddress, ...savedAddresses].slice(0, 5);
+    setSavedAddresses(nextAddresses);
+    window.localStorage.setItem(savedAddressesKey(profile.id), JSON.stringify(nextAddresses));
+    setNotice('Direccion guardada.');
+  }
+
+  function chooseSavedAddress(addressId: string) {
+    const savedAddress = savedAddresses.find((item) => item.id === addressId);
+    if (!savedAddress) return;
+    setAddress(savedAddress.line);
+    setAddressLabel(savedAddress.label);
+    if (savedAddress.lat != null && savedAddress.lng != null) {
+      setCoords({ lat: savedAddress.lat, lng: savedAddress.lng });
+    }
+  }
+
+  function updatePhotos(files: FileList | null) {
+    const nextFiles = Array.from(files || [])
+      .slice(0, 3)
+      .map((file) => file.name);
+    setPhotoNames(nextFiles);
   }
 
   return (
@@ -671,10 +857,40 @@ function ClientHome({
               <span>Que necesitas?</span>
               <textarea value={description} onChange={(event) => setDescription(event.target.value)} required />
             </label>
+
+            <div className="v6-split">
+              <label className="v6-field">
+                <span>Direcciones guardadas</span>
+                <select defaultValue="" onChange={(event) => chooseSavedAddress(event.target.value)}>
+                  <option value="" disabled>
+                    {savedAddresses.length ? 'Elegir direccion' : 'Todavia no guardaste direcciones'}
+                  </option>
+                  {savedAddresses.map((item) => (
+                    <option value={item.id} key={item.id}>
+                      {item.label} - {item.line}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="v6-field">
+                <span>Nombre</span>
+                <input value={addressLabel} onChange={(event) => setAddressLabel(event.target.value)} />
+              </label>
+            </div>
             <label className="v6-field">
               <span>Direccion</span>
               <input value={address} onChange={(event) => setAddress(event.target.value)} required />
             </label>
+            <div className="v6-actions-row">
+              <button className="v6-secondary" type="button" onClick={captureLocation}>
+                <LocateFixed size={17} aria-hidden="true" />
+                {coords ? 'GPS capturado' : 'Usar GPS'}
+              </button>
+              <button className="v6-secondary" type="button" onClick={saveAddress}>
+                <MapPin size={17} aria-hidden="true" />
+                Guardar direccion
+              </button>
+            </div>
             <label className="v6-field">
               <span>Modalidad</span>
               <select value={mode} onChange={(event) => setMode(event.target.value as V6Mode)}>
@@ -689,10 +905,116 @@ function ClientHome({
                 <input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} />
               </label>
             )}
-            <button className="v6-secondary" type="button" onClick={captureLocation}>
-              <LocateFixed size={17} aria-hidden="true" />
-              {coords ? 'GPS capturado' : 'Usar GPS'}
-            </button>
+
+            <label className="v6-field">
+              <span>Fotos del problema</span>
+              <input type="file" accept="image/*" multiple onChange={(event) => updatePhotos(event.target.files)} />
+            </label>
+            {photoNames.length > 0 && (
+              <div className="v6-file-list">
+                {photoNames.map((name) => (
+                  <span key={name}>
+                    <Camera size={15} aria-hidden="true" /> {name}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="v6-section-head compact">
+              <h2>Asignacion</h2>
+              <span>{assignmentMode === 'manual' ? 'Elegis vos' : 'MANITO asigna'}</span>
+            </div>
+            <div className="v6-choice-grid">
+              <button
+                type="button"
+                className="v6-choice"
+                aria-pressed={assignmentMode === 'auto'}
+                onClick={() => setAssignmentMode('auto')}
+              >
+                <Users size={18} aria-hidden="true" />
+                Automatico
+              </button>
+              <button
+                type="button"
+                className="v6-choice"
+                aria-pressed={assignmentMode === 'manual'}
+                onClick={() => setAssignmentMode('manual')}
+              >
+                <Star size={18} aria-hidden="true" />
+                Elegir profesional
+              </button>
+            </div>
+
+            {assignmentMode === 'manual' && (
+              <div className="v6-pro-list">
+                {featuredProfessionals.map((professional) => (
+                  <button
+                    className="v6-pro-card"
+                    type="button"
+                    aria-pressed={selectedProfessionalId === professional.id}
+                    key={professional.id}
+                    onClick={() => setSelectedProfessionalId(professional.id)}
+                  >
+                    <span className="v6-pro-avatar">{professional.name.slice(0, 1)}</span>
+                    <span>
+                      <strong>{professional.name}</strong>
+                      <small>{professional.trade}</small>
+                      <small>
+                        {professional.rating} estrellas - {professional.jobs} trabajos - {professional.distance} - {professional.etaMinutes} min
+                      </small>
+                      <em>{professional.specialties.join(' - ')}</em>
+                    </span>
+                    <span className="v6-badges">
+                      {professional.verified && <BadgeCheck size={17} aria-label="Verificado" />}
+                      {professional.pro && <b>PRO</b>}
+                      <Heart size={17} aria-label="Favorito" />
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="v6-section-head compact">
+              <h2>Pago</h2>
+              <span>Metodo preferido</span>
+            </div>
+            <div className="v6-choice-grid three">
+              {paymentOptions.map((option) => (
+                <button
+                  type="button"
+                  className="v6-choice"
+                  aria-pressed={paymentMethod === option.id}
+                  key={option.id}
+                  onClick={() => setPaymentMethod(option.id)}
+                >
+                  {option.icon}
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            {mode === 'quote' && selectedService && (
+              <div className="v6-quote-list">
+                {featuredProfessionals.map((professional) => (
+                  <article className="v6-quote-card" key={professional.id}>
+                    <strong>{professional.name}</strong>
+                    <span>{professional.rating} estrellas - disponible hoy - visita {money(6500)}</span>
+                    <p>
+                      Mano de obra {money(Math.max(0, selectedBasePrice + professional.priceDelta))}
+                      {' '}+ fee MANITO {money(2500)}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            )}
+
+            <div className="v6-summary">
+              <span>
+                <ShieldCheck size={17} aria-hidden="true" /> Garantia MANITO 7 dias
+              </span>
+              <strong>{money(estimatedPrice)}</strong>
+              <small>ETA {etaText} - {paymentOptions.find((option) => option.id === paymentMethod)?.label}</small>
+            </div>
             <button className="v6-primary" type="submit">
               Publicar pedido
             </button>
