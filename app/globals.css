@@ -1102,6 +1102,36 @@ a {
   color: white;
 }
 
+.v6-link-button {
+  display: inline-flex;
+  text-decoration: none;
+}
+
+.v6-confirm-card {
+  text-align: center;
+}
+
+.v6-confirm-icon {
+  width: 68px;
+  height: 68px;
+  margin: 18px auto 12px;
+  border-radius: 26px;
+  background: #e5f2ed;
+  color: var(--green-800);
+  display: grid;
+  place-items: center;
+}
+
+.v6-spin {
+  animation: v6-spin 0.9s linear infinite;
+}
+
+@keyframes v6-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .v6-secondary {
   border-color: var(--line);
   background: white;

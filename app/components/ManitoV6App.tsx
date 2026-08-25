@@ -295,6 +295,10 @@ function getAuthRedirectUrl() {
   return window.location.origin;
 }
 
+function getAuthCallbackUrl() {
+  return `${getAuthRedirectUrl().replace(/\/$/, '')}/auth/callback`;
+}
+
 function loadSavedAddresses(profileId: string): SavedAddress[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -751,7 +755,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         password,
         options: {
           data: { full_name: fullName },
-          emailRedirectTo: getAuthRedirectUrl(),
+          emailRedirectTo: getAuthCallbackUrl(),
         },
       });
       if (signupError) throw signupError;
