@@ -32,23 +32,44 @@ import {
 import type { FormEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  acceptV6Proposal,
   acceptV6Order,
+  addV6Complaint,
+  addV6OrderExtra,
+  addV6PortfolioItem,
+  addV6Rating,
+  addV6PaymentProfile,
   advanceV6Order,
   cancelV6Order,
   completeV6Profile,
   createV6Order,
+  decideV6OrderExtra,
   getV6Profile,
+  getV6ProfessionalOnboarding,
+  getV6ProfessionalProfile,
+  listV6AdminSettings,
+  listV6ClientAddresses,
   listV6Messages,
+  listV6OrderExtras,
+  listV6OrderProposals,
   listV6Orders,
+  listV6PaymentProfiles,
+  listV6Portfolio,
+  listV6ProfessionalDocuments,
   listV6ProfessionalServices,
   listV6Services,
   removeV6Channel,
+  sendV6OrderProposal,
   saveV6ProfessionalServices,
   sendV6Message,
   setV6Availability,
   subscribeV6Messages,
   subscribeV6Orders,
   updateV6Profile,
+  upsertV6ClientAddress,
+  upsertV6ProfessionalDocument,
+  upsertV6ProfessionalOnboarding,
+  upsertV6ProfessionalProfile,
 } from '../lib/v6Api';
 import {
   clearStoredConfig,
@@ -57,11 +78,19 @@ import {
   saveStoredConfig,
 } from '../lib/v6Supabase';
 import type {
+  V6AdminSetting,
   V6Message,
   V6Mode,
   V6Order,
+  V6OrderExtra,
+  V6OrderProposal,
+  V6PaymentProfile,
+  V6PortfolioItem,
   V6OrderStatus,
   V6Profile,
+  V6ProfessionalDocument,
+  V6ProfessionalOnboarding,
+  V6ProfessionalProfile,
   V6ProfessionalService,
   V6Role,
   V6Service,
@@ -151,6 +180,31 @@ const featuredProfessionals: FeaturedProfessional[] = [
     pro: false,
     priceDelta: -1000,
   },
+];
+const onboardingSteps = [
+  'Datos personales',
+  'DNI frente',
+  'DNI dorso',
+  'Selfie',
+  'Telefono',
+  'Direccion',
+  'CUIT/CUIL',
+  'CBU o CVU',
+  'Categoria principal',
+  'Especialidades',
+  'Tarifas',
+  'Portfolio',
+  'Seguro',
+  'Antecedentes',
+  'Terminos',
+  'Revision MANITO',
+];
+const requiredDocuments = [
+  { kind: 'dni_front', label: 'DNI frente' },
+  { kind: 'dni_back', label: 'DNI dorso' },
+  { kind: 'selfie', label: 'Selfie de verificacion' },
+  { kind: 'tax', label: 'Constancia fiscal' },
+  { kind: 'insurance', label: 'Seguro o matricula' },
 ];
 
 function money(value: number | null | undefined) {
@@ -715,6 +769,7 @@ function ClientHome({
   const [selectedProfessionalId, setSelectedProfessionalId] = useState(featuredProfessionals[0].id);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('card');
   const [photoNames, setPhotoNames] = useState<string[]>([]);
+  const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
   const selectedProfessional = featuredProfessionals.find(
     (professional) => professional.id === selectedProfessionalId,
   );
@@ -730,6 +785,33 @@ function ClientHome({
       : selectedProfessional
         ? `${selectedProfessional.etaMinutes} min`
         : '30-45 min';
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      listV6ClientAddresses(profile.id),
+      listV6PaymentProfiles(profile.id),
+    ])
+      .then(([remoteAddresses, remotePaymentProfiles]) => {
+        if (!alive) return;
+        if (remoteAddresses.length) {
+          setSavedAddresses(remoteAddresses.map((item) => ({
+            id: item.id,
+            label: item.label,
+            line: item.line,
+            lat: item.lat,
+            lng: item.lng,
+          })));
+        }
+        setPaymentProfiles(remotePaymentProfiles);
+      })
+      .catch(() => {
+        if (alive) setPaymentProfiles([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [profile.id]);
 
   async function createOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -757,6 +839,11 @@ function ClientHome({
         description: orderDescription,
         address,
         mode,
+        assignmentMode,
+        preferredProfessionalId: null,
+        paymentMethod,
+        guaranteeDays: 7,
+        etaMinutes: selectedProfessional?.etaMinutes || null,
         scheduledAt: mode === 'scheduled' && scheduledAt ? new Date(scheduledAt).toISOString() : null,
         price: estimatedPrice,
         lat: coords?.lat || null,
@@ -782,22 +869,43 @@ function ClientHome({
     );
   }
 
-  function saveAddress() {
+  async function saveAddress() {
     if (!address.trim()) {
       setError('Escribi una direccion para guardarla.');
       return;
     }
-    const nextAddress: SavedAddress = {
-      id: makeClientId('addr'),
-      label: addressLabel.trim() || 'Direccion',
-      line: address.trim(),
-      lat: coords?.lat || null,
-      lng: coords?.lng || null,
-    };
-    const nextAddresses = [nextAddress, ...savedAddresses].slice(0, 5);
-    setSavedAddresses(nextAddresses);
-    window.localStorage.setItem(savedAddressesKey(profile.id), JSON.stringify(nextAddresses));
-    setNotice('Direccion guardada.');
+    try {
+      const remoteAddress = await upsertV6ClientAddress({
+        clientId: profile.id,
+        label: addressLabel.trim() || 'Direccion',
+        line: address.trim(),
+        lat: coords?.lat || null,
+        lng: coords?.lng || null,
+      });
+      const nextAddress: SavedAddress = {
+        id: remoteAddress.id,
+        label: remoteAddress.label,
+        line: remoteAddress.line,
+        lat: remoteAddress.lat,
+        lng: remoteAddress.lng,
+      };
+      const nextAddresses = [nextAddress, ...savedAddresses.filter((item) => item.id !== nextAddress.id)].slice(0, 5);
+      setSavedAddresses(nextAddresses);
+      window.localStorage.setItem(savedAddressesKey(profile.id), JSON.stringify(nextAddresses));
+      setNotice('Direccion guardada en tu cuenta.');
+    } catch {
+      const nextAddress: SavedAddress = {
+        id: makeClientId('addr'),
+        label: addressLabel.trim() || 'Direccion',
+        line: address.trim(),
+        lat: coords?.lat || null,
+        lng: coords?.lng || null,
+      };
+      const nextAddresses = [nextAddress, ...savedAddresses].slice(0, 5);
+      setSavedAddresses(nextAddresses);
+      window.localStorage.setItem(savedAddressesKey(profile.id), JSON.stringify(nextAddresses));
+      setNotice('Direccion guardada en este dispositivo.');
+    }
   }
 
   function chooseSavedAddress(addressId: string) {
@@ -992,6 +1100,16 @@ function ClientHome({
                 </button>
               ))}
             </div>
+            {paymentProfiles.length > 0 && (
+              <div className="v6-file-list">
+                {paymentProfiles.map((payment) => (
+                  <span key={payment.id}>
+                    <CreditCard size={15} aria-hidden="true" /> {payment.label}
+                    {payment.last4 ? ` terminada en ${payment.last4}` : ''}
+                  </span>
+                ))}
+              </div>
+            )}
 
             {mode === 'quote' && selectedService && (
               <div className="v6-quote-list">
@@ -1132,24 +1250,36 @@ function ProfessionalHome({
           <span>{matchingOrders.length} compatibles</span>
         </div>
         {profile.is_available &&
-          matchingOrders.map((order) => (
-            <article className="v6-order" key={order.id}>
-              <div className="v6-order-top">
-                <span className="v6-order-icon">{serviceIcon(order.service?.slug || '')}</span>
-                <div>
-                  <strong>{order.service?.name || 'Servicio'}</strong>
-                  <p>{order.description}</p>
-                  <small>
-                    <MapPin size={13} aria-hidden="true" /> {order.address}
-                  </small>
+          matchingOrders.map((order) =>
+            order.mode === 'quote' ? (
+              <OrderCard
+                key={order.id}
+                order={order}
+                profile={profile}
+                setOrders={() => undefined}
+                setChatOrder={setChatOrder}
+                setError={setError}
+                setNotice={setNotice}
+              />
+            ) : (
+              <article className="v6-order" key={order.id}>
+                <div className="v6-order-top">
+                  <span className="v6-order-icon">{serviceIcon(order.service?.slug || '')}</span>
+                  <div>
+                    <strong>{order.service?.name || 'Servicio'}</strong>
+                    <p>{order.description}</p>
+                    <small>
+                      <MapPin size={13} aria-hidden="true" /> {order.address}
+                    </small>
+                  </div>
+                  <b>{money(order.service?.base_price)}</b>
                 </div>
-                <b>{money(order.service?.base_price)}</b>
-              </div>
-              <button className="v6-primary" type="button" onClick={() => accept(order.id)}>
-                Aceptar trabajo
-              </button>
-            </article>
-          ))}
+                <button className="v6-primary" type="button" onClick={() => accept(order.id)}>
+                  Aceptar trabajo
+                </button>
+              </article>
+            ),
+          )}
         {!profile.is_available && <Empty title="Estas desconectado" body="Activa Disponible para ver pedidos abiertos." />}
         {profile.is_available && !matchingOrders.length && <Empty title="No hay pedidos compatibles" body="Cuando un cliente publique uno de tus servicios aparecera aca." />}
       </section>
@@ -1221,6 +1351,43 @@ function OrderCard({
       : order.status === 'en_camino'
         ? 'Marcar llegada'
         : 'Finalizar trabajo';
+  const [proposals, setProposals] = useState<V6OrderProposal[]>([]);
+  const [extras, setExtras] = useState<V6OrderExtra[]>([]);
+  const [proposalLabor, setProposalLabor] = useState(String(order.service?.base_price || 18000));
+  const [proposalMaterials, setProposalMaterials] = useState('0');
+  const [proposalVisit, setProposalVisit] = useState('6500');
+  const [proposalNote, setProposalNote] = useState('Puedo verlo hoy y confirmar materiales antes de empezar.');
+  const [extraTitle, setExtraTitle] = useState('Material adicional');
+  const [extraAmount, setExtraAmount] = useState('4500');
+  const [ratingStars, setRatingStars] = useState(5);
+  const [ratingComment, setRatingComment] = useState('');
+  const [complaintDetail, setComplaintDetail] = useState('');
+
+  const refreshCommercialData = useCallback(async () => {
+    const [nextProposals, nextExtras] = await Promise.all([
+      listV6OrderProposals(order.id),
+      listV6OrderExtras(order.id),
+    ]);
+    setProposals(nextProposals);
+    setExtras(nextExtras);
+  }, [order.id]);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      listV6OrderProposals(order.id),
+      listV6OrderExtras(order.id),
+    ])
+      .then(([nextProposals, nextExtras]) => {
+        if (!alive) return;
+        setProposals(nextProposals);
+        setExtras(nextExtras);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [order.id]);
 
   async function advance() {
     try {
@@ -1242,6 +1409,102 @@ function OrderCard({
     }
   }
 
+  async function sendProposal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      await sendV6OrderProposal({
+        orderId: order.id,
+        professionalId: profile.id,
+        laborPrice: Number(proposalLabor) || 0,
+        materialsPrice: Number(proposalMaterials) || 0,
+        visitPrice: Number(proposalVisit) || 0,
+        manitoFee: 2500,
+        estimatedMinutes: 90,
+        availabilityLabel: 'Hoy',
+        observation: proposalNote,
+      });
+      await refreshCommercialData();
+      setNotice('Presupuesto enviado.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo enviar presupuesto.');
+    }
+  }
+
+  async function acceptProposal(proposalId: string) {
+    try {
+      await acceptV6Proposal(proposalId);
+      setOrders(await listV6Orders());
+      await refreshCommercialData();
+      setNotice('Presupuesto aceptado.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo aceptar presupuesto.');
+    }
+  }
+
+  async function createExtra(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!order.professional_id) return;
+    try {
+      await addV6OrderExtra({
+        orderId: order.id,
+        professionalId: order.professional_id,
+        title: extraTitle,
+        amount: Number(extraAmount) || 0,
+      });
+      await refreshCommercialData();
+      setNotice('Adicional enviado para aprobacion.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo crear adicional.');
+    }
+  }
+
+  async function decideExtra(extraId: string, status: 'approved' | 'rejected') {
+    try {
+      await decideV6OrderExtra(extraId, status);
+      await refreshCommercialData();
+      setNotice(status === 'approved' ? 'Adicional aprobado.' : 'Adicional rechazado.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo responder el adicional.');
+    }
+  }
+
+  async function submitRating(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!order.professional_id) {
+      setError('Este pedido no tiene profesional asignado.');
+      return;
+    }
+    try {
+      await addV6Rating({
+        orderId: order.id,
+        clientId: profile.id,
+        professionalId: order.professional_id,
+        stars: ratingStars,
+        comment: ratingComment,
+      });
+      setNotice('Calificacion enviada.');
+      setRatingComment('');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo calificar.');
+    }
+  }
+
+  async function submitComplaint(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      await addV6Complaint({
+        orderId: order.id,
+        openedBy: profile.id,
+        reason: 'Garantia MANITO',
+        detail: complaintDetail,
+      });
+      setNotice('Reclamo abierto. MANITO revisa la garantia.');
+      setComplaintDetail('');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo abrir reclamo.');
+    }
+  }
+
   return (
     <article className="v6-order">
       <div className="v6-order-top">
@@ -1255,6 +1518,81 @@ function OrderCard({
         <b>{money(order.price || order.service?.base_price)}</b>
       </div>
       <StatusSteps status={order.status} />
+      <div className="v6-meta-row">
+        <span><ShieldCheck size={14} aria-hidden="true" /> Garantia {order.guarantee_days || 7} dias</span>
+        {order.payment_method && <span>Pago {order.payment_method}</span>}
+        {order.eta_minutes && <span>ETA {order.eta_minutes} min</span>}
+        {order.status === 'accepted' && <span>PIN inicio {order.start_pin || 'pendiente'}</span>}
+      </div>
+      {order.mode === 'quote' && proposals.length > 0 && (
+        <div className="v6-quote-list">
+          {proposals.map((proposal) => (
+            <article className="v6-quote-card" key={proposal.id}>
+              <strong>{proposal.professional?.full_name || 'Profesional MANITO'}</strong>
+              <span>{proposal.availability_label || 'A coordinar'} - {proposal.estimated_minutes || 90} min</span>
+              <p>
+                Visita {money(proposal.visit_price)} + mano de obra {money(proposal.labor_price)}
+                {' '}+ materiales {money(proposal.materials_price)} + fee {money(proposal.manito_fee)}
+              </p>
+              {proposal.observation && <p>{proposal.observation}</p>}
+              {profile.role === 'client' && order.status === 'open' && proposal.status === 'sent' && (
+                <button className="v6-primary" type="button" onClick={() => acceptProposal(proposal.id)}>
+                  Aceptar presupuesto
+                </button>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+      {profile.role === 'professional' && order.mode === 'quote' && order.status === 'open' && (
+        <form className="v6-inline-form" onSubmit={sendProposal}>
+          <input value={proposalLabor} onChange={(event) => setProposalLabor(event.target.value)} aria-label="Mano de obra" />
+          <input value={proposalMaterials} onChange={(event) => setProposalMaterials(event.target.value)} aria-label="Materiales" />
+          <input value={proposalVisit} onChange={(event) => setProposalVisit(event.target.value)} aria-label="Visita" />
+          <textarea value={proposalNote} onChange={(event) => setProposalNote(event.target.value)} aria-label="Observacion" />
+          <button className="v6-secondary" type="submit">Enviar presupuesto</button>
+        </form>
+      )}
+      {extras.length > 0 && (
+        <div className="v6-quote-list">
+          {extras.map((extra) => (
+            <article className="v6-quote-card" key={extra.id}>
+              <strong>{extra.title}</strong>
+              <span>{money(extra.amount)} - {extra.status}</span>
+              {profile.role === 'client' && extra.status === 'pending' && (
+                <div className="v6-actions">
+                  <button className="v6-primary" type="button" onClick={() => decideExtra(extra.id, 'approved')}>Aprobar</button>
+                  <button className="v6-danger" type="button" onClick={() => decideExtra(extra.id, 'rejected')}>Rechazar</button>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+      {profile.role === 'professional' && order.professional_id === profile.id && order.status === 'en_sitio' && (
+        <form className="v6-inline-form" onSubmit={createExtra}>
+          <input value={extraTitle} onChange={(event) => setExtraTitle(event.target.value)} aria-label="Detalle adicional" />
+          <input value={extraAmount} onChange={(event) => setExtraAmount(event.target.value)} aria-label="Monto adicional" />
+          <button className="v6-secondary" type="submit">Pedir adicional</button>
+        </form>
+      )}
+      {profile.role === 'client' && order.status === 'completed' && order.professional_id && (
+        <div className="v6-aftercare">
+          <form className="v6-inline-form" onSubmit={submitRating}>
+            <select value={ratingStars} onChange={(event) => setRatingStars(Number(event.target.value))} aria-label="Estrellas">
+              {[5, 4, 3, 2, 1].map((value) => (
+                <option value={value} key={value}>{value} estrellas</option>
+              ))}
+            </select>
+            <input value={ratingComment} onChange={(event) => setRatingComment(event.target.value)} placeholder="Comentario" />
+            <button className="v6-secondary" type="submit">Calificar</button>
+          </form>
+          <form className="v6-inline-form" onSubmit={submitComplaint}>
+            <input value={complaintDetail} onChange={(event) => setComplaintDetail(event.target.value)} placeholder="Reclamo o garantia" />
+            <button className="v6-danger" type="submit">Usar garantia</button>
+          </form>
+        </div>
+      )}
       <div className="v6-actions">
         {profile.role === 'client' && ['open', 'accepted'].includes(order.status) && (
           <button className="v6-danger" type="button" onClick={cancel}>Cancelar</button>
@@ -1298,6 +1636,44 @@ function ProfilePanel({
   const [phone, setPhone] = useState(profile.phone || '');
   const [city, setCity] = useState(profile.city || '');
   const [role, setRole] = useState<V6Role>(profile.role);
+  const [professionalProfile, setProfessionalProfile] = useState<V6ProfessionalProfile | null>(null);
+  const [onboarding, setOnboarding] = useState<V6ProfessionalOnboarding | null>(null);
+  const [documents, setDocuments] = useState<V6ProfessionalDocument[]>([]);
+  const [portfolio, setPortfolio] = useState<V6PortfolioItem[]>([]);
+  const [headline, setHeadline] = useState('Tecnico verificado para urgencias del hogar');
+  const [bio, setBio] = useState('Trabajo con turnos puntuales, presupuesto claro y garantia MANITO.');
+  const [yearsExperience, setYearsExperience] = useState('3');
+  const [insuranceLabel, setInsuranceLabel] = useState('Responsabilidad civil vigente');
+  const [portfolioTitle, setPortfolioTitle] = useState('Trabajo terminado');
+  const [portfolioDescription, setPortfolioDescription] = useState('Antes y despues documentado para el cliente.');
+
+  useEffect(() => {
+    if (role !== 'professional') return;
+    let alive = true;
+    Promise.all([
+      getV6ProfessionalProfile(profile.id),
+      getV6ProfessionalOnboarding(profile.id),
+      listV6ProfessionalDocuments(profile.id),
+      listV6Portfolio(profile.id),
+    ])
+      .then(([nextProfessionalProfile, nextOnboarding, nextDocuments, nextPortfolio]) => {
+        if (!alive) return;
+        setProfessionalProfile(nextProfessionalProfile);
+        setOnboarding(nextOnboarding);
+        setDocuments(nextDocuments);
+        setPortfolio(nextPortfolio);
+        if (nextProfessionalProfile) {
+          setHeadline((current) => nextProfessionalProfile.headline || current);
+          setBio((current) => nextProfessionalProfile.bio || current);
+          setYearsExperience(String(nextProfessionalProfile.years_experience || 0));
+          setInsuranceLabel((current) => nextProfessionalProfile.insurance_label || current);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [profile.id, role]);
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1322,6 +1698,78 @@ function ProfilePanel({
       setNotice('Servicios guardados.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se guardaron servicios.');
+    }
+  }
+
+  async function saveProfessionalSurface(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      const nextProfile = await upsertV6ProfessionalProfile({
+        professionalId: profile.id,
+        headline,
+        bio,
+        yearsExperience: Number(yearsExperience) || 0,
+        responseMinutes: 35,
+        insuranceLabel,
+      });
+      const nextOnboarding = await upsertV6ProfessionalOnboarding({
+        professionalId: profile.id,
+        status: onboarding?.status || 'draft',
+        currentStep: Math.max(onboarding?.current_step || 1, 8),
+        notes: 'Perfil publico iniciado por el profesional.',
+      });
+      setProfessionalProfile(nextProfile);
+      setOnboarding(nextOnboarding);
+      setNotice('Perfil profesional guardado.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Aplica la migracion V7 para guardar alta profesional.');
+    }
+  }
+
+  async function markDocumentUploaded(kind: string, label: string) {
+    try {
+      const current = documents.find((document) => document.kind === kind);
+      await upsertV6ProfessionalDocument({
+        id: current?.id,
+        professionalId: profile.id,
+        kind,
+        label,
+        status: 'uploaded',
+        filePath: `manual/${kind}`,
+      });
+      setDocuments(await listV6ProfessionalDocuments(profile.id));
+      setNotice('Documento marcado como cargado.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo guardar documento.');
+    }
+  }
+
+  async function submitOnboarding() {
+    try {
+      setOnboarding(await upsertV6ProfessionalOnboarding({
+        professionalId: profile.id,
+        status: 'submitted',
+        currentStep: 16,
+        notes: 'Alta enviada para revision.',
+      }));
+      setNotice('Alta enviada para revision MANITO.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo enviar alta.');
+    }
+  }
+
+  async function savePortfolio(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      await addV6PortfolioItem({
+        professionalId: profile.id,
+        title: portfolioTitle,
+        description: portfolioDescription,
+      });
+      setPortfolio(await listV6Portfolio(profile.id));
+      setNotice('Portfolio actualizado.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo guardar portfolio.');
     }
   }
 
@@ -1356,22 +1804,121 @@ function ProfilePanel({
       </section>
 
       {role === 'professional' && (
-        <section className="v6-card">
-          <h2>Mis servicios</h2>
-          <div className="v6-check-grid">
-            {services.map((service) => (
-              <button
-                className="v6-check-service"
-                type="button"
-                key={service.id}
-                aria-pressed={proServices.some((item) => item.service_id === service.id)}
-                onClick={() => toggleService(service.id)}
-              >
-                {serviceIcon(service.slug)} {service.name}
+        <>
+          <section className="v6-card">
+            <div className="v6-section-head">
+              <h2>Alta profesional</h2>
+              <span>{onboarding?.status || 'borrador'} · paso {onboarding?.current_step || 1}/16</span>
+            </div>
+            <div className="v6-progress">
+              <span style={{ width: `${((onboarding?.current_step || 1) / onboardingSteps.length) * 100}%` }} />
+            </div>
+            <div className="v6-step-grid">
+              {onboardingSteps.map((step, index) => (
+                <span className={index < (onboarding?.current_step || 1) ? 'done' : ''} key={step}>
+                  {index + 1}. {step}
+                </span>
+              ))}
+            </div>
+            <button className="v6-primary" type="button" onClick={submitOnboarding}>
+              Enviar alta a revision
+            </button>
+          </section>
+
+          <section className="v6-card">
+            <h2>Perfil publico</h2>
+            <form className="v6-stack" onSubmit={saveProfessionalSurface}>
+              <label className="v6-field">
+                <span>Titulo</span>
+                <input value={headline} onChange={(event) => setHeadline(event.target.value)} />
+              </label>
+              <label className="v6-field">
+                <span>Descripcion</span>
+                <textarea value={bio} onChange={(event) => setBio(event.target.value)} />
+              </label>
+              <div className="v6-split">
+                <label className="v6-field">
+                  <span>Anios de experiencia</span>
+                  <input value={yearsExperience} onChange={(event) => setYearsExperience(event.target.value)} />
+                </label>
+                <label className="v6-field">
+                  <span>Seguro / matricula</span>
+                  <input value={insuranceLabel} onChange={(event) => setInsuranceLabel(event.target.value)} />
+                </label>
+              </div>
+              <div className="v6-summary">
+                <span>
+                  <BadgeCheck size={17} aria-hidden="true" /> Vista publica
+                </span>
+                <strong>{professionalProfile?.rating_avg || 4.8} estrellas</strong>
+                <small>{professionalProfile?.jobs_completed || 0} trabajos · {professionalProfile?.manito_pro ? 'MANITO PRO' : 'Verificacion en curso'}</small>
+              </div>
+              <button className="v6-primary" type="submit">
+                Guardar perfil profesional
               </button>
-            ))}
-          </div>
-        </section>
+            </form>
+          </section>
+
+          <section className="v6-card">
+            <h2>Documentos</h2>
+            <div className="v6-check-grid">
+              {requiredDocuments.map((item) => {
+                const current = documents.find((document) => document.kind === item.kind);
+                return (
+                  <button
+                    className="v6-check-service"
+                    type="button"
+                    key={item.kind}
+                    aria-pressed={current?.status === 'uploaded' || current?.status === 'approved'}
+                    onClick={() => markDocumentUploaded(item.kind, item.label)}
+                  >
+                    <Check size={17} aria-hidden="true" /> {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="v6-card">
+            <h2>Portfolio</h2>
+            <form className="v6-stack" onSubmit={savePortfolio}>
+              <label className="v6-field">
+                <span>Titulo del trabajo</span>
+                <input value={portfolioTitle} onChange={(event) => setPortfolioTitle(event.target.value)} />
+              </label>
+              <label className="v6-field">
+                <span>Descripcion</span>
+                <textarea value={portfolioDescription} onChange={(event) => setPortfolioDescription(event.target.value)} />
+              </label>
+              <button className="v6-secondary" type="submit">Agregar al portfolio</button>
+            </form>
+            <div className="v6-quote-list">
+              {portfolio.map((item) => (
+                <article className="v6-quote-card" key={item.id}>
+                  <strong>{item.title}</strong>
+                  <p>{item.description}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="v6-card">
+            <h2>Mis servicios</h2>
+            <div className="v6-check-grid">
+              {services.map((service) => (
+                <button
+                  className="v6-check-service"
+                  type="button"
+                  key={service.id}
+                  aria-pressed={proServices.some((item) => item.service_id === service.id)}
+                  onClick={() => toggleService(service.id)}
+                >
+                  {serviceIcon(service.slug)} {service.name}
+                </button>
+              ))}
+            </div>
+          </section>
+        </>
       )}
     </>
   );
@@ -1388,6 +1935,38 @@ function AccountPanel({
   onInstall: () => void;
   setNotice: (message: string) => void;
 }) {
+  const [accountType, setAccountType] = useState(() => {
+    if (typeof window === 'undefined') return 'particular';
+    return window.localStorage.getItem(`manito_v6_account_type:${profile.id}`) || 'particular';
+  });
+  const [taxId, setTaxId] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    return window.localStorage.getItem(`manito_v6_tax_id:${profile.id}`) || '';
+  });
+  const [trustedContact, setTrustedContact] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    return window.localStorage.getItem(`manito_v6_trusted:${profile.id}`) || '';
+  });
+  const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
+  const [adminSettings, setAdminSettings] = useState<V6AdminSetting[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      listV6PaymentProfiles(profile.id),
+      profile.role === 'admin' ? listV6AdminSettings() : Promise.resolve([]),
+    ])
+      .then(([nextPayments, nextSettings]) => {
+        if (!alive) return;
+        setPaymentProfiles(nextPayments);
+        setAdminSettings(nextSettings);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [profile.id, profile.role]);
+
   async function logout() {
     await getV6Supabase().auth.signOut();
   }
@@ -1398,12 +1977,111 @@ function AccountPanel({
     window.location.reload();
   }
 
+  function saveAccountPreferences() {
+    window.localStorage.setItem(`manito_v6_account_type:${profile.id}`, accountType);
+    window.localStorage.setItem(`manito_v6_tax_id:${profile.id}`, taxId);
+    window.localStorage.setItem(`manito_v6_trusted:${profile.id}`, trustedContact);
+    setNotice('Cuenta actualizada.');
+  }
+
+  async function addPayment(type: PaymentMethod) {
+    try {
+      await addV6PaymentProfile({
+        profileId: profile.id,
+        type,
+        label: type === 'cash' ? 'Efectivo' : type === 'wallet' ? 'Billetera virtual' : 'Tarjeta personal',
+        last4: type === 'card' ? '1234' : null,
+      });
+      setPaymentProfiles(await listV6PaymentProfiles(profile.id));
+      setNotice('Medio de pago guardado.');
+    } catch {
+      setNotice('Aplica la migracion V7 para guardar medios de pago.');
+    }
+  }
+
   return (
     <>
       <section className="v6-account">
         <h1>{profile.full_name || 'Usuario MANITO'}</h1>
         <p>{profile.email} · {profile.role === 'professional' ? 'Cuenta profesional' : 'Cuenta cliente'}</p>
       </section>
+      <section className="v6-card">
+        <h2>Datos de cuenta</h2>
+        <div className="v6-stack">
+          <label className="v6-field">
+            <span>Tipo</span>
+            <select value={accountType} onChange={(event) => setAccountType(event.target.value)}>
+              <option value="particular">Particular</option>
+              <option value="empresa">Empresa</option>
+              <option value="consorcio">Consorcio</option>
+            </select>
+          </label>
+          <label className="v6-field">
+            <span>CUIT / CUIL</span>
+            <input value={taxId} onChange={(event) => setTaxId(event.target.value)} />
+          </label>
+          <label className="v6-field">
+            <span>Contacto de confianza</span>
+            <input value={trustedContact} onChange={(event) => setTrustedContact(event.target.value)} />
+          </label>
+          <button className="v6-secondary" type="button" onClick={saveAccountPreferences}>
+            Guardar cuenta
+          </button>
+        </div>
+      </section>
+      <section className="v6-card">
+        <div className="v6-section-head">
+          <h2>Pagos</h2>
+          <span>{paymentProfiles.length}</span>
+        </div>
+        <div className="v6-choice-grid three">
+          {paymentOptions.map((option) => (
+            <button className="v6-choice" type="button" key={option.id} onClick={() => addPayment(option.id)}>
+              {option.icon}
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <div className="v6-file-list">
+          {paymentProfiles.map((payment) => (
+            <span key={payment.id}>
+              <CreditCard size={15} aria-hidden="true" /> {payment.label}
+              {payment.last4 ? ` terminada en ${payment.last4}` : ''}
+            </span>
+          ))}
+        </div>
+      </section>
+      <section className="v6-card">
+        <h2>Beneficios</h2>
+        <div className="v6-step-grid">
+          <span className="done">Referidos: invita y gana credito</span>
+          <span className="done">Recurrentes: repetir servicios habituales</span>
+          <span className="done">Favoritos: volver a contratar profesionales</span>
+          <span className="done">Compartir seguimiento con contacto de confianza</span>
+        </div>
+      </section>
+      {profile.role === 'admin' && (
+        <section className="v6-card">
+          <h2>Admin</h2>
+          <div className="v6-admin-grid">
+            <article>
+              <strong>Pedidos</strong>
+              <span>Operacion realtime</span>
+            </article>
+            <article>
+              <strong>Profesionales</strong>
+              <span>Alta, documentos y suspension</span>
+            </article>
+            <article>
+              <strong>Comercial</strong>
+              <span>{adminSettings.length ? 'Config desde Supabase' : 'Pendiente de migracion V7'}</span>
+            </article>
+          </div>
+          {adminSettings.map((setting) => (
+            <pre className="v6-admin-setting" key={setting.key}>{setting.key}: {JSON.stringify(setting.value, null, 2)}</pre>
+          ))}
+        </section>
+      )}
       <section className="v6-menu">
         {canInstall && (
           <button type="button" onClick={onInstall}>

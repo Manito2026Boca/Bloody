@@ -3,10 +3,22 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getV6Supabase } from './v6Supabase';
 import type {
+  V6AdminSetting,
+  V6AssignmentMode,
+  V6ClientAddress,
+  V6Complaint,
   V6Message,
   V6Mode,
   V6Order,
+  V6OrderExtra,
+  V6OrderProposal,
+  V6PaymentMethod,
+  V6PaymentProfile,
+  V6PortfolioItem,
   V6Profile,
+  V6ProfessionalDocument,
+  V6ProfessionalOnboarding,
+  V6ProfessionalProfile,
   V6ProfessionalService,
   V6Role,
   V6Service,
@@ -14,6 +26,17 @@ import type {
 
 function fail(error: { message: string } | null) {
   if (error) throw new Error(error.message);
+}
+
+function isMissingV5Table(error: { message: string; code?: string } | null) {
+  if (!error) return false;
+  return (
+    error.code === '42P01' ||
+    error.code === '42703' ||
+    error.message.includes('Could not find') ||
+    error.message.includes('schema cache') ||
+    error.message.includes('does not exist')
+  );
 }
 
 export async function getV6Profile(userId: string) {
@@ -86,6 +109,78 @@ export async function listV6ProfessionalServices(userId: string) {
   return (data || []) as V6ProfessionalService[];
 }
 
+export async function listV6ClientAddresses(userId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('client_addresses')
+    .select('*')
+    .eq('client_id', userId)
+    .order('created_at', { ascending: false });
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6ClientAddress[];
+}
+
+export async function upsertV6ClientAddress(input: {
+  id?: string;
+  clientId: string;
+  label: string;
+  line: string;
+  city?: string | null;
+  lat: number | null;
+  lng: number | null;
+  isDefault?: boolean;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('client_addresses')
+    .upsert({
+      id: input.id,
+      client_id: input.clientId,
+      label: input.label,
+      line: input.line,
+      city: input.city || null,
+      lat: input.lat,
+      lng: input.lng,
+      is_default: Boolean(input.isDefault),
+    })
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6ClientAddress;
+}
+
+export async function listV6PaymentProfiles(userId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('payment_methods')
+    .select('*')
+    .eq('profile_id', userId)
+    .order('created_at', { ascending: false });
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6PaymentProfile[];
+}
+
+export async function addV6PaymentProfile(input: {
+  profileId: string;
+  type: V6PaymentMethod;
+  label: string;
+  last4?: string | null;
+  isDefault?: boolean;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('payment_methods')
+    .insert({
+      profile_id: input.profileId,
+      type: input.type,
+      label: input.label,
+      last4: input.last4 || null,
+      is_default: Boolean(input.isDefault),
+    })
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6PaymentProfile;
+}
+
 export async function saveV6ProfessionalServices(
   userId: string,
   serviceIds: number[],
@@ -132,12 +227,43 @@ export async function createV6Order(input: {
   description: string;
   address: string;
   mode: V6Mode;
+  assignmentMode?: V6AssignmentMode;
+  preferredProfessionalId?: string | null;
+  paymentMethod?: V6PaymentMethod | null;
+  guaranteeDays?: number;
+  etaMinutes?: number | null;
   scheduledAt: string | null;
   price: number | null;
   lat: number | null;
   lng: number | null;
 }) {
-  const { data, error } = await getV6Supabase()
+  const supabase = getV6Supabase();
+  const { data, error } = await supabase
+    .from('orders')
+    .insert({
+      client_id: input.clientId,
+      service_id: input.serviceId,
+      description: input.description,
+      address: input.address,
+      mode: input.mode,
+      assignment_mode: input.assignmentMode || 'auto',
+      preferred_professional_id: input.preferredProfessionalId || null,
+      payment_method: input.paymentMethod || null,
+      guarantee_days: input.guaranteeDays ?? 7,
+      eta_minutes: input.etaMinutes || null,
+      scheduled_at: input.scheduledAt,
+      price: input.price,
+      client_lat: input.lat,
+      client_lng: input.lng,
+    })
+    .select('*')
+    .single();
+  if (!isMissingV5Table(error)) {
+    fail(error);
+    return data as V6Order;
+  }
+
+  const { data: legacyData, error: legacyError } = await supabase
     .from('orders')
     .insert({
       client_id: input.clientId,
@@ -152,6 +278,56 @@ export async function createV6Order(input: {
     })
     .select('*')
     .single();
+  fail(legacyError);
+  return legacyData as V6Order;
+}
+
+export async function listV6OrderProposals(orderId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('order_proposals')
+    .select('*,professional:profiles!order_proposals_professional_id_fkey(id,full_name,phone,city)')
+    .eq('order_id', orderId)
+    .order('created_at', { ascending: false });
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6OrderProposal[];
+}
+
+export async function sendV6OrderProposal(input: {
+  orderId: string;
+  professionalId: string;
+  laborPrice: number;
+  materialsPrice: number;
+  visitPrice: number;
+  manitoFee: number;
+  estimatedMinutes: number;
+  availabilityLabel: string;
+  observation: string;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('order_proposals')
+    .upsert({
+      order_id: input.orderId,
+      professional_id: input.professionalId,
+      labor_price: input.laborPrice,
+      materials_price: input.materialsPrice,
+      visit_price: input.visitPrice,
+      manito_fee: input.manitoFee,
+      estimated_minutes: input.estimatedMinutes,
+      availability_label: input.availabilityLabel,
+      observation: input.observation,
+      status: 'sent',
+    })
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6OrderProposal;
+}
+
+export async function acceptV6Proposal(proposalId: string) {
+  const { data, error } = await getV6Supabase().rpc('accept_proposal', {
+    p_proposal_id: proposalId,
+  });
   fail(error);
   return data as V6Order;
 }
@@ -180,6 +356,90 @@ export async function cancelV6Order(orderId: string) {
   return data as V6Order;
 }
 
+export async function listV6OrderExtras(orderId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('order_extras')
+    .select('*')
+    .eq('order_id', orderId)
+    .order('created_at', { ascending: false });
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6OrderExtra[];
+}
+
+export async function addV6OrderExtra(input: {
+  orderId: string;
+  professionalId: string;
+  title: string;
+  amount: number;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('order_extras')
+    .insert({
+      order_id: input.orderId,
+      professional_id: input.professionalId,
+      title: input.title,
+      amount: input.amount,
+    })
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6OrderExtra;
+}
+
+export async function decideV6OrderExtra(extraId: string, status: 'approved' | 'rejected') {
+  const { data, error } = await getV6Supabase()
+    .from('order_extras')
+    .update({ status, decided_at: new Date().toISOString() })
+    .eq('id', extraId)
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6OrderExtra;
+}
+
+export async function addV6Rating(input: {
+  orderId: string;
+  clientId: string;
+  professionalId: string;
+  stars: number;
+  comment: string;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('ratings')
+    .insert({
+      order_id: input.orderId,
+      client_id: input.clientId,
+      professional_id: input.professionalId,
+      stars: input.stars,
+      comment: input.comment || null,
+    })
+    .select('*')
+    .single();
+  fail(error);
+  return data;
+}
+
+export async function addV6Complaint(input: {
+  orderId: string;
+  openedBy: string;
+  reason: string;
+  detail: string;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('complaints')
+    .insert({
+      order_id: input.orderId,
+      opened_by: input.openedBy,
+      reason: input.reason,
+      detail: input.detail || null,
+    })
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6Complaint;
+}
+
 export async function listV6Messages(orderId: string) {
   const { data, error } = await getV6Supabase()
     .from('messages')
@@ -198,6 +458,153 @@ export async function sendV6Message(orderId: string, senderId: string, body: str
     .single();
   fail(error);
   return data as V6Message;
+}
+
+export async function getV6ProfessionalProfile(userId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_profiles')
+    .select('*')
+    .eq('professional_id', userId)
+    .maybeSingle();
+  if (isMissingV5Table(error)) return null;
+  fail(error);
+  return data as V6ProfessionalProfile | null;
+}
+
+export async function upsertV6ProfessionalProfile(input: {
+  professionalId: string;
+  headline: string;
+  bio: string;
+  yearsExperience: number;
+  publicSlug?: string | null;
+  responseMinutes?: number | null;
+  insuranceLabel?: string | null;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_profiles')
+    .upsert({
+      professional_id: input.professionalId,
+      headline: input.headline,
+      bio: input.bio,
+      years_experience: input.yearsExperience,
+      public_slug: input.publicSlug || null,
+      response_minutes: input.responseMinutes || null,
+      insurance_label: input.insuranceLabel || null,
+    })
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6ProfessionalProfile;
+}
+
+export async function getV6ProfessionalOnboarding(userId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_onboarding')
+    .select('*')
+    .eq('professional_id', userId)
+    .maybeSingle();
+  if (isMissingV5Table(error)) return null;
+  fail(error);
+  return data as V6ProfessionalOnboarding | null;
+}
+
+export async function upsertV6ProfessionalOnboarding(input: {
+  professionalId: string;
+  status: V6ProfessionalOnboarding['status'];
+  currentStep: number;
+  notes?: string | null;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_onboarding')
+    .upsert({
+      professional_id: input.professionalId,
+      status: input.status,
+      current_step: input.currentStep,
+      notes: input.notes || null,
+      submitted_at: input.status === 'submitted' ? new Date().toISOString() : null,
+    })
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6ProfessionalOnboarding;
+}
+
+export async function listV6ProfessionalDocuments(userId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_documents')
+    .select('*')
+    .eq('professional_id', userId)
+    .order('created_at');
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6ProfessionalDocument[];
+}
+
+export async function upsertV6ProfessionalDocument(input: {
+  id?: string;
+  professionalId: string;
+  kind: string;
+  label: string;
+  status: V6ProfessionalDocument['status'];
+  filePath?: string | null;
+  observation?: string | null;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_documents')
+    .upsert({
+      id: input.id,
+      professional_id: input.professionalId,
+      kind: input.kind,
+      label: input.label,
+      status: input.status,
+      file_path: input.filePath || null,
+      observation: input.observation || null,
+    })
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6ProfessionalDocument;
+}
+
+export async function listV6Portfolio(userId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_portfolio')
+    .select('*')
+    .eq('professional_id', userId)
+    .order('created_at', { ascending: false });
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6PortfolioItem[];
+}
+
+export async function addV6PortfolioItem(input: {
+  professionalId: string;
+  title: string;
+  description: string;
+  serviceId?: number | null;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_portfolio')
+    .insert({
+      professional_id: input.professionalId,
+      title: input.title,
+      description: input.description || null,
+      service_id: input.serviceId || null,
+    })
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6PortfolioItem;
+}
+
+export async function listV6AdminSettings() {
+  const { data, error } = await getV6Supabase()
+    .from('admin_settings')
+    .select('*')
+    .order('key');
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6AdminSetting[];
 }
 
 export function subscribeV6Orders(onChange: () => void) {
