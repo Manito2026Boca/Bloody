@@ -1140,6 +1140,21 @@ function ClientHome({
         </section>
       )}
 
+      <section className="v6-card">
+        <div className="v6-section-head">
+          <h2>Atajos</h2>
+          <span>Cuenta y seguridad</span>
+        </div>
+        <div className="v6-step-grid">
+          <span className="done">Repetir pedido habitual</span>
+          <span className="done">Profesionales favoritos</span>
+          <span className="done">Referir amigo con promo</span>
+          <span className="done">Compartir seguimiento</span>
+          <span className="done">Contacto de confianza</span>
+          <span className="done">Ocultar telefono en chat</span>
+        </div>
+      </section>
+
       <section className="v6-section">
         <div className="v6-section-head">
           <h2>Pedidos recientes</h2>
@@ -1215,6 +1230,15 @@ function ProfessionalHome({
     }
   }
 
+  const grossIncome = activeOrders.reduce(
+    (total, order) => total + Number(order.price || order.service?.base_price || 0),
+    0,
+  );
+  const commission = Math.round(grossIncome * 0.12);
+  const netIncome = Math.max(0, grossIncome - commission);
+  const completedJobs = activeOrders.filter((order) => order.status === 'completed').length;
+  const proProgress = Math.min(100, completedJobs * 10 + proServices.length * 8);
+
   return (
     <>
       <section className="v6-available">
@@ -1225,6 +1249,34 @@ function ProfessionalHome({
         <button className="v6-switch" type="button" aria-pressed={profile.is_available} onClick={toggleAvailable}>
           <span />
         </button>
+      </section>
+
+      <section className="v6-card">
+        <div className="v6-section-head">
+          <h2>Panel profesional</h2>
+          <span>MANITO PRO {proProgress}%</span>
+        </div>
+        <div className="v6-admin-grid">
+          <article>
+            <strong>{money(grossIncome)}</strong>
+            <span>Bruto</span>
+          </article>
+          <article>
+            <strong>{money(commission)}</strong>
+            <span>Comision MANITO</span>
+          </article>
+          <article>
+            <strong>{money(netIncome)}</strong>
+            <span>Neto estimado</span>
+          </article>
+          <article>
+            <strong>{matchingOrders.length}</strong>
+            <span>Pedidos cercanos</span>
+          </article>
+        </div>
+        <div className="v6-progress">
+          <span style={{ width: `${proProgress}%` }} />
+        </div>
       </section>
 
       <section className="v6-card">
@@ -1268,6 +1320,7 @@ function ProfessionalHome({
                   <div>
                     <strong>{order.service?.name || 'Servicio'}</strong>
                     <p>{order.description}</p>
+                    <small>Match {proServices.some((item) => item.service_id === order.service_id) ? '96%' : '72%'} · {V6_MODE_LABEL[order.mode]}</small>
                     <small>
                       <MapPin size={13} aria-hidden="true" /> {order.address}
                     </small>

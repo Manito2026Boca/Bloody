@@ -170,6 +170,63 @@ create table if not exists public.admin_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.recurring_orders (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  service_id bigint not null references public.services(id) on delete restrict,
+  address_id uuid references public.client_addresses(id) on delete set null,
+  label text not null,
+  frequency text not null check (frequency in ('weekly', 'biweekly', 'monthly', 'custom')),
+  next_run_at timestamptz,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.trusted_contacts (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  name text not null,
+  phone text,
+  email text,
+  can_receive_tracking boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.promo_codes (
+  code text primary key,
+  label text not null,
+  discount_percent integer not null default 0 check (discount_percent between 0 and 100),
+  active boolean not null default true,
+  expires_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.notification_preferences (
+  profile_id uuid primary key references public.profiles(id) on delete cascade,
+  push_enabled boolean not null default true,
+  email_enabled boolean not null default true,
+  whatsapp_enabled boolean not null default false,
+  marketing_enabled boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.tracking_shares (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.orders(id) on delete cascade,
+  shared_by uuid not null references public.profiles(id) on delete cascade,
+  contact_name text not null,
+  contact_value text,
+  token text unique not null default encode(gen_random_bytes(16), 'hex'),
+  expires_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+insert into public.promo_codes (code, label, discount_percent) values
+  ('MANITO10', 'Bienvenida MANITO', 10),
+  ('AMIGO', 'Referido amigo', 15)
+on conflict (code) do nothing;
+
 insert into public.admin_settings (key, value) values
   ('commercial', '{"commission_percent": 12, "client_fee": 2500, "guarantee_days": 7, "promo_percent": 0}'::jsonb),
   ('onboarding', '{"required_steps": 16, "requires_documents": true, "requires_manual_review": true}'::jsonb)
@@ -181,6 +238,8 @@ create index if not exists idx_order_proposals_order on public.order_proposals(o
 create index if not exists idx_order_extras_order on public.order_extras(order_id, created_at desc);
 create index if not exists idx_ratings_professional on public.ratings(professional_id, created_at desc);
 create index if not exists idx_complaints_order on public.complaints(order_id, created_at desc);
+create index if not exists idx_recurring_orders_client on public.recurring_orders(client_id, active, next_run_at);
+create index if not exists idx_tracking_shares_order on public.tracking_shares(order_id, created_at desc);
 
 drop trigger if exists trg_client_addresses_updated_at on public.client_addresses;
 create trigger trg_client_addresses_updated_at
@@ -212,6 +271,16 @@ create trigger trg_complaints_updated_at
 before update on public.complaints
 for each row execute function public.touch_updated_at();
 
+drop trigger if exists trg_recurring_orders_updated_at on public.recurring_orders;
+create trigger trg_recurring_orders_updated_at
+before update on public.recurring_orders
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_notification_preferences_updated_at on public.notification_preferences;
+create trigger trg_notification_preferences_updated_at
+before update on public.notification_preferences
+for each row execute function public.touch_updated_at();
+
 alter table public.client_addresses enable row level security;
 alter table public.payment_methods enable row level security;
 alter table public.favorites enable row level security;
@@ -226,6 +295,11 @@ alter table public.ratings enable row level security;
 alter table public.complaints enable row level security;
 alter table public.referrals enable row level security;
 alter table public.admin_settings enable row level security;
+alter table public.recurring_orders enable row level security;
+alter table public.trusted_contacts enable row level security;
+alter table public.promo_codes enable row level security;
+alter table public.notification_preferences enable row level security;
+alter table public.tracking_shares enable row level security;
 
 grant select, insert, update, delete on public.client_addresses to authenticated;
 grant select, insert, update, delete on public.payment_methods to authenticated;
@@ -241,6 +315,11 @@ grant select, insert on public.ratings to authenticated;
 grant select, insert, update on public.complaints to authenticated;
 grant select, insert, update on public.referrals to authenticated;
 grant select on public.admin_settings to authenticated;
+grant select, insert, update, delete on public.recurring_orders to authenticated;
+grant select, insert, update, delete on public.trusted_contacts to authenticated;
+grant select on public.promo_codes to authenticated;
+grant select, insert, update on public.notification_preferences to authenticated;
+grant select, insert, update, delete on public.tracking_shares to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 
 grant update (
@@ -433,6 +512,42 @@ create policy admin_settings_select on public.admin_settings
 for select to authenticated
 using (true);
 
+drop policy if exists recurring_orders_own on public.recurring_orders;
+create policy recurring_orders_own on public.recurring_orders
+for all to authenticated
+using (client_id = (select auth.uid()))
+with check (client_id = (select auth.uid()));
+
+drop policy if exists trusted_contacts_own on public.trusted_contacts;
+create policy trusted_contacts_own on public.trusted_contacts
+for all to authenticated
+using (profile_id = (select auth.uid()))
+with check (profile_id = (select auth.uid()));
+
+drop policy if exists promo_codes_select_active on public.promo_codes;
+create policy promo_codes_select_active on public.promo_codes
+for select to authenticated
+using (active = true and (expires_at is null or expires_at > now()));
+
+drop policy if exists notification_preferences_own on public.notification_preferences;
+create policy notification_preferences_own on public.notification_preferences
+for all to authenticated
+using (profile_id = (select auth.uid()))
+with check (profile_id = (select auth.uid()));
+
+drop policy if exists tracking_shares_order_owner on public.tracking_shares;
+create policy tracking_shares_order_owner on public.tracking_shares
+for all to authenticated
+using (
+  shared_by = (select auth.uid())
+  or exists (
+    select 1 from public.orders o
+    where o.id = tracking_shares.order_id
+      and (o.client_id = (select auth.uid()) or o.professional_id = (select auth.uid()))
+  )
+)
+with check (shared_by = (select auth.uid()));
+
 drop policy if exists orders_client_update_v5_details on public.orders;
 create policy orders_client_update_v5_details on public.orders
 for update to authenticated
@@ -496,3 +611,32 @@ revoke all on function private.accept_proposal_impl(uuid) from public, anon, aut
 revoke all on function public.accept_proposal(uuid) from public, anon;
 grant execute on function private.accept_proposal_impl(uuid) to authenticated;
 grant execute on function public.accept_proposal(uuid) to authenticated;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'manito-media',
+  'manito-media',
+  false,
+  5242880,
+  array['image/jpeg', 'image/png', 'image/webp']
+)
+on conflict (id) do update set
+  public = false,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists manito_media_select_own on storage.objects;
+create policy manito_media_select_own on storage.objects
+for select to authenticated
+using (
+  bucket_id = 'manito-media'
+  and owner = (select auth.uid())
+);
+
+drop policy if exists manito_media_insert_own on storage.objects;
+create policy manito_media_insert_own on storage.objects
+for insert to authenticated
+with check (
+  bucket_id = 'manito-media'
+  and owner = (select auth.uid())
+);
