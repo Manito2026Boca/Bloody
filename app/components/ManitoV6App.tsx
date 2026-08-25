@@ -20,9 +20,11 @@ import {
   MessageCircle,
   PlugZap,
   Save,
+  Search,
   SendHorizontal,
   Settings,
   ShieldCheck,
+  Sparkles,
   Star,
   UserCircle,
   Users,
@@ -206,6 +208,18 @@ const requiredDocuments = [
   { kind: 'tax', label: 'Constancia fiscal' },
   { kind: 'insurance', label: 'Seguro o matricula' },
 ];
+const serviceKeywords: Record<string, string[]> = {
+  plomeria: ['plomero', 'plomeria', 'agua', 'canilla', 'bano', 'inodoro', 'perdida', 'gotera', 'cano', 'destapar'],
+  electricidad: ['electricista', 'electricidad', 'luz', 'enchufe', 'corto', 'termica', 'disyuntor', 'cable', 'tablero'],
+  gas: ['gas', 'gasista', 'calefon', 'termotanque', 'estufa', 'olor', 'perdida gas', 'matriculado'],
+  cerrajeria: ['cerrajero', 'cerradura', 'llave', 'puerta', 'traba', 'candado', 'abrir'],
+  limpieza: ['limpieza', 'limpiar', 'mucama', 'profunda', 'departamento', 'oficina'],
+  pintura: ['pintor', 'pintura', 'pintar', 'pared', 'humedad', 'enduir', 'color'],
+  jardineria: ['jardinero', 'jardineria', 'pasto', 'cesped', 'plantas', 'podar', 'jardin'],
+  aire: ['aire', 'acondicionado', 'split', 'frio', 'calor', 'filtro', 'instalar aire'],
+  electrodomesticos: ['heladera', 'lavarropas', 'horno', 'microondas', 'electrodomestico', 'lavavajillas'],
+  carpinteria: ['carpintero', 'mueble', 'madera', 'puerta', 'bisagra', 'estante', 'placard'],
+};
 
 function money(value: number | null | undefined) {
   if (value == null) return 'A definir';
@@ -229,6 +243,38 @@ function serviceIcon(slug: string) {
   if (slug === 'cerrajeria') return <KeyRound size={20} aria-hidden="true" />;
   if (slug === 'electricidad') return <PlugZap size={20} aria-hidden="true" />;
   return <Wrench size={20} aria-hidden="true" />;
+}
+
+function normalizeText(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function serviceScore(service: V6Service, query: string) {
+  const normalizedQuery = normalizeText(query);
+  if (!normalizedQuery.trim()) return 0;
+  const keywords = [
+    service.slug,
+    service.name,
+    ...(serviceKeywords[service.slug] || []),
+  ].map(normalizeText);
+  return keywords.reduce((score, keyword) => {
+    if (!keyword) return score;
+    if (normalizedQuery.includes(keyword)) return score + 4;
+    if (keyword.split(' ').some((part) => part.length > 3 && normalizedQuery.includes(part))) {
+      return score + 2;
+    }
+    return score;
+  }, 0);
+}
+
+function professionalForService(service: V6Service | null) {
+  const slug = service?.slug || '';
+  if (slug === 'electricidad') return featuredProfessionals[1];
+  if (slug === 'plomeria' || slug === 'gas') return featuredProfessionals[0];
+  return featuredProfessionals[2];
 }
 
 function pendingProfileKey(email: string) {
@@ -756,6 +802,7 @@ function ClientHome({
   setNotice: (message: string) => void;
 }) {
   const [selectedService, setSelectedService] = useState<V6Service | null>(null);
+  const [problemQuery, setProblemQuery] = useState('');
   const [description, setDescription] = useState('Necesito un plomero.');
   const [address, setAddress] = useState('Av. Constitucion 4580');
   const [mode, setMode] = useState<V6Mode>('immediate');
@@ -785,6 +832,26 @@ function ClientHome({
       : selectedProfessional
         ? `${selectedProfessional.etaMinutes} min`
         : '30-45 min';
+  const scoredServices = useMemo(
+    () =>
+      services
+        .map((service) => ({ service, score: serviceScore(service, problemQuery) }))
+        .sort((left, right) => right.score - left.score),
+    [problemQuery, services],
+  );
+  const recommendedService = scoredServices.find((item) => item.score > 0)?.service || null;
+  const filteredServices = useMemo(() => {
+    const query = normalizeText(problemQuery);
+    if (!query.trim()) return services;
+    const matches = scoredServices
+      .filter((item) => item.score > 0)
+      .map((item) => item.service);
+    if (matches.length) return matches;
+    return services.filter((service) =>
+      normalizeText(`${service.name} ${service.slug}`).includes(query),
+    );
+  }, [problemQuery, scoredServices, services]);
+  const recommendedProfessional = professionalForService(recommendedService);
 
   useEffect(() => {
     let alive = true;
@@ -925,6 +992,14 @@ function ClientHome({
     setPhotoNames(nextFiles);
   }
 
+  function applyRecommendation(service: V6Service) {
+    const professional = professionalForService(service);
+    setSelectedService(service);
+    setDescription(problemQuery.trim() || `Necesito ayuda con ${service.name}.`);
+    setAssignmentMode('manual');
+    setSelectedProfessionalId(professional.id);
+  }
+
   return (
     <>
       <section className="v6-hero">
@@ -935,13 +1010,56 @@ function ClientHome({
         <p>Publica un pedido real. Un profesional conectado desde otro dispositivo puede aceptarlo.</p>
       </section>
 
+      <section className="v6-card v6-finder">
+        <label className="v6-field">
+          <span>Buscar por profesion o describir problema</span>
+          <div className="v6-search-box">
+            <Search size={18} aria-hidden="true" />
+            <textarea
+              value={problemQuery}
+              onChange={(event) => setProblemQuery(event.target.value)}
+              placeholder="Ej: pierde agua el bano, se corto la luz, necesito pintar una pared"
+            />
+          </div>
+        </label>
+        <div className="v6-chip-row">
+          {['Plomero', 'Electricista', 'Perdi la llave', 'No enfria el aire'].map((example) => (
+            <button type="button" key={example} onClick={() => setProblemQuery(example)}>
+              {example}
+            </button>
+          ))}
+        </div>
+        {recommendedService && (
+          <article className="v6-recommendation">
+            <div>
+              <span className="v6-order-icon">{serviceIcon(recommendedService.slug)}</span>
+            </div>
+            <div>
+              <p>
+                <Sparkles size={15} aria-hidden="true" /> MANITO recomienda
+              </p>
+              <strong>{recommendedService.name}</strong>
+              <small>
+                {recommendedProfessional.name} - {recommendedProfessional.rating} estrellas - {recommendedProfessional.etaMinutes} min
+              </small>
+            </div>
+            <button className="v6-primary" type="button" onClick={() => applyRecommendation(recommendedService)}>
+              Pedir
+            </button>
+          </article>
+        )}
+        {problemQuery.trim().length > 2 && !recommendedService && (
+          <p className="v6-muted">No encontre una coincidencia exacta. Podes elegir un servicio abajo y describirlo igual.</p>
+        )}
+      </section>
+
       <section className="v6-section">
         <div className="v6-section-head">
           <h2>Servicios</h2>
-          <span>{services.length} disponibles</span>
+          <span>{filteredServices.length} disponibles</span>
         </div>
         <div className="v6-services">
-          {services.map((service) => (
+          {filteredServices.map((service) => (
             <button
               className="v6-service"
               type="button"
