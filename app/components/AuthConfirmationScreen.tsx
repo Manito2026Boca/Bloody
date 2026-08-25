@@ -12,6 +12,11 @@ type PendingProfile = {
   role: V6Role;
 };
 
+type SupabaseAuthPayload = {
+  user?: { email?: string | null } | null;
+  session?: { user?: { email?: string | null } | null } | null;
+};
+
 function pendingProfileKey(email: string) {
   return `manito_v6_pending_profile:${email.toLowerCase()}`;
 }
@@ -27,6 +32,22 @@ async function completePendingProfile(email: string) {
   const pending = JSON.parse(raw) as PendingProfile;
   await completeV6Profile(pending);
   window.localStorage.removeItem(pendingProfileKey(email));
+}
+
+function getConfirmedEmail(data: SupabaseAuthPayload | null | undefined) {
+  return data?.user?.email || data?.session?.user?.email || null;
+}
+
+function isJwtTimingError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes('jwt issued at future');
+}
+
+function friendlyConfirmationError(error: unknown) {
+  if (isJwtTimingError(error)) {
+    return 'Tu email fue validado, pero el celular parece tener la hora desfasada. Activa fecha y hora automatica y toca Entrar a MANITO.';
+  }
+  return 'No pudimos confirmar el enlace. Proba ingresar con tu email y contrasena.';
 }
 
 export default function AuthConfirmationScreen({
@@ -60,18 +81,22 @@ export default function AuthConfirmationScreen({
         const code = query.get('code');
         const tokenHash = query.get('token_hash');
         const type = query.get('type') || 'signup';
+        let confirmedEmail: string | null = null;
 
         if (canVerifyToken && tokenHash) {
-          const { error } = await supabase.auth.verifyOtp({
+          const { data, error } = await supabase.auth.verifyOtp({
             token_hash: tokenHash,
             type: type as 'signup',
           });
           if (error) throw error;
+          confirmedEmail = getConfirmedEmail(data);
         } else if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
+          confirmedEmail = getConfirmedEmail(data);
         } else if (hash.get('access_token')) {
-          await supabase.auth.getSession();
+          const { data } = await supabase.auth.getSession();
+          confirmedEmail = getConfirmedEmail(data);
         } else {
           const { data } = await supabase.auth.getSession();
           if (!data.session) {
@@ -80,16 +105,40 @@ export default function AuthConfirmationScreen({
             setMessage('Tu email ya fue confirmado. Ingresa con tu cuenta para seguir.');
             return;
           }
+          confirmedEmail = getConfirmedEmail(data);
         }
 
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
-        if (userError) throw userError;
+        if (!confirmedEmail) {
+          try {
+            const {
+              data: { user },
+              error: userError,
+            } = await supabase.auth.getUser();
+            if (userError) throw userError;
+            confirmedEmail = user?.email || null;
+          } catch (caught) {
+            if (isJwtTimingError(caught)) {
+              if (!alive) return;
+              setState('success');
+              setMessage(friendlyConfirmationError(caught));
+              return;
+            }
+            throw caught;
+          }
+        }
 
-        if (user?.email) {
-          await completePendingProfile(user.email);
+        if (confirmedEmail) {
+          try {
+            await completePendingProfile(confirmedEmail);
+          } catch (caught) {
+            if (isJwtTimingError(caught)) {
+              if (!alive) return;
+              setState('success');
+              setMessage(friendlyConfirmationError(caught));
+              return;
+            }
+            throw caught;
+          }
         }
 
         if (!alive) return;
@@ -97,12 +146,13 @@ export default function AuthConfirmationScreen({
         setMessage('Tu cuenta fue confirmada. Ya podes entrar a MANITO.');
       } catch (caught) {
         if (!alive) return;
+        if (isJwtTimingError(caught)) {
+          setState('success');
+          setMessage(friendlyConfirmationError(caught));
+          return;
+        }
         setState('error');
-        setMessage(
-          caught instanceof Error
-            ? caught.message
-            : 'No pudimos confirmar el enlace. Proba ingresar con tu email y contrasena.',
-        );
+        setMessage(friendlyConfirmationError(caught));
       }
     }
 
