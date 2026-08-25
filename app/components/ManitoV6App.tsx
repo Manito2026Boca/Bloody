@@ -32,7 +32,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   acceptV6Proposal,
   acceptV6Order,
@@ -576,6 +576,7 @@ export default function ManitoV6App() {
               setChatOrder={setChatOrder}
               setError={setError}
               setNotice={setNotice}
+              onNavigate={setTab}
             />
           ))}
 
@@ -841,6 +842,7 @@ function ClientHome({
   setChatOrder,
   setError,
   setNotice,
+  onNavigate,
 }: {
   profile: V6Profile;
   services: V6Service[];
@@ -853,6 +855,7 @@ function ClientHome({
   setChatOrder: (order: V6Order) => void;
   setError: (message: string) => void;
   setNotice: (message: string) => void;
+  onNavigate: (tab: Tab) => void;
 }) {
   const [description, setDescription] = useState('Necesito un plomero.');
   const [address, setAddress] = useState('Av. Constitucion 4580');
@@ -868,6 +871,7 @@ function ClientHome({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('card');
   const [photoNames, setPhotoNames] = useState<string[]>([]);
   const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
+  const requestFormRef = useRef<HTMLElement | null>(null);
   const selectedProfessional = featuredProfessionals.find(
     (professional) => professional.id === selectedProfessionalId,
   );
@@ -903,6 +907,12 @@ function ClientHome({
           normalizeText(`${service.name} ${service.slug}`).includes(query),
         );
   const recommendedProfessional = professionalForService(recommendedService);
+
+  function scrollToRequestForm() {
+    window.requestAnimationFrame(() => {
+      requestFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
 
   useEffect(() => {
     let alive = true;
@@ -1043,12 +1053,79 @@ function ClientHome({
     setPhotoNames(nextFiles);
   }
 
-  function applyRecommendation(service: V6Service) {
+  function applyRecommendation(service: V6Service, nextProblem = problemQuery) {
     const professional = professionalForService(service);
     setSelectedService(service);
-    setDescription(problemQuery.trim() || `Necesito ayuda con ${service.name}.`);
+    setProblemQuery(nextProblem);
+    setDescription(nextProblem.trim() || `Necesito ayuda con ${service.name}.`);
     setAssignmentMode('manual');
     setSelectedProfessionalId(professional.id);
+    setNotice(`${service.name} seleccionado. Completa los datos y publica el pedido.`);
+    scrollToRequestForm();
+  }
+
+  function applyExample(example: string) {
+    const match =
+      services
+        .map((service) => ({ service, score: serviceScore(service, example) }))
+        .sort((left, right) => right.score - left.score)
+        .find((item) => item.score > 0)?.service || null;
+    if (match) {
+      applyRecommendation(match, example);
+      return;
+    }
+    setProblemQuery(example);
+    setNotice('Describi un poco mas el problema y MANITO te recomienda una categoria.');
+  }
+
+  function chooseService(service: V6Service) {
+    setSelectedService(service);
+    if (!problemQuery.trim()) {
+      setProblemQuery(service.name);
+    }
+    setDescription((current) =>
+      current.trim() && current !== 'Necesito un plomero.'
+        ? current
+        : `Necesito ayuda con ${service.name}.`,
+    );
+    setNotice(`${service.name} seleccionado. Completa el pedido.`);
+    scrollToRequestForm();
+  }
+
+  function repeatLastOrder() {
+    const lastOrder = clientOrders[0];
+    if (!lastOrder) {
+      setNotice('Todavia no hay pedidos para repetir. Elegi un servicio y creamos el primero.');
+      scrollToRequestForm();
+      return;
+    }
+    const lastService = services.find((service) => service.id === lastOrder.service_id) || null;
+    if (lastService) setSelectedService(lastService);
+    setDescription(lastOrder.description.split('\n')[0] || `Necesito ayuda con ${lastService?.name || 'un servicio'}.`);
+    setAddress(lastOrder.address);
+    setMode(lastOrder.mode);
+    setPaymentMethod(
+      lastOrder.payment_method === 'wallet' || lastOrder.payment_method === 'cash'
+        ? lastOrder.payment_method
+        : 'card',
+    );
+    setNotice('Copie tu ultimo pedido. Revisalo y publicalo de nuevo.');
+    scrollToRequestForm();
+  }
+
+  function shareTracking() {
+    const activeOrder = clientOrders.find((order) => !['completed', 'cancelled'].includes(order.status));
+    if (!activeOrder) {
+      setNotice('Cuando tengas un pedido en curso vas a poder compartir el seguimiento.');
+      return;
+    }
+    onNavigate('orders');
+    setNotice('Abri el pedido en curso para compartir su seguimiento.');
+  }
+
+  function openAccountShortcut(message: string) {
+    onNavigate('account');
+    setNotice(message);
   }
 
   return (
@@ -1083,7 +1160,7 @@ function ClientHome({
         </label>
         <div className="v6-chip-row">
           {['Plomero', 'Electricista', 'Perdi la llave', 'No enfria el aire'].map((example) => (
-            <button type="button" key={example} onClick={() => setProblemQuery(example)}>
+            <button type="button" key={example} onClick={() => applyExample(example)}>
               {example}
             </button>
           ))}
@@ -1150,7 +1227,7 @@ function ClientHome({
               type="button"
               aria-pressed={selectedService?.id === service.id}
               key={service.id}
-              onClick={() => setSelectedService(service)}
+              onClick={() => chooseService(service)}
             >
               <span>{serviceIcon(service.slug)}</span>
               <strong>{service.name}</strong>
@@ -1161,7 +1238,7 @@ function ClientHome({
       </section>
 
       {selectedService && (
-        <section className="v6-card">
+        <section className="v6-card" ref={requestFormRef}>
           <h2>{selectedService.name}</h2>
           <form className="v6-stack" onSubmit={createOrder}>
             <label className="v6-field">
@@ -1341,12 +1418,36 @@ function ClientHome({
           <span>Cuenta y seguridad</span>
         </div>
         <div className="v6-step-grid">
-          <span className="done">Repetir pedido habitual</span>
-          <span className="done">Profesionales favoritos</span>
-          <span className="done">Referir amigo con promo</span>
-          <span className="done">Compartir seguimiento</span>
-          <span className="done">Contacto de confianza</span>
-          <span className="done">Ocultar telefono en chat</span>
+          <button className="done" type="button" onClick={repeatLastOrder}>
+            Repetir pedido habitual
+          </button>
+          <button className="done" type="button" onClick={() => onNavigate('favorites')}>
+            Profesionales favoritos
+          </button>
+          <button
+            className="done"
+            type="button"
+            onClick={() => openAccountShortcut('En Cuenta tenes tu codigo de referido para compartir.')}
+          >
+            Referir amigo con promo
+          </button>
+          <button className="done" type="button" onClick={shareTracking}>
+            Compartir seguimiento
+          </button>
+          <button
+            className="done"
+            type="button"
+            onClick={() => openAccountShortcut('En Cuenta podes configurar tu contacto de confianza.')}
+          >
+            Contacto de confianza
+          </button>
+          <button
+            className="done"
+            type="button"
+            onClick={() => openAccountShortcut('En Cuenta dejamos visible la opcion de privacidad del telefono.')}
+          >
+            Ocultar telefono en chat
+          </button>
         </div>
       </section>
 
@@ -1409,7 +1510,11 @@ function SearchPanel({
               onChange={(event) => setProblemQuery(event.target.value)}
               placeholder="Buscar un servicio"
             />
-            <button className="v6-orange-button" type="button">
+            <button
+              className="v6-orange-button"
+              type="button"
+              onClick={() => visibleServices[0] && onPickService(visibleServices[0])}
+            >
               Buscar
             </button>
           </div>

@@ -1565,6 +1565,7 @@ a {
 }
 
 .v6-step-grid span,
+.v6-step-grid button,
 .v6-admin-grid article {
   min-width: 0;
   border: 1px solid var(--line);
@@ -1576,7 +1577,13 @@ a {
   line-height: 1.25;
 }
 
-.v6-step-grid span.done {
+.v6-step-grid button {
+  cursor: pointer;
+  text-align: left;
+}
+
+.v6-step-grid span.done,
+.v6-step-grid button.done {
   border-color: #b8d9cb;
   background: var(--mist);
   color: var(--green-900);
