@@ -9,6 +9,7 @@ import {
   Camera,
   Check,
   CircleDot,
+  Clock,
   CreditCard,
   Download,
   Heart,
@@ -26,7 +27,6 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
-  UserCircle,
   Users,
   Wallet,
   Wrench,
@@ -99,7 +99,7 @@ import type {
 } from '../lib/v6Types';
 import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 
-type Tab = 'home' | 'orders' | 'profile' | 'account';
+type Tab = 'home' | 'search' | 'orders' | 'favorites' | 'profile' | 'account';
 type AuthMode = 'login' | 'signup';
 type AssignmentMode = 'auto' | 'manual';
 type PaymentMethod = 'card' | 'wallet' | 'cash';
@@ -335,6 +335,8 @@ export default function ManitoV6App() {
   const [chatOrder, setChatOrder] = useState<V6Order | null>(null);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(() => isInstalledDisplayMode());
+  const [clientSelectedService, setClientSelectedService] = useState<V6Service | null>(null);
+  const [clientProblemQuery, setClientProblemQuery] = useState('');
 
   const loadData = useCallback(async (userId: string) => {
     setProfileLoading(true);
@@ -521,7 +523,10 @@ export default function ManitoV6App() {
           <strong>
             MANI<span>TO</span>
           </strong>
-          <p>{profile.role === 'professional' ? 'Profesional' : 'Cliente'}</p>
+          <p className="v6-kicker">Tu ubicacion</p>
+          <p className="v6-location">
+            <MapPin size={13} aria-hidden="true" /> Av. Independencia 1845, Mar del Plata
+          </p>
         </div>
         <button className="v6-icon-button" type="button" aria-label="Notificaciones">
           <Bell size={19} aria-hidden="true" />
@@ -559,12 +564,30 @@ export default function ManitoV6App() {
               profile={profile}
               services={services}
               clientOrders={clientOrders}
+              selectedService={clientSelectedService}
+              setSelectedService={setClientSelectedService}
+              problemQuery={clientProblemQuery}
+              setProblemQuery={setClientProblemQuery}
               setOrders={setOrders}
               setChatOrder={setChatOrder}
               setError={setError}
               setNotice={setNotice}
             />
           ))}
+
+        {tab === 'search' && (
+          <SearchPanel
+            services={services}
+            selectedService={clientSelectedService}
+            problemQuery={clientProblemQuery}
+            setProblemQuery={setClientProblemQuery}
+            onPickService={(service) => {
+              setClientSelectedService(service);
+              setClientProblemQuery((current) => current || service.name);
+              setTab('home');
+            }}
+          />
+        )}
 
         {tab === 'orders' && (
           <OrdersList
@@ -590,11 +613,26 @@ export default function ManitoV6App() {
           />
         )}
 
+        {tab === 'favorites' && (
+          <FavoritesPanel
+            onPickProfessional={(professional) => {
+              setClientSelectedService(
+                services.find((service) =>
+                  professional.trade.toLowerCase().includes(service.name.toLowerCase()),
+                ) || services[0] || null,
+              );
+              setClientProblemQuery(professional.trade);
+              setTab('home');
+            }}
+          />
+        )}
+
         {tab === 'account' && (
           <AccountPanel
             profile={profile}
             canInstall={Boolean(installPrompt) && !isStandalone}
             onInstall={installApp}
+            onOpenProfile={() => setTab('profile')}
             setNotice={setNotice}
           />
         )}
@@ -604,6 +642,9 @@ export default function ManitoV6App() {
         <NavButton active={tab === 'home'} onClick={() => setTab('home')} icon={<Home size={18} />}>
           Inicio
         </NavButton>
+        <NavButton active={tab === 'search'} onClick={() => setTab('search')} icon={<Search size={18} />}>
+          Buscar
+        </NavButton>
         <NavButton
           active={tab === 'orders'}
           onClick={() => setTab('orders')}
@@ -612,11 +653,11 @@ export default function ManitoV6App() {
           {profile.role === 'professional' ? 'Trabajos' : 'Pedidos'}
         </NavButton>
         <NavButton
-          active={tab === 'profile'}
-          onClick={() => setTab('profile')}
-          icon={<UserCircle size={18} />}
+          active={tab === 'favorites'}
+          onClick={() => setTab('favorites')}
+          icon={<Heart size={18} />}
         >
-          Perfil
+          Favoritos
         </NavButton>
         <NavButton
           active={tab === 'account'}
@@ -788,6 +829,10 @@ function ClientHome({
   profile,
   services,
   clientOrders,
+  selectedService,
+  setSelectedService,
+  problemQuery,
+  setProblemQuery,
   setOrders,
   setChatOrder,
   setError,
@@ -796,13 +841,15 @@ function ClientHome({
   profile: V6Profile;
   services: V6Service[];
   clientOrders: V6Order[];
+  selectedService: V6Service | null;
+  setSelectedService: (service: V6Service | null) => void;
+  problemQuery: string;
+  setProblemQuery: (query: string) => void;
   setOrders: (orders: V6Order[]) => void;
   setChatOrder: (order: V6Order) => void;
   setError: (message: string) => void;
   setNotice: (message: string) => void;
 }) {
-  const [selectedService, setSelectedService] = useState<V6Service | null>(null);
-  const [problemQuery, setProblemQuery] = useState('');
   const [description, setDescription] = useState('Necesito un plomero.');
   const [address, setAddress] = useState('Av. Constitucion 4580');
   const [mode, setMode] = useState<V6Mode>('immediate');
@@ -840,17 +887,17 @@ function ClientHome({
     [problemQuery, services],
   );
   const recommendedService = scoredServices.find((item) => item.score > 0)?.service || null;
-  const filteredServices = useMemo(() => {
-    const query = normalizeText(problemQuery);
-    if (!query.trim()) return services;
-    const matches = scoredServices
-      .filter((item) => item.score > 0)
-      .map((item) => item.service);
-    if (matches.length) return matches;
-    return services.filter((service) =>
-      normalizeText(`${service.name} ${service.slug}`).includes(query),
-    );
-  }, [problemQuery, scoredServices, services]);
+  const query = normalizeText(problemQuery);
+  const scoreMatches = scoredServices
+    .filter((item) => item.score > 0)
+    .map((item) => item.service);
+  const filteredServices = !query.trim()
+    ? services
+    : scoreMatches.length
+      ? scoreMatches
+      : services.filter((service) =>
+          normalizeText(`${service.name} ${service.slug}`).includes(query),
+        );
   const recommendedProfessional = professionalForService(recommendedService);
 
   useEffect(() => {
@@ -1020,6 +1067,14 @@ function ClientHome({
               onChange={(event) => setProblemQuery(event.target.value)}
               placeholder="Ej: pierde agua el bano, se corto la luz, necesito pintar una pared"
             />
+            <button
+              className="v6-orange-button"
+              type="button"
+              disabled={!recommendedService}
+              onClick={() => recommendedService && applyRecommendation(recommendedService)}
+            >
+              Analizar
+            </button>
           </div>
         </label>
         <div className="v6-chip-row">
@@ -1051,6 +1106,32 @@ function ClientHome({
         {problemQuery.trim().length > 2 && !recommendedService && (
           <p className="v6-muted">No encontre una coincidencia exacta. Podes elegir un servicio abajo y describirlo igual.</p>
         )}
+      </section>
+
+      <section className="v6-section v6-flat-section">
+        <div className="v6-section-head">
+          <h2>Como lo necesitas?</h2>
+          <span>elegi modalidad</span>
+        </div>
+        <div className="v6-mode-grid">
+          {([
+            { id: 'immediate', title: 'Ahora', body: 'Profesional disponible lo antes posible', icon: <PlugZap size={22} aria-hidden="true" /> },
+            { id: 'scheduled', title: 'Programar', body: 'Elegi dia y horario', icon: <Clock size={22} aria-hidden="true" /> },
+            { id: 'quote', title: 'Presupuestar', body: 'Compara propuestas antes de decidir', icon: <MessageCircle size={22} aria-hidden="true" /> },
+          ] as Array<{ id: V6Mode; title: string; body: string; icon: ReactNode }>).map((item) => (
+            <button
+              className="v6-mode-card"
+              type="button"
+              aria-pressed={mode === item.id}
+              key={item.id}
+              onClick={() => setMode(item.id)}
+            >
+              {item.icon}
+              <strong>{item.title}</strong>
+              <small>{item.body}</small>
+            </button>
+          ))}
+        </div>
       </section>
 
       <section className="v6-section">
@@ -1117,14 +1198,6 @@ function ClientHome({
                 Guardar direccion
               </button>
             </div>
-            <label className="v6-field">
-              <span>Modalidad</span>
-              <select value={mode} onChange={(event) => setMode(event.target.value as V6Mode)}>
-                {(['immediate', 'scheduled', 'quote'] as const).map((item) => (
-                  <option value={item} key={item}>{V6_MODE_LABEL[item]}</option>
-                ))}
-              </select>
-            </label>
             {mode === 'scheduled' && (
               <label className="v6-field">
                 <span>Fecha y hora</span>
@@ -1293,6 +1366,136 @@ function ClientHome({
       </section>
     </>
   );
+}
+
+function SearchPanel({
+  services,
+  selectedService,
+  problemQuery,
+  setProblemQuery,
+  onPickService,
+}: {
+  services: V6Service[];
+  selectedService: V6Service | null;
+  problemQuery: string;
+  setProblemQuery: (query: string) => void;
+  onPickService: (service: V6Service) => void;
+}) {
+  const scoredServices = useMemo(
+    () =>
+      services
+        .map((service) => ({ service, score: serviceScore(service, problemQuery) }))
+        .sort((left, right) => right.score - left.score),
+    [problemQuery, services],
+  );
+  const filteredServices = problemQuery.trim()
+    ? scoredServices.filter((item) => item.score > 0).map((item) => item.service)
+    : services;
+  const visibleServices = filteredServices.length ? filteredServices : services;
+
+  return (
+    <>
+      <section className="v6-card v6-search-page">
+        <label className="v6-field">
+          <span>Buscar un servicio</span>
+          <div className="v6-search-box line">
+            <Search size={18} aria-hidden="true" />
+            <input
+              value={problemQuery}
+              onChange={(event) => setProblemQuery(event.target.value)}
+              placeholder="Buscar un servicio"
+            />
+            <button className="v6-orange-button" type="button">
+              Buscar
+            </button>
+          </div>
+        </label>
+      </section>
+
+      <section className="v6-section v6-flat-section">
+        <div className="v6-section-head">
+          <h2>Categorias</h2>
+          <span>{visibleServices.length} resultados</span>
+        </div>
+        <div className="v6-chip-row nowrap">
+          <button type="button" aria-pressed={!problemQuery.trim()} onClick={() => setProblemQuery('')}>
+            Todos
+          </button>
+          {services.slice(0, 7).map((service) => (
+            <button type="button" key={service.id} onClick={() => setProblemQuery(service.name)}>
+              {service.name}
+            </button>
+          ))}
+        </div>
+        <div className="v6-service-list">
+          {visibleServices.map((service) => (
+            <article className="v6-list-service" key={service.id}>
+              <span>{service.name.slice(0, 2)}</span>
+              <div>
+                <strong>{service.name}</strong>
+                <p>{serviceDescription(service.slug)}</p>
+                <small>Desde {money(service.base_price)} - {professionalForService(service).etaMinutes} min</small>
+              </div>
+              <button
+                className={selectedService?.id === service.id ? 'v6-orange-button' : 'v6-primary'}
+                type="button"
+                onClick={() => onPickService(service)}
+              >
+                Pedir
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function FavoritesPanel({
+  onPickProfessional,
+}: {
+  onPickProfessional: (professional: FeaturedProfessional) => void;
+}) {
+  return (
+    <>
+      <section className="v6-card v6-referral">
+        <h2>Favoritos</h2>
+        <p>Volves a contratar rapido a quienes ya te dieron confianza.</p>
+      </section>
+      <section className="v6-section v6-flat-section">
+        <div className="v6-section-head">
+          <h2>Profesionales recomendados</h2>
+          <span>Ver todos</span>
+        </div>
+        <div className="v6-pro-list">
+          {featuredProfessionals.map((professional) => (
+            <button className="v6-pro-card v6-public-pro" type="button" key={professional.id} onClick={() => onPickProfessional(professional)}>
+              <span className="v6-pro-avatar">{professional.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span>
+              <span>
+                <strong>{professional.name}</strong>
+                <small>{professional.rating} estrellas - {professional.jobs} trabajos - {professional.trade}</small>
+                <em>{professional.specialties.join(' - ')}</em>
+              </span>
+              <span className="v6-badges">
+                {professional.pro && <b>PRO</b>}
+                <Heart size={17} aria-label="Favorito" />
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function serviceDescription(slug: string) {
+  if (slug === 'plomeria') return 'Perdidas, canerias, griferias, destapes y reparaciones generales.';
+  if (slug === 'electricidad') return 'Cortes, tomas, termicas, luces y reparaciones electricas domiciliarias.';
+  if (slug === 'limpieza') return 'Limpieza general, profunda, post obra y servicios por hora.';
+  if (slug === 'gas') return 'Revision, perdidas, calefones, cocinas y trabajos con gasistas.';
+  if (slug === 'cerrajeria') return 'Aperturas, cambios de cerradura y urgencias de acceso.';
+  if (slug === 'pintura') return 'Pintura interior y exterior, retoques y ambientes completos.';
+  return 'Profesionales verificados para resolver tareas del hogar.';
 }
 
 function ProfessionalHome({
@@ -2099,11 +2302,13 @@ function AccountPanel({
   profile,
   canInstall,
   onInstall,
+  onOpenProfile,
   setNotice,
 }: {
   profile: V6Profile;
   canInstall: boolean;
   onInstall: () => void;
+  onOpenProfile: () => void;
   setNotice: (message: string) => void;
 }) {
   const [accountType, setAccountType] = useState(() => {
@@ -2176,6 +2381,13 @@ function AccountPanel({
         <h1>{profile.full_name || 'Usuario MANITO'}</h1>
         <p>{profile.email} · {profile.role === 'professional' ? 'Cuenta profesional' : 'Cuenta cliente'}</p>
       </section>
+      <section className="v6-card v6-account-cta">
+        <h2>Tu cuenta de cliente</h2>
+        <p>Guarda direcciones, favoritos, pedidos recurrentes y datos de facturacion.</p>
+        <button className="v6-primary" type="button" onClick={onOpenProfile}>
+          Editar perfil
+        </button>
+      </section>
       <section className="v6-card">
         <h2>Datos de cuenta</h2>
         <div className="v6-stack">
@@ -2230,6 +2442,13 @@ function AccountPanel({
           <span className="done">Favoritos: volver a contratar profesionales</span>
           <span className="done">Compartir seguimiento con contacto de confianza</span>
         </div>
+      </section>
+      <section className="v6-card v6-account-cta">
+        <h2>Trabaja con MANITO</h2>
+        <p>Crea tu perfil profesional, mostra que haces y empeza a recibir pedidos cuando tu cuenta sea aprobada.</p>
+        <button className="v6-secondary" type="button" onClick={onOpenProfile}>
+          Quiero ser profesional
+        </button>
       </section>
       {profile.role === 'admin' && (
         <section className="v6-card">
