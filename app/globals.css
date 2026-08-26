@@ -1553,6 +1553,37 @@ a.v6-evidence-link {
   font-size: 1.4rem;
 }
 
+.v6-appointment {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #b8d9cb;
+  border-radius: 18px;
+  background: var(--mist);
+  color: var(--green-900);
+  padding: 14px;
+  box-shadow: 0 14px 34px rgb(15 75 63 / 10%);
+}
+
+.v6-appointment h2 {
+  margin: 4px 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.v6-appointment p,
+.v6-appointment small {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.v6-appointment small {
+  display: block;
+  margin-top: 4px;
+}
+
 .v6-meta-row {
   display: flex;
   flex-wrap: wrap;

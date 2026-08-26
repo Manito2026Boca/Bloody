@@ -226,6 +226,9 @@ const serviceKeywords: Record<string, string[]> = {
   aire: ['aire', 'acondicionado', 'split', 'frio', 'calor', 'filtro', 'instalar aire'],
   electrodomesticos: ['heladera', 'lavarropas', 'horno', 'microondas', 'electrodomestico', 'lavavajillas'],
   carpinteria: ['carpintero', 'mueble', 'madera', 'puerta', 'bisagra', 'estante', 'placard'],
+  mecanica_automotor: ['mecanico', 'mecanica', 'auto', 'automotor', 'motor', 'freno', 'embrague', 'bateria', 'arranque', 'service'],
+  gomeria: ['gomeria', 'goma', 'cubierta', 'neumatico', 'pinchadura', 'balanceo', 'alineacion', 'rueda'],
+  chapa_pintura_auto: ['chapista', 'chapa', 'pintura auto', 'choque', 'abolladura', 'paragolpe', 'rayon', 'carroceria'],
 };
 
 function money(value: number | null | undefined) {
@@ -246,9 +249,16 @@ function shortDate(value: string) {
   }).format(new Date(value));
 }
 
+function appointmentDate(order: V6Order) {
+  return order.scheduled_at || order.accepted_at || order.created_at;
+}
+
 function serviceIcon(slug: string) {
   if (slug === 'cerrajeria') return <KeyRound size={20} aria-hidden="true" />;
   if (slug === 'electricidad') return <PlugZap size={20} aria-hidden="true" />;
+  if (['mecanica_automotor', 'gomeria', 'chapa_pintura_auto'].includes(slug)) {
+    return <Wrench size={20} aria-hidden="true" />;
+  }
   return <Wrench size={20} aria-hidden="true" />;
 }
 
@@ -259,6 +269,9 @@ function serviceDisplayName(service?: Pick<V6Service, 'slug' | 'name'> | null) {
     cerrajeria: 'Cerrajería',
     jardineria: 'Jardinería',
     gas: 'Gasista',
+    mecanica_automotor: 'Mecánica automotor',
+    gomeria: 'Gomería',
+    chapa_pintura_auto: 'Chapa y pintura',
   };
   return names[service.slug] || service.name;
 }
@@ -333,6 +346,9 @@ function professionalForService(service: V6Service | null) {
   const slug = service?.slug || '';
   if (slug === 'electricidad') return featuredProfessionals[1];
   if (slug === 'plomeria' || slug === 'gas') return featuredProfessionals[0];
+  if (['mecanica_automotor', 'gomeria', 'chapa_pintura_auto'].includes(slug)) {
+    return featuredProfessionals[2];
+  }
   return featuredProfessionals[2];
 }
 
@@ -1221,6 +1237,12 @@ function ClientHome({
         <p>Publicá un pedido real. Un profesional conectado desde otro dispositivo puede aceptarlo.</p>
       </section>
 
+      <AppointmentNotice
+        orders={clientOrders}
+        profile={profile}
+        setChatOrder={setChatOrder}
+      />
+
       <section className="v6-card v6-finder">
         <label className="v6-field">
           <span>Buscar por profesión o describir problema</span>
@@ -1243,6 +1265,11 @@ function ClientHome({
         </label>
         <div className="v6-chip-row">
           {['Plomero', 'Electricista', 'Perdí la llave', 'No enfría el aire'].map((example) => (
+            <button type="button" key={example} onClick={() => applyExample(example)}>
+              {example}
+            </button>
+          ))}
+          {['Mecánico automotor', 'Gomería', 'Chapista'].map((example) => (
             <button type="button" key={example} onClick={() => applyExample(example)}>
               {example}
             </button>
@@ -1657,6 +1684,62 @@ function SearchPanel({
   );
 }
 
+function AppointmentNotice({
+  orders,
+  profile,
+  setChatOrder,
+}: {
+  orders: V6Order[];
+  profile: V6Profile;
+  setChatOrder: (order: V6Order) => void;
+}) {
+  const nextOrder = [...orders]
+    .filter((order) =>
+      ['accepted', 'en_camino', 'en_sitio'].includes(order.status) ||
+      (order.status === 'open' && Boolean(order.scheduled_at)),
+    )
+    .sort(
+      (left, right) =>
+        new Date(appointmentDate(left)).getTime() -
+        new Date(appointmentDate(right)).getTime(),
+    )[0];
+
+  if (!nextOrder) return null;
+
+  const counterpart = profile.role === 'client' ? nextOrder.professional : nextOrder.client;
+  const counterpartLabel = profile.role === 'client' ? 'Prestador' : 'Cliente';
+  const canChat = Boolean(nextOrder.professional_id);
+  const appointmentLabel = nextOrder.scheduled_at
+    ? shortDate(nextOrder.scheduled_at)
+    : nextOrder.status === 'accepted'
+      ? 'Coordinación pendiente'
+      : V6_STATUS_LABEL[nextOrder.status];
+
+  return (
+    <section className="v6-appointment">
+      <div>
+        <p className="v6-live">
+          <Clock size={14} aria-hidden="true" /> Cita pendiente
+        </p>
+        <h2>{serviceDisplayName(nextOrder.service)}</h2>
+        <p>
+          {appointmentLabel} · {nextOrder.address}
+        </p>
+        <small>
+          {counterpart
+            ? `${counterpartLabel}: ${counterpart.full_name || 'Usuario MANITO'}`
+            : 'Cuando un prestador acepte, se habilita el chat.'}
+        </small>
+      </div>
+      {canChat && (
+        <button className="v6-secondary" type="button" onClick={() => setChatOrder(nextOrder)}>
+          <MessageCircle size={16} aria-hidden="true" /> Chat
+        </button>
+      )}
+    </section>
+  );
+}
+
 function FavoritesPanel({
   onPickProfessional,
 }: {
@@ -1701,6 +1784,9 @@ function serviceDescription(slug: string) {
   if (slug === 'gas') return 'Revisión, pérdidas, calefones, cocinas y trabajos con gasistas.';
   if (slug === 'cerrajeria') return 'Aperturas, cambios de cerradura y urgencias de acceso.';
   if (slug === 'pintura') return 'Pintura interior y exterior, retoques y ambientes completos.';
+  if (slug === 'mecanica_automotor') return 'Diagnóstico, frenos, batería, arranque, service y fallas generales.';
+  if (slug === 'gomeria') return 'Pinchaduras, cubiertas, alineación, balanceo y auxilio de ruedas.';
+  if (slug === 'chapa_pintura_auto') return 'Chapa, pintura, rayones, abolladuras y arreglos de carrocería.';
   return 'Profesionales verificados para resolver tareas del hogar.';
 }
 
@@ -1781,6 +1867,12 @@ function ProfessionalHome({
           <span />
         </button>
       </section>
+
+      <AppointmentNotice
+        orders={activeOrders}
+        profile={profile}
+        setChatOrder={setChatOrder}
+      />
 
       <section className="v6-card">
         <div className="v6-section-head">
