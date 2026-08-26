@@ -1193,6 +1193,7 @@ function ClientHome({
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
   const [serviceGroup, setServiceGroup] = useState<ServiceGroupId>('all');
+  const [creatingOrder, setCreatingOrder] = useState(false);
   const requestFormRef = useRef<HTMLElement | null>(null);
   const selectedProfessional = featuredProfessionals.find(
     (professional) => professional.id === selectedProfessionalId,
@@ -1274,6 +1275,7 @@ function ClientHome({
 
   async function createOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (creatingOrder) return;
     if (!selectedService) {
       setError('Elegí un servicio.');
       return;
@@ -1286,6 +1288,7 @@ function ClientHome({
       setError('Escribí la ciudad.');
       return;
     }
+    setCreatingOrder(true);
     try {
       const orderAddress = formatAddress(address, addressCity);
       const orderDescription = [
@@ -1350,6 +1353,8 @@ function ClientHome({
       onNavigate('orders');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo publicar.');
+    } finally {
+      setCreatingOrder(false);
     }
   }
 
@@ -1838,8 +1843,8 @@ function ClientHome({
               <strong>{money(estimatedPrice)}</strong>
               <small>ETA {etaText} - {paymentLabel(paymentMethod)}</small>
             </div>
-            <button className="v6-primary" type="submit">
-              Publicar pedido
+            <button className="v6-primary" type="submit" disabled={creatingOrder}>
+              {creatingOrder ? 'Publicando...' : 'Publicar pedido'}
             </button>
           </form>
         </section>
@@ -3547,6 +3552,7 @@ function AccountPanel({
     return window.localStorage.getItem(`manito_v6_hide_phone:${profile.id}`) !== 'false';
   });
   const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
+  const [savingPaymentType, setSavingPaymentType] = useState<PaymentMethod | null>(null);
   const [adminSettings, setAdminSettings] = useState<V6AdminSetting[]>([]);
   const referralCode = `MANITO-${normalizeText(profile.full_name || profile.email || profile.id)
     .replace(/[^a-z0-9]+/g, '')
@@ -3598,6 +3604,8 @@ function AccountPanel({
   }
 
   async function addPayment(type: PaymentMethod) {
+    if (savingPaymentType) return;
+    setSavingPaymentType(type);
     try {
       const alreadySaved = paymentProfiles.some((payment) => payment.type === type);
       await addV6PaymentProfile({
@@ -3610,6 +3618,8 @@ function AccountPanel({
       setNotice(alreadySaved ? 'Medio de pago actualizado.' : 'Medio de pago guardado.');
     } catch {
       setNotice('Aplicá la migración V7 para guardar medios de pago.');
+    } finally {
+      setSavingPaymentType(null);
     }
   }
 
@@ -3679,9 +3689,15 @@ function AccountPanel({
         <p className="v6-muted">Guardamos un método por tipo para evitar duplicados.</p>
         <div className="v6-choice-grid three">
           {paymentOptions.map((option) => (
-            <button className="v6-choice" type="button" key={option.id} onClick={() => addPayment(option.id)}>
+            <button
+              className="v6-choice"
+              type="button"
+              key={option.id}
+              onClick={() => addPayment(option.id)}
+              disabled={Boolean(savingPaymentType)}
+            >
               {option.icon}
-              {option.label}
+              {savingPaymentType === option.id ? 'Guardando...' : option.label}
             </button>
           ))}
         </div>
