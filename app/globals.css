@@ -1655,6 +1655,17 @@ a.v6-evidence-link {
   font-weight: 800;
 }
 
+.v6-order-contact {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.v6-order-contact button {
+  min-width: 0;
+  padding-inline: 8px;
+}
+
 .v6-photo-strip {
   display: grid;
   grid-auto-flow: column;

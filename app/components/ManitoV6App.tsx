@@ -2630,6 +2630,7 @@ function OrderCard({
   const canUploadEvidence =
     order.professional_id === profile.id &&
     ['accepted', 'en_camino', 'en_sitio'].includes(order.status);
+  const canChat = Boolean(order.professional_id);
   const canShareTracking = !['completed', 'cancelled'].includes(order.status);
 
   async function shareOrderTracking() {
@@ -2687,6 +2688,20 @@ function OrderCard({
             ? 'Pago con Cuenta DNI/billetera: cuando el prestador acepte, coordiná QR o link por el chat.'
             : 'Este pedido prefiere Cuenta DNI/billetera. Compartí tu QR o link de pago por el chat antes de finalizar.'}
         </p>
+      )}
+      {(canChat || canShareTracking) && (
+        <div className="v6-order-contact">
+          {canChat && (
+            <button className="v6-secondary" type="button" onClick={() => setChatOrder(order)}>
+              <MessageCircle size={16} aria-hidden="true" /> Abrir chat
+            </button>
+          )}
+          {canShareTracking && (
+            <button className="v6-secondary" type="button" onClick={shareOrderTracking}>
+              <SendHorizontal size={16} aria-hidden="true" /> Compartir seguimiento
+            </button>
+          )}
+        </div>
       )}
       {photos.length > 0 && (
         <div className="v6-photo-strip">
@@ -2813,16 +2828,6 @@ function OrderCard({
       <div className="v6-actions">
         {profile.role === 'client' && ['open', 'accepted'].includes(order.status) && (
           <button className="v6-danger" type="button" onClick={cancel}>Cancelar</button>
-        )}
-        {order.professional_id && (
-          <button className="v6-secondary" type="button" onClick={() => setChatOrder(order)}>
-            <MessageCircle size={16} aria-hidden="true" /> Abrir chat
-          </button>
-        )}
-        {canShareTracking && (
-          <button className="v6-secondary" type="button" onClick={shareOrderTracking}>
-            <SendHorizontal size={16} aria-hidden="true" /> Compartir seguimiento
-          </button>
         )}
         {profile.role === 'professional' &&
           order.professional_id === profile.id &&
