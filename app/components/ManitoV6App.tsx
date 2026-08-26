@@ -170,6 +170,10 @@ function paymentLabel(method?: string | null) {
   return paymentOptions.find((option) => option.id === method)?.label || 'A coordinar';
 }
 
+function isRequestPaymentMethod(method: string): method is PaymentMethod {
+  return method === 'card' || method === 'wallet' || method === 'cash';
+}
+
 function paymentProfileDisplay(payment: V6PaymentProfile) {
   if (payment.type === 'wallet') return 'Cuenta DNI / billetera digital';
   if (payment.type === 'cash') return 'Efectivo';
@@ -1242,6 +1246,7 @@ function ClientHome({
   const filteredServices = filterServicesByGroup(queryFilteredServices, activeServiceGroup);
   const recommendedProfessional = professionalForService(recommendedService);
   const photoNames = photoFiles.map((file) => file.name);
+  const selectedPaymentProfile = paymentProfiles.find((payment) => payment.type === paymentMethod);
 
   const scrollToRequestForm = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -1272,6 +1277,11 @@ function ClientHome({
           })));
         }
         setPaymentProfiles(remotePaymentProfiles);
+        const preferredPayment =
+          remotePaymentProfiles.find((payment) => payment.is_default) || remotePaymentProfiles[0];
+        if (preferredPayment && isRequestPaymentMethod(preferredPayment.type)) {
+          setPaymentMethod(preferredPayment.type);
+        }
       })
       .catch(() => {
         if (alive) setPaymentProfiles([]);
@@ -1817,11 +1827,15 @@ function ClientHome({
             {paymentProfiles.length > 0 && (
               <div className="v6-file-list">
                 {paymentProfiles.map((payment) => (
-                  <span key={payment.id}>
+                  <span className={payment.type === paymentMethod ? 'active' : ''} key={payment.id}>
                     {paymentProfileIcon(payment)} {paymentProfileDisplay(payment)}
+                    {payment.type === paymentMethod && <b>Guardado</b>}
                   </span>
                 ))}
               </div>
+            )}
+            {!selectedPaymentProfile && (
+              <p className="v6-muted">Este método se usará solo para este pedido. Podés guardarlo desde Cuenta.</p>
             )}
             {paymentMethod === 'wallet' && (
               <p className="v6-note">

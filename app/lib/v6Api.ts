@@ -163,6 +163,7 @@ export async function listV6PaymentProfiles(userId: string) {
     .from('payment_methods')
     .select('*')
     .eq('profile_id', userId)
+    .order('is_default', { ascending: false })
     .order('created_at', { ascending: false });
   if (isMissingV5Table(error)) return [];
   fail(error);

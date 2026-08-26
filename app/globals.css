@@ -1385,6 +1385,22 @@ a {
   font-size: 0.82rem;
 }
 
+.v6-file-list span.active {
+  color: var(--green-900);
+  font-weight: 850;
+}
+
+.v6-file-list b {
+  margin-left: auto;
+  border-radius: 999px;
+  background: var(--mist);
+  color: var(--green-900);
+  padding: 2px 7px;
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .v6-upload-list {
   display: grid;
   gap: 10px;
