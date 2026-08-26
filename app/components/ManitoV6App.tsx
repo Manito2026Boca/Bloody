@@ -183,6 +183,12 @@ function paymentProfileIcon(payment: V6PaymentProfile) {
   return <CreditCard size={15} aria-hidden="true" />;
 }
 
+function photoStageLabel(stage: V6OrderPhoto['stage']) {
+  if (stage === 'before') return 'Antes';
+  if (stage === 'after') return 'Después';
+  return 'Durante';
+}
+
 function timeInputValue(value?: string | null, fallback = '08:00') {
   if (!value) return fallback;
   return value.slice(0, 5);
@@ -2671,20 +2677,22 @@ function OrderCard({
       {photos.length > 0 && (
         <div className="v6-photo-strip">
           {photos.map((photo) => (
-            photo.signedUrl ? (
-              <Image
-                src={photo.signedUrl}
-                alt={photo.caption || 'Foto del pedido'}
-                key={photo.id}
-                width={88}
-                height={88}
-                unoptimized
-              />
-            ) : (
-              <span key={photo.id}>
-                <Camera size={15} aria-hidden="true" /> {photo.caption || 'Foto del pedido'}
-              </span>
-            )
+            <figure className="v6-photo-item" key={photo.id}>
+              {photo.signedUrl ? (
+                <Image
+                  src={photo.signedUrl}
+                  alt={photo.caption || 'Foto del pedido'}
+                  width={88}
+                  height={88}
+                  unoptimized
+                />
+              ) : (
+                <span>
+                  <Camera size={15} aria-hidden="true" /> {photo.caption || 'Foto del pedido'}
+                </span>
+              )}
+              <figcaption>{photoStageLabel(photo.stage)}</figcaption>
+            </figure>
           ))}
         </div>
       )}

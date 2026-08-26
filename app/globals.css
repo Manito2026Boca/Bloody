@@ -1648,6 +1648,13 @@ a.v6-evidence-link {
   padding-bottom: 2px;
 }
 
+.v6-photo-item {
+  position: relative;
+  width: 74px;
+  height: 74px;
+  margin: 0;
+}
+
 .v6-photo-strip img,
 .v6-photo-strip [data-nimg],
 .v6-photo-strip span {
@@ -1672,6 +1679,22 @@ a.v6-evidence-link {
   line-height: 1.1;
   padding: 6px;
   text-align: center;
+}
+
+.v6-photo-item figcaption {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  max-width: calc(100% - 10px);
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(9 45 38 / 88%);
+  color: white;
+  padding: 2px 6px;
+  font-size: 0.58rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .v6-inline-form,
