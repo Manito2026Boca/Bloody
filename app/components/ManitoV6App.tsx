@@ -242,9 +242,9 @@ const featuredProfessionals: FeaturedProfessional[] = [
 const requiredDocuments = [
   { kind: 'dni_front', label: 'DNI frente' },
   { kind: 'dni_back', label: 'DNI dorso' },
-  { kind: 'selfie', label: 'Selfie de verificacion' },
+  { kind: 'selfie', label: 'Selfie de verificación' },
   { kind: 'tax', label: 'Constancia fiscal' },
-  { kind: 'insurance', label: 'Seguro o matricula' },
+  { kind: 'insurance', label: 'Seguro o matrícula' },
 ];
 const serviceGroups: ServiceGroup[] = [
   { id: 'all', label: 'Todos', slugs: [] },
@@ -992,7 +992,7 @@ export default function ManitoV6App() {
         )}
       </div>
 
-      <nav className="v6-bottom" aria-label="Navegacion principal">
+      <nav className="v6-bottom" aria-label="Navegación principal">
         <NavButton active={tab === 'home'} onClick={() => setTab('home')} icon={<Home size={18} />}>
           Inicio
         </NavButton>
@@ -1638,7 +1638,7 @@ function ClientHome({
           {([
             { id: 'immediate', title: 'Ahora', body: 'Profesional disponible lo antes posible', icon: <PlugZap size={22} aria-hidden="true" /> },
             { id: 'scheduled', title: 'Programar', body: 'Elegí día y horario', icon: <Clock size={22} aria-hidden="true" /> },
-            { id: 'quote', title: 'Presupuestar', body: 'Compara propuestas antes de decidir', icon: <MessageCircle size={22} aria-hidden="true" /> },
+            { id: 'quote', title: 'Presupuestar', body: 'Compará propuestas antes de decidir', icon: <MessageCircle size={22} aria-hidden="true" /> },
           ] as Array<{ id: V6Mode; title: string; body: string; icon: ReactNode }>).map((item) => (
             <button
               className="v6-mode-card"
@@ -1904,7 +1904,7 @@ function ClientHome({
           <button
             className="done"
             type="button"
-            onClick={() => openAccountShortcut('En Cuenta tenes tu codigo de referido para compartir.')}
+            onClick={() => openAccountShortcut('En Cuenta tenés tu código de referido para compartir.')}
           >
             Referir amigo con promo
           </button>
@@ -1914,7 +1914,7 @@ function ClientHome({
           <button
             className="done"
             type="button"
-            onClick={() => openAccountShortcut('En Cuenta podes configurar tu contacto de confianza.')}
+            onClick={() => openAccountShortcut('En Cuenta podés configurar tu contacto de confianza.')}
           >
             Contacto de confianza
           </button>
@@ -2132,7 +2132,7 @@ function FavoritesPanel({
     <>
       <section className="v6-card v6-referral">
         <h2>Favoritos</h2>
-        <p>Volves a contratar rapido a quienes ya te dieron confianza.</p>
+        <p>Volvés a contratar rápido a quienes ya te dieron confianza.</p>
       </section>
       <section className="v6-section v6-flat-section">
         <div className="v6-section-head">
@@ -2226,7 +2226,7 @@ function ProfessionalHome({
   async function toggleAvailable() {
     try {
       setProfile(await setV6Availability(profile.id, !profile.is_available));
-      setNotice(!profile.is_available ? 'Ahora estas disponible.' : 'Disponibilidad desactivada.');
+      setNotice(!profile.is_available ? 'Ahora estás disponible.' : 'Disponibilidad desactivada.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo cambiar disponibilidad.');
     }
@@ -2268,7 +2268,7 @@ function ProfessionalHome({
     <>
       <section className="v6-available">
         <div>
-          <strong>{profile.is_available ? 'Estas disponible' : 'No estas recibiendo pedidos'}</strong>
+          <strong>{profile.is_available ? 'Estás disponible' : 'No estás recibiendo pedidos'}</strong>
           <p>{profile.is_available ? 'MANITO muestra trabajos compatibles.' : 'Activa disponibilidad cuando quieras trabajar.'}</p>
         </div>
         <button className="v6-switch" type="button" aria-pressed={profile.is_available} onClick={toggleAvailable}>
@@ -2367,8 +2367,8 @@ function ProfessionalHome({
               </article>
             ),
           )}
-        {!profile.is_available && <Empty title="Estas desconectado" body="Activa Disponible para ver pedidos abiertos." />}
-        {profile.is_available && !compatibleMatches.length && <Empty title="No hay pedidos compatibles" body="Cuando un cliente publique un servicio dentro de tu zona y horario aparecera aca." />}
+        {!profile.is_available && <Empty title="Estás desconectado" body="Activá Disponible para ver pedidos abiertos." />}
+        {profile.is_available && !compatibleMatches.length && <Empty title="No hay pedidos compatibles" body="Cuando un cliente publique un servicio dentro de tu zona y horario aparecerá acá." />}
       </section>
 
       <section className="v6-section">
@@ -2810,7 +2810,7 @@ function OrderCard({
           <input value={proposalLabor} onChange={(event) => setProposalLabor(event.target.value)} aria-label="Mano de obra" />
           <input value={proposalMaterials} onChange={(event) => setProposalMaterials(event.target.value)} aria-label="Materiales" />
           <input value={proposalVisit} onChange={(event) => setProposalVisit(event.target.value)} aria-label="Visita" />
-          <textarea value={proposalNote} onChange={(event) => setProposalNote(event.target.value)} aria-label="Observacion" />
+          <textarea value={proposalNote} onChange={(event) => setProposalNote(event.target.value)} aria-label="Observación" />
           <button className="v6-secondary" type="submit">Enviar presupuesto</button>
         </form>
       )}
@@ -2912,7 +2912,7 @@ function ProfilePanel({
   const [walletPaymentLink, setWalletPaymentLink] = useState('');
   const [serviceRates, setServiceRates] = useState<Record<number, string>>({});
   const [portfolioTitle, setPortfolioTitle] = useState('Trabajo terminado');
-  const [portfolioDescription, setPortfolioDescription] = useState('Antes y despues documentado para el cliente.');
+  const [portfolioDescription, setPortfolioDescription] = useState('Antes y después documentado para el cliente.');
   const [portfolioLink, setPortfolioLink] = useState('');
   const [portfolioBeforeFile, setPortfolioBeforeFile] = useState<File | null>(null);
   const [portfolioAfterFile, setPortfolioAfterFile] = useState<File | null>(null);
@@ -3048,12 +3048,12 @@ function ProfilePanel({
 
   const professionalSteps = [
     'Servicios',
-    'Perfil publico',
+    'Perfil público',
     'Datos personales',
     'Documentos',
     'Portfolio',
     'Zona y tarifas',
-    'Revision',
+    'Revisión',
   ];
 
   async function saveOnboardingProgress(nextStep: number) {
@@ -3294,7 +3294,7 @@ function ProfilePanel({
                 onClick={() => goToProfessionalStep(professionalStep - 1)}
                 disabled={professionalStep === 1}
               >
-                Atras
+                Atrás
               </button>
               {professionalStep < professionalSteps.length ? (
                 <button
@@ -3311,7 +3311,7 @@ function ProfilePanel({
                   onClick={submitOnboarding}
                   disabled={submittingOnboarding}
                 >
-                  {submittingOnboarding ? 'Enviando...' : 'Enviar a verificacion'}
+                  {submittingOnboarding ? 'Enviando...' : 'Enviar a verificación'}
                 </button>
               )}
             </div>
@@ -3319,9 +3319,9 @@ function ProfilePanel({
 
       {professionalStep === 1 && (
           <section className="v6-card">
-            <h2>Servicios que ofreces</h2>
+            <h2>Servicios que ofrecés</h2>
             <p className="v6-help-text">
-              Elegi los rubros donde queres recibir pedidos. Despues vas a poder definir zona, horarios y tarifas.
+              Elegí los rubros donde querés recibir pedidos. Después vas a poder definir zona, horarios y tarifas.
             </p>
             <div className="v6-check-grid">
               {services.map((service) => (
@@ -3340,7 +3340,7 @@ function ProfilePanel({
               <span>
                 <BriefcaseBusiness size={17} aria-hidden="true" /> Servicios seleccionados
               </span>
-              <small>{proServices.length ? `${proServices.length} rubros activos` : 'Todavia no elegiste rubros'}</small>
+              <small>{proServices.length ? `${proServices.length} rubros activos` : 'Todavía no elegiste rubros'}</small>
             </div>
           </section>
       )}
@@ -3350,11 +3350,11 @@ function ProfilePanel({
             <h2>Perfil público</h2>
             <form className="v6-stack" onSubmit={saveProfessionalSurface}>
               <label className="v6-field">
-                <span>Titulo</span>
+                <span>Título</span>
                 <input value={headline} onChange={(event) => setHeadline(event.target.value)} />
               </label>
               <label className="v6-field">
-                <span>Descripcion</span>
+                <span>Descripción</span>
                 <textarea value={bio} onChange={(event) => setBio(event.target.value)} />
               </label>
               <div className="v6-split">
@@ -3363,16 +3363,16 @@ function ProfilePanel({
                   <input value={yearsExperience} onChange={(event) => setYearsExperience(event.target.value)} />
                 </label>
                 <label className="v6-field">
-                  <span>Seguro / matricula</span>
+                  <span>Seguro / matrícula</span>
                   <input value={insuranceLabel} onChange={(event) => setInsuranceLabel(event.target.value)} />
                 </label>
               </div>
               <div className="v6-summary">
                 <span>
-                  <BadgeCheck size={17} aria-hidden="true" /> Vista publica
+                  <BadgeCheck size={17} aria-hidden="true" /> Vista pública
                 </span>
                 <strong>{professionalProfile?.rating_avg || 4.8} estrellas</strong>
-                <small>{professionalProfile?.jobs_completed || 0} trabajos · {professionalProfile?.manito_pro ? 'MANITO PRO' : 'Verificacion en curso'}</small>
+                <small>{professionalProfile?.jobs_completed || 0} trabajos · {professionalProfile?.manito_pro ? 'MANITO PRO' : 'Verificación en curso'}</small>
               </div>
               <button className="v6-primary" type="submit">
                 Guardar perfil profesional
@@ -3427,7 +3427,7 @@ function ProfilePanel({
           <section className="v6-card">
             <h2>Documentos</h2>
             <p className="v6-help-text">
-              Sube fotos JPG, PNG o WebP. Si tenes PDF o carpeta compartida, pega el link.
+              Subí fotos JPG, PNG o WebP. Si tenés PDF o carpeta compartida, pegá el link.
             </p>
             <div className="v6-upload-list">
               {requiredDocuments.map((item) => {
@@ -3479,11 +3479,11 @@ function ProfilePanel({
             <h2>Portfolio</h2>
             <form className="v6-stack" onSubmit={savePortfolio}>
               <label className="v6-field">
-                <span>Titulo del trabajo</span>
+                <span>Título del trabajo</span>
                 <input value={portfolioTitle} onChange={(event) => setPortfolioTitle(event.target.value)} />
               </label>
               <label className="v6-field">
-                <span>Descripcion</span>
+                <span>Descripción</span>
                 <textarea value={portfolioDescription} onChange={(event) => setPortfolioDescription(event.target.value)} />
               </label>
               <label className="v6-field">
@@ -3504,7 +3504,7 @@ function ProfilePanel({
                   />
                 </label>
                 <label className="v6-field">
-                  <span>Foto despues</span>
+                  <span>Foto después</span>
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
@@ -3523,7 +3523,7 @@ function ProfilePanel({
                   <p>{item.description}</p>
                   <div className="v6-file-list">
                     {renderEvidence(item.before_path, item.after_path ? 'Antes' : 'Link')}
-                    {renderEvidence(item.after_path, 'Despues')}
+                    {renderEvidence(item.after_path, 'Después')}
                   </div>
                 </article>
               ))}
@@ -3535,7 +3535,7 @@ function ProfilePanel({
           <section className="v6-card">
             <h2>Zona, horarios y tarifas</h2>
             <p className="v6-help-text">
-              Ajusta donde trabajas, cuando estas disponible y cuanto queres cobrar desde cada rubro.
+              Ajustá dónde trabajás, cuándo estás disponible y cuánto querés cobrar desde cada rubro.
             </p>
             <div className="v6-split">
               <label className="v6-field">
@@ -3651,7 +3651,7 @@ function ProfilePanel({
 
       {professionalStep === 7 && (
           <section className="v6-card">
-            <h2>Revision MANITO</h2>
+            <h2>Revisión MANITO</h2>
             <div className="v6-summary">
               <span>
                 <BadgeCheck size={17} aria-hidden="true" /> Resumen de alta
@@ -3662,7 +3662,7 @@ function ProfilePanel({
             </div>
             <div className="v6-step-grid">
               <span className={proServices.length ? 'done' : ''}>Servicios cargados</span>
-              <span className={professionalProfile ? 'done' : ''}>Perfil publico guardado</span>
+              <span className={professionalProfile ? 'done' : ''}>Perfil público guardado</span>
               <span className={phone && city ? 'done' : ''}>Datos personales</span>
               <span className={completedDocuments === requiredDocuments.length ? 'done' : ''}>Documentos completos</span>
               <span className={portfolio.length ? 'done' : ''}>Portfolio</span>
@@ -3675,7 +3675,7 @@ function ProfilePanel({
               onClick={submitOnboarding}
               disabled={submittingOnboarding}
             >
-              {submittingOnboarding ? 'Enviando...' : 'Enviar alta a verificacion'}
+              {submittingOnboarding ? 'Enviando...' : 'Enviar alta a verificación'}
             </button>
           </section>
       )}
@@ -3743,7 +3743,7 @@ function AccountPanel({
 
   function resetConfig() {
     clearStoredConfig();
-    setNotice('Conexion borrada.');
+    setNotice('Conexión borrada.');
     window.location.reload();
   }
 
@@ -3873,7 +3873,7 @@ function AccountPanel({
       <section className="v6-card">
         <h2>Beneficios</h2>
         <div className="v6-step-grid">
-          <span className="done">Referidos: invita y gana credito</span>
+          <span className="done">Referidos: invitá y ganá crédito</span>
           <span className="done">Recurrentes: repetir servicios habituales</span>
           <span className="done">Favoritos: volver a contratar profesionales</span>
           <span className="done">Compartir seguimiento con contacto de confianza</span>
@@ -3892,11 +3892,11 @@ function AccountPanel({
           <div className="v6-admin-grid">
             <article>
               <strong>Pedidos</strong>
-              <span>Operacion realtime</span>
+              <span>Operación realtime</span>
             </article>
             <article>
               <strong>Profesionales</strong>
-              <span>Alta, documentos y suspension</span>
+              <span>Alta, documentos y suspensión</span>
             </article>
             <article>
               <strong>Comercial</strong>
