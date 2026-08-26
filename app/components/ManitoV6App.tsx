@@ -51,6 +51,7 @@ import {
   getV6Profile,
   getV6MediaSignedUrl,
   getV6ProfessionalOnboarding,
+  getV6ProfessionalPayoutDetails,
   getV6ProfessionalProfile,
   listV6AdminSettings,
   listV6ClientAddresses,
@@ -76,6 +77,7 @@ import {
   upsertV6ClientAddress,
   upsertV6ProfessionalDocument,
   upsertV6ProfessionalOnboarding,
+  upsertV6ProfessionalPayoutDetails,
   upsertV6ProfessionalProfile,
 } from '../lib/v6Api';
 import {
@@ -2773,11 +2775,12 @@ function ProfilePanel({
     let alive = true;
     Promise.all([
       getV6ProfessionalProfile(profile.id),
+      getV6ProfessionalPayoutDetails(profile.id),
       getV6ProfessionalOnboarding(profile.id),
       listV6ProfessionalDocuments(profile.id),
       listV6Portfolio(profile.id),
     ])
-      .then(([nextProfessionalProfile, nextOnboarding, nextDocuments, nextPortfolio]) => {
+      .then(([nextProfessionalProfile, nextPayoutDetails, nextOnboarding, nextDocuments, nextPortfolio]) => {
         if (!alive) return;
         setProfessionalProfile(nextProfessionalProfile);
         setOnboarding(nextOnboarding);
@@ -2793,9 +2796,11 @@ function ProfilePanel({
           setWorkDays(nextProfessionalProfile.work_days?.length ? nextProfessionalProfile.work_days : ['Lun', 'Mar', 'Mié', 'Jue', 'Vie']);
           setWorkStart(timeInputValue(nextProfessionalProfile.work_starts_at, '08:00'));
           setWorkEnd(timeInputValue(nextProfessionalProfile.work_ends_at, '18:00'));
-          setPayoutAlias(nextProfessionalProfile.payout_alias || '');
-          setPayoutCbu(nextProfessionalProfile.payout_cbu || '');
-          setWalletPaymentLink(nextProfessionalProfile.wallet_payment_link || '');
+        }
+        if (nextPayoutDetails) {
+          setPayoutAlias(nextPayoutDetails.payout_alias || '');
+          setPayoutCbu(nextPayoutDetails.payout_cbu || '');
+          setWalletPaymentLink(nextPayoutDetails.wallet_payment_link || '');
         }
       })
       .catch(() => undefined);
@@ -2940,6 +2945,9 @@ function ProfilePanel({
         workDays,
         workStartsAt: workStart,
         workEndsAt: workEnd,
+      });
+      await upsertV6ProfessionalPayoutDetails({
+        professionalId: profile.id,
         payoutAlias: payoutAlias.trim(),
         payoutCbu: payoutCbu.trim(),
         walletPaymentLink: walletPaymentLink.trim(),
@@ -2973,6 +2981,9 @@ function ProfilePanel({
         workDays,
         workStartsAt: workStart,
         workEndsAt: workEnd,
+      });
+      await upsertV6ProfessionalPayoutDetails({
+        professionalId: profile.id,
         payoutAlias: payoutAlias.trim(),
         payoutCbu: payoutCbu.trim(),
         walletPaymentLink: walletPaymentLink.trim(),

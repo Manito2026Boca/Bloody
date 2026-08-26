@@ -19,6 +19,7 @@ import type {
   V6Profile,
   V6ProfessionalDocument,
   V6ProfessionalOnboarding,
+  V6ProfessionalPayoutDetails,
   V6ProfessionalProfile,
   V6ProfessionalService,
   V6Role,
@@ -529,6 +530,38 @@ export async function getV6ProfessionalProfile(userId: string) {
   return data as V6ProfessionalProfile | null;
 }
 
+export async function getV6ProfessionalPayoutDetails(userId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_payout_details')
+    .select('*')
+    .eq('professional_id', userId)
+    .maybeSingle();
+  if (isMissingV5Table(error)) return null;
+  fail(error);
+  return data as V6ProfessionalPayoutDetails | null;
+}
+
+export async function upsertV6ProfessionalPayoutDetails(input: {
+  professionalId: string;
+  payoutAlias?: string | null;
+  payoutCbu?: string | null;
+  walletPaymentLink?: string | null;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_payout_details')
+    .upsert({
+      professional_id: input.professionalId,
+      payout_alias: input.payoutAlias || null,
+      payout_cbu: input.payoutCbu || null,
+      wallet_payment_link: input.walletPaymentLink || null,
+    })
+    .select('*')
+    .single();
+  if (isMissingV5Table(error)) return null;
+  fail(error);
+  return data as V6ProfessionalPayoutDetails;
+}
+
 export async function upsertV6ProfessionalProfile(input: {
   professionalId: string;
   headline: string;
@@ -542,9 +575,6 @@ export async function upsertV6ProfessionalProfile(input: {
   workDays?: string[];
   workStartsAt?: string | null;
   workEndsAt?: string | null;
-  payoutAlias?: string | null;
-  payoutCbu?: string | null;
-  walletPaymentLink?: string | null;
 }) {
   const { data, error } = await getV6Supabase()
     .from('professional_profiles')
@@ -561,9 +591,6 @@ export async function upsertV6ProfessionalProfile(input: {
       work_days: input.workDays?.length ? input.workDays : ['Lun', 'Mar', 'Mie', 'Jue', 'Vie'],
       work_starts_at: input.workStartsAt || '08:00',
       work_ends_at: input.workEndsAt || '18:00',
-      payout_alias: input.payoutAlias || null,
-      payout_cbu: input.payoutCbu || null,
-      wallet_payment_link: input.walletPaymentLink || null,
     })
     .select('*')
     .single();

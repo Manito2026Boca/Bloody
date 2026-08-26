@@ -116,6 +116,14 @@ export type V6ProfessionalProfile = {
   updated_at: string;
 };
 
+export type V6ProfessionalPayoutDetails = {
+  professional_id: string;
+  payout_alias: string | null;
+  payout_cbu: string | null;
+  wallet_payment_link: string | null;
+  updated_at: string;
+};
+
 export type V6ProfessionalOnboarding = {
   professional_id: string;
   status: 'draft' | 'submitted' | 'in_review' | 'approved' | 'observed' | 'rejected' | 'suspended';
