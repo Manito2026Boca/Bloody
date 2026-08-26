@@ -113,6 +113,7 @@ type SavedAddress = {
   id: string;
   label: string;
   line: string;
+  city: string | null;
   lat: number | null;
   lng: number | null;
 };
@@ -143,6 +144,11 @@ const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: ReactNode 
   { id: 'wallet', label: 'Billetera', icon: <Wallet size={17} aria-hidden="true" /> },
   { id: 'cash', label: 'Efectivo', icon: <Banknote size={17} aria-hidden="true" /> },
 ];
+
+function paymentLabel(method?: string | null) {
+  if (method === 'transfer') return 'Transferencia';
+  return paymentOptions.find((option) => option.id === method)?.label || 'A coordinar';
+}
 const featuredProfessionals: FeaturedProfessional[] = [
   {
     id: 'pro-martin',
@@ -152,7 +158,7 @@ const featuredProfessionals: FeaturedProfessional[] = [
     jobs: 186,
     distance: '1,8 km',
     etaMinutes: 28,
-    specialties: ['Urgencias', 'Perdidas', 'Termotanques'],
+    specialties: ['Urgencias', 'Pérdidas', 'Termotanques'],
     verified: true,
     pro: true,
     priceDelta: 2500,
@@ -189,18 +195,18 @@ const onboardingSteps = [
   'DNI frente',
   'DNI dorso',
   'Selfie',
-  'Telefono',
-  'Direccion',
+  'Teléfono',
+  'Dirección',
   'CUIT/CUIL',
   'CBU o CVU',
-  'Categoria principal',
+  'Categoría principal',
   'Especialidades',
   'Tarifas',
   'Portfolio',
   'Seguro',
   'Antecedentes',
-  'Terminos',
-  'Revision MANITO',
+  'Términos',
+  'Revisión MANITO',
 ];
 const requiredDocuments = [
   { kind: 'dni_front', label: 'DNI frente' },
@@ -246,6 +252,25 @@ function serviceIcon(slug: string) {
   return <Wrench size={20} aria-hidden="true" />;
 }
 
+function serviceDisplayName(service?: Pick<V6Service, 'slug' | 'name'> | null) {
+  if (!service) return 'Servicio';
+  const names: Record<string, string> = {
+    plomeria: 'Plomería',
+    cerrajeria: 'Cerrajería',
+    jardineria: 'Jardinería',
+    gas: 'Gasista',
+  };
+  return names[service.slug] || service.name;
+}
+
+function serviceInitials(service: V6Service) {
+  return serviceDisplayName(service)
+    .split(' ')
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2);
+}
+
 function normalizeText(value: string) {
   return value
     .toLowerCase()
@@ -269,6 +294,39 @@ function serviceScore(service: V6Service, query: string) {
     }
     return score;
   }, 0);
+}
+
+function formatAddress(line?: string | null, city?: string | null) {
+  const cleanLine = (line || '').trim();
+  const cleanCity = (city || '').trim();
+  if (!cleanLine) return cleanCity;
+  if (!cleanCity) return cleanLine;
+  return normalizeText(cleanLine).includes(normalizeText(cleanCity))
+    ? cleanLine
+    : `${cleanLine}, ${cleanCity}`;
+}
+
+function splitStoredAddress(value: string, fallbackCity?: string | null) {
+  const cleanValue = value.trim();
+  const city = (fallbackCity || '').trim();
+  if (city && normalizeText(cleanValue).endsWith(normalizeText(`, ${city}`))) {
+    return {
+      line: cleanValue.slice(0, cleanValue.length - city.length - 2),
+      city,
+    };
+  }
+  const parts = cleanValue.split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    return {
+      line: parts.slice(0, -1).join(', '),
+      city: parts[parts.length - 1],
+    };
+  }
+  return { line: cleanValue, city };
+}
+
+function headerLocation(profile: V6Profile) {
+  return profile.city || 'Agregar ubicación';
 }
 
 function professionalForService(service: V6Service | null) {
@@ -520,6 +578,7 @@ export default function ManitoV6App() {
 
   const activeOrders =
     profile.role === 'professional' ? professionalOrders : clientOrders;
+  const currentLocation = headerLocation(profile);
 
   return (
     <main className="v6-app">
@@ -528,9 +587,9 @@ export default function ManitoV6App() {
           <strong>
             MANI<span>TO</span>
           </strong>
-          <p className="v6-kicker">Tu ubicacion</p>
+          <p className="v6-kicker">Tu ubicación</p>
           <p className="v6-location">
-            <MapPin size={13} aria-hidden="true" /> Av. Independencia 1845, Mar del Plata
+            <MapPin size={13} aria-hidden="true" /> {currentLocation}
           </p>
         </div>
         <button className="v6-icon-button" type="button" aria-label="Notificaciones">
@@ -560,6 +619,7 @@ export default function ManitoV6App() {
               activeOrders={professionalOrders}
               setProfile={setProfile}
               setProServices={setProServices}
+              setOrders={setOrders}
               setChatOrder={setChatOrder}
               setError={setError}
               setNotice={setNotice}
@@ -589,7 +649,7 @@ export default function ManitoV6App() {
             setProblemQuery={setClientProblemQuery}
             onPickService={(service) => {
               setClientSelectedService(service);
-              setClientProblemQuery((current) => current || service.name);
+              setClientProblemQuery((current) => current || serviceDisplayName(service));
               setTab('home');
             }}
           />
@@ -780,7 +840,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         </p>
         <h1>{mode === 'login' ? 'Entra a MANITO.' : 'Crea tu cuenta.'}</h1>
         <p className="v6-muted">
-          Para probar el circuito, usa una cuenta cliente y otra profesional.
+          Para probar el circuito, usá una cuenta cliente y otra profesional.
         </p>
         <div className="v6-tabs">
           <button type="button" aria-pressed={mode === 'login'} onClick={() => setMode('login')}>
@@ -859,7 +919,8 @@ function ClientHome({
   onNavigate: (tab: Tab) => void;
 }) {
   const [description, setDescription] = useState('Necesito un plomero.');
-  const [address, setAddress] = useState('Av. Constitucion 4580');
+  const [address, setAddress] = useState('');
+  const [addressCity, setAddressCity] = useState(profile.city || '');
   const [mode, setMode] = useState<V6Mode>('immediate');
   const [scheduledAt, setScheduledAt] = useState('');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -928,6 +989,7 @@ function ClientHome({
             id: item.id,
             label: item.label,
             line: item.line,
+            city: item.city,
             lat: item.lat,
             lng: item.lng,
           })));
@@ -945,20 +1007,29 @@ function ClientHome({
   async function createOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedService) {
-      setError('Elegi un servicio.');
+      setError('Elegí un servicio.');
+      return;
+    }
+    if (!address.trim()) {
+      setError('Escribí la dirección del servicio.');
+      return;
+    }
+    if (!addressCity.trim()) {
+      setError('Escribí la ciudad.');
       return;
     }
     try {
+      const orderAddress = formatAddress(address, addressCity);
       const orderDescription = [
         description,
-        `Asignacion: ${
+        `Asignación: ${
           assignmentMode === 'manual' && selectedProfessional
             ? `prefiero a ${selectedProfessional.name}`
-            : 'automatica MANITO'
+            : 'automática MANITO'
         }`,
-        `Pago: ${paymentOptions.find((option) => option.id === paymentMethod)?.label}`,
+        `Pago: ${paymentLabel(paymentMethod)}`,
         photoNames.length ? `Fotos cargadas: ${photoNames.join(', ')}` : null,
-        'Garantia MANITO: 7 dias',
+        'Garantía MANITO: 7 días',
       ]
         .filter(Boolean)
         .join('\n');
@@ -966,7 +1037,7 @@ function ClientHome({
         clientId: profile.id,
         serviceId: selectedService.id,
         description: orderDescription,
-        address,
+        address: orderAddress,
         mode,
         assignmentMode,
         preferredProfessionalId: null,
@@ -1000,14 +1071,19 @@ function ClientHome({
 
   async function saveAddress() {
     if (!address.trim()) {
-      setError('Escribi una direccion para guardarla.');
+      setError('Escribí una dirección para guardarla.');
+      return;
+    }
+    if (!addressCity.trim()) {
+      setError('Escribí la ciudad.');
       return;
     }
     try {
       const remoteAddress = await upsertV6ClientAddress({
         clientId: profile.id,
-        label: addressLabel.trim() || 'Direccion',
+        label: addressLabel.trim() || 'Dirección',
         line: address.trim(),
+        city: addressCity.trim(),
         lat: coords?.lat || null,
         lng: coords?.lng || null,
       });
@@ -1015,25 +1091,27 @@ function ClientHome({
         id: remoteAddress.id,
         label: remoteAddress.label,
         line: remoteAddress.line,
+        city: remoteAddress.city,
         lat: remoteAddress.lat,
         lng: remoteAddress.lng,
       };
       const nextAddresses = [nextAddress, ...savedAddresses.filter((item) => item.id !== nextAddress.id)].slice(0, 5);
       setSavedAddresses(nextAddresses);
       window.localStorage.setItem(savedAddressesKey(profile.id), JSON.stringify(nextAddresses));
-      setNotice('Direccion guardada en tu cuenta.');
+      setNotice('Dirección guardada en tu cuenta.');
     } catch {
       const nextAddress: SavedAddress = {
         id: makeClientId('addr'),
-        label: addressLabel.trim() || 'Direccion',
+        label: addressLabel.trim() || 'Dirección',
         line: address.trim(),
+        city: addressCity.trim(),
         lat: coords?.lat || null,
         lng: coords?.lng || null,
       };
       const nextAddresses = [nextAddress, ...savedAddresses].slice(0, 5);
       setSavedAddresses(nextAddresses);
       window.localStorage.setItem(savedAddressesKey(profile.id), JSON.stringify(nextAddresses));
-      setNotice('Direccion guardada en este dispositivo.');
+      setNotice('Dirección guardada en este dispositivo.');
     }
   }
 
@@ -1041,6 +1119,7 @@ function ClientHome({
     const savedAddress = savedAddresses.find((item) => item.id === addressId);
     if (!savedAddress) return;
     setAddress(savedAddress.line);
+    setAddressCity(savedAddress.city || profile.city || '');
     setAddressLabel(savedAddress.label);
     if (savedAddress.lat != null && savedAddress.lng != null) {
       setCoords({ lat: savedAddress.lat, lng: savedAddress.lng });
@@ -1056,12 +1135,13 @@ function ClientHome({
 
   function applyRecommendation(service: V6Service, nextProblem = problemQuery) {
     const professional = professionalForService(service);
+    const label = serviceDisplayName(service);
     setSelectedService(service);
     setProblemQuery(nextProblem);
-    setDescription(nextProblem.trim() || `Necesito ayuda con ${service.name}.`);
+    setDescription(nextProblem.trim() || `Necesito ayuda con ${label}.`);
     setAssignmentMode('manual');
     setSelectedProfessionalId(professional.id);
-    setNotice(`${service.name} seleccionado. Completa los datos y publica el pedido.`);
+    setNotice(`${label} seleccionado. Completá los datos y publicá el pedido.`);
     scrollToRequestForm();
   }
 
@@ -1076,41 +1156,43 @@ function ClientHome({
       return;
     }
     setProblemQuery(example);
-    setNotice('Describi un poco mas el problema y MANITO te recomienda una categoria.');
+    setNotice('Describí un poco más el problema y MANITO te recomienda una categoría.');
   }
 
   function chooseService(service: V6Service) {
     setSelectedService(service);
     if (!problemQuery.trim()) {
-      setProblemQuery(service.name);
+      setProblemQuery(serviceDisplayName(service));
     }
     setDescription((current) =>
       current.trim() && current !== 'Necesito un plomero.'
         ? current
-        : `Necesito ayuda con ${service.name}.`,
+        : `Necesito ayuda con ${serviceDisplayName(service)}.`,
     );
-    setNotice(`${service.name} seleccionado. Completa el pedido.`);
+    setNotice(`${serviceDisplayName(service)} seleccionado. Completá el pedido.`);
     scrollToRequestForm();
   }
 
   function repeatLastOrder() {
     const lastOrder = clientOrders[0];
     if (!lastOrder) {
-      setNotice('Todavia no hay pedidos para repetir. Elegi un servicio y creamos el primero.');
+      setNotice('Todavía no hay pedidos para repetir. Elegí un servicio y creamos el primero.');
       scrollToRequestForm();
       return;
     }
     const lastService = services.find((service) => service.id === lastOrder.service_id) || null;
     if (lastService) setSelectedService(lastService);
-    setDescription(lastOrder.description.split('\n')[0] || `Necesito ayuda con ${lastService?.name || 'un servicio'}.`);
-    setAddress(lastOrder.address);
+    const parsedAddress = splitStoredAddress(lastOrder.address, profile.city);
+    setDescription(lastOrder.description.split('\n')[0] || `Necesito ayuda con ${lastService ? serviceDisplayName(lastService) : 'un servicio'}.`);
+    setAddress(parsedAddress.line);
+    setAddressCity(parsedAddress.city);
     setMode(lastOrder.mode);
     setPaymentMethod(
       lastOrder.payment_method === 'wallet' || lastOrder.payment_method === 'cash'
         ? lastOrder.payment_method
         : 'card',
     );
-    setNotice('Copie tu ultimo pedido. Revisalo y publicalo de nuevo.');
+    setNotice('Copié tu último pedido. Revisalo y publicalo de nuevo.');
     scrollToRequestForm();
   }
 
@@ -1121,7 +1203,7 @@ function ClientHome({
       return;
     }
     onNavigate('orders');
-    setNotice('Abri el pedido en curso para compartir su seguimiento.');
+    setNotice('Abrí el pedido en curso para compartir su seguimiento.');
   }
 
   function openAccountShortcut(message: string) {
@@ -1135,19 +1217,19 @@ function ClientHome({
         <p className="v6-live">
           <CircleDot size={14} aria-hidden="true" /> Backend conectado
         </p>
-        <h1>Hola {profile.full_name || 'Jeremias'}, que necesitas resolver?</h1>
-        <p>Publica un pedido real. Un profesional conectado desde otro dispositivo puede aceptarlo.</p>
+        <h1>Hola {profile.full_name || 'Jeremías'}, ¿qué necesitás resolver?</h1>
+        <p>Publicá un pedido real. Un profesional conectado desde otro dispositivo puede aceptarlo.</p>
       </section>
 
       <section className="v6-card v6-finder">
         <label className="v6-field">
-          <span>Buscar por profesion o describir problema</span>
+          <span>Buscar por profesión o describir problema</span>
           <div className="v6-search-box">
             <Search size={18} aria-hidden="true" />
             <textarea
               value={problemQuery}
               onChange={(event) => setProblemQuery(event.target.value)}
-              placeholder="Ej: pierde agua el bano, se corto la luz, necesito pintar una pared"
+              placeholder="Ej: pierde agua el baño, se cortó la luz, necesito pintar una pared"
             />
             <button
               className="v6-orange-button"
@@ -1160,7 +1242,7 @@ function ClientHome({
           </div>
         </label>
         <div className="v6-chip-row">
-          {['Plomero', 'Electricista', 'Perdi la llave', 'No enfria el aire'].map((example) => (
+          {['Plomero', 'Electricista', 'Perdí la llave', 'No enfría el aire'].map((example) => (
             <button type="button" key={example} onClick={() => applyExample(example)}>
               {example}
             </button>
@@ -1175,7 +1257,7 @@ function ClientHome({
               <p>
                 <Sparkles size={15} aria-hidden="true" /> MANITO recomienda
               </p>
-              <strong>{recommendedService.name}</strong>
+              <strong>{serviceDisplayName(recommendedService)}</strong>
               <small>
                 {recommendedProfessional.name} - {recommendedProfessional.rating} estrellas - {recommendedProfessional.etaMinutes} min
               </small>
@@ -1186,19 +1268,19 @@ function ClientHome({
           </article>
         )}
         {problemQuery.trim().length > 2 && !recommendedService && (
-          <p className="v6-muted">No encontre una coincidencia exacta. Podes elegir un servicio abajo y describirlo igual.</p>
+          <p className="v6-muted">No encontré una coincidencia exacta. Podés elegir un servicio abajo y describirlo igual.</p>
         )}
       </section>
 
       <section className="v6-section v6-flat-section">
         <div className="v6-section-head">
-          <h2>Como lo necesitas?</h2>
-          <span>elegi modalidad</span>
+          <h2>¿Cómo lo necesitás?</h2>
+          <span>elegí modalidad</span>
         </div>
         <div className="v6-mode-grid">
           {([
             { id: 'immediate', title: 'Ahora', body: 'Profesional disponible lo antes posible', icon: <PlugZap size={22} aria-hidden="true" /> },
-            { id: 'scheduled', title: 'Programar', body: 'Elegi dia y horario', icon: <Clock size={22} aria-hidden="true" /> },
+            { id: 'scheduled', title: 'Programar', body: 'Elegí día y horario', icon: <Clock size={22} aria-hidden="true" /> },
             { id: 'quote', title: 'Presupuestar', body: 'Compara propuestas antes de decidir', icon: <MessageCircle size={22} aria-hidden="true" /> },
           ] as Array<{ id: V6Mode; title: string; body: string; icon: ReactNode }>).map((item) => (
             <button
@@ -1231,7 +1313,7 @@ function ClientHome({
               onClick={() => chooseService(service)}
             >
               <span>{serviceIcon(service.slug)}</span>
-              <strong>{service.name}</strong>
+              <strong>{serviceDisplayName(service)}</strong>
               <small>Desde {money(service.base_price)}</small>
             </button>
           ))}
@@ -1240,7 +1322,7 @@ function ClientHome({
 
       {selectedService && (
         <section className="v6-card" ref={requestFormRef}>
-          <h2>{selectedService.name}</h2>
+          <h2>{serviceDisplayName(selectedService)}</h2>
           <form className="v6-stack" onSubmit={createOrder}>
             <label className="v6-field">
               <span>Que necesitas?</span>
@@ -1252,11 +1334,11 @@ function ClientHome({
                 <span>Direcciones guardadas</span>
                 <select defaultValue="" onChange={(event) => chooseSavedAddress(event.target.value)}>
                   <option value="" disabled>
-                    {savedAddresses.length ? 'Elegir direccion' : 'Todavia no guardaste direcciones'}
+                    {savedAddresses.length ? 'Elegir dirección' : 'Todavía no guardaste direcciones'}
                   </option>
                   {savedAddresses.map((item) => (
                     <option value={item.id} key={item.id}>
-                      {item.label} - {item.line}
+                      {item.label} - {formatAddress(item.line, item.city)}
                     </option>
                   ))}
                 </select>
@@ -1267,8 +1349,22 @@ function ClientHome({
               </label>
             </div>
             <label className="v6-field">
-              <span>Direccion</span>
-              <input value={address} onChange={(event) => setAddress(event.target.value)} required />
+              <span>Dirección</span>
+              <input
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+                placeholder="Calle, número, piso o referencia"
+                required
+              />
+            </label>
+            <label className="v6-field">
+              <span>Ciudad</span>
+              <input
+                value={addressCity}
+                onChange={(event) => setAddressCity(event.target.value)}
+                placeholder="Ej: Tres Arroyos"
+                required
+              />
             </label>
             <div className="v6-actions-row">
               <button className="v6-secondary" type="button" onClick={captureLocation}>
@@ -1277,7 +1373,7 @@ function ClientHome({
               </button>
               <button className="v6-secondary" type="button" onClick={saveAddress}>
                 <MapPin size={17} aria-hidden="true" />
-                Guardar direccion
+                Guardar dirección
               </button>
             </div>
             {mode === 'scheduled' && (
@@ -1302,8 +1398,8 @@ function ClientHome({
             )}
 
             <div className="v6-section-head compact">
-              <h2>Asignacion</h2>
-              <span>{assignmentMode === 'manual' ? 'Elegis vos' : 'MANITO asigna'}</span>
+              <h2>Asignación</h2>
+              <span>{assignmentMode === 'manual' ? 'Elegís vos' : 'MANITO asigna'}</span>
             </div>
             <div className="v6-choice-grid">
               <button
@@ -1313,7 +1409,7 @@ function ClientHome({
                 onClick={() => setAssignmentMode('auto')}
               >
                 <Users size={18} aria-hidden="true" />
-                Automatico
+                Automático
               </button>
               <button
                 type="button"
@@ -1357,7 +1453,7 @@ function ClientHome({
 
             <div className="v6-section-head compact">
               <h2>Pago</h2>
-              <span>Metodo preferido</span>
+              <span>Método preferido</span>
             </div>
             <div className="v6-choice-grid three">
               {paymentOptions.map((option) => (
@@ -1401,10 +1497,10 @@ function ClientHome({
 
             <div className="v6-summary">
               <span>
-                <ShieldCheck size={17} aria-hidden="true" /> Garantia MANITO 7 dias
+                <ShieldCheck size={17} aria-hidden="true" /> Garantía MANITO 7 días
               </span>
               <strong>{money(estimatedPrice)}</strong>
-              <small>ETA {etaText} - {paymentOptions.find((option) => option.id === paymentMethod)?.label}</small>
+              <small>ETA {etaText} - {paymentLabel(paymentMethod)}</small>
             </div>
             <button className="v6-primary" type="submit">
               Publicar pedido
@@ -1445,9 +1541,9 @@ function ClientHome({
           <button
             className="done"
             type="button"
-            onClick={() => openAccountShortcut('En Cuenta dejamos visible la opcion de privacidad del telefono.')}
+            onClick={() => openAccountShortcut('En Cuenta dejamos visible la opción de privacidad del teléfono.')}
           >
-            Ocultar telefono en chat
+            Ocultar teléfono en chat
           </button>
         </div>
       </section>
@@ -1468,7 +1564,7 @@ function ClientHome({
             setNotice={setNotice}
           />
         ))}
-        {!clientOrders.length && <Empty title="Todavia no pediste nada" body="Elegi un servicio para crear el primer pedido real." />}
+        {!clientOrders.length && <Empty title="Todavía no pediste nada" body="Elegí un servicio para crear el primer pedido real." />}
       </section>
     </>
   );
@@ -1524,7 +1620,7 @@ function SearchPanel({
 
       <section className="v6-section v6-flat-section">
         <div className="v6-section-head">
-          <h2>Categorias</h2>
+          <h2>Categorías</h2>
           <span>{visibleServices.length} resultados</span>
         </div>
         <div className="v6-chip-row nowrap">
@@ -1532,17 +1628,17 @@ function SearchPanel({
             Todos
           </button>
           {services.slice(0, 7).map((service) => (
-            <button type="button" key={service.id} onClick={() => setProblemQuery(service.name)}>
-              {service.name}
+            <button type="button" key={service.id} onClick={() => setProblemQuery(serviceDisplayName(service))}>
+              {serviceDisplayName(service)}
             </button>
           ))}
         </div>
         <div className="v6-service-list">
           {visibleServices.map((service) => (
             <article className="v6-list-service" key={service.id}>
-              <span>{service.name.slice(0, 2)}</span>
+              <span>{serviceInitials(service)}</span>
               <div>
-                <strong>{service.name}</strong>
+                <strong>{serviceDisplayName(service)}</strong>
                 <p>{serviceDescription(service.slug)}</p>
                 <small>Desde {money(service.base_price)} - {professionalForService(service).etaMinutes} min</small>
               </div>
@@ -1599,10 +1695,10 @@ function FavoritesPanel({
 }
 
 function serviceDescription(slug: string) {
-  if (slug === 'plomeria') return 'Perdidas, canerias, griferias, destapes y reparaciones generales.';
-  if (slug === 'electricidad') return 'Cortes, tomas, termicas, luces y reparaciones electricas domiciliarias.';
+  if (slug === 'plomeria') return 'Pérdidas, cañerías, griferías, destapes y reparaciones generales.';
+  if (slug === 'electricidad') return 'Cortes, tomas, térmicas, luces y reparaciones eléctricas domiciliarias.';
   if (slug === 'limpieza') return 'Limpieza general, profunda, post obra y servicios por hora.';
-  if (slug === 'gas') return 'Revision, perdidas, calefones, cocinas y trabajos con gasistas.';
+  if (slug === 'gas') return 'Revisión, pérdidas, calefones, cocinas y trabajos con gasistas.';
   if (slug === 'cerrajeria') return 'Aperturas, cambios de cerradura y urgencias de acceso.';
   if (slug === 'pintura') return 'Pintura interior y exterior, retoques y ambientes completos.';
   return 'Profesionales verificados para resolver tareas del hogar.';
@@ -1616,6 +1712,7 @@ function ProfessionalHome({
   activeOrders,
   setProfile,
   setProServices,
+  setOrders,
   setChatOrder,
   setError,
   setNotice,
@@ -1627,6 +1724,7 @@ function ProfessionalHome({
   activeOrders: V6Order[];
   setProfile: (profile: V6Profile) => void;
   setProServices: (services: V6ProfessionalService[]) => void;
+  setOrders: (orders: V6Order[]) => void;
   setChatOrder: (order: V6Order) => void;
   setError: (message: string) => void;
   setNotice: (message: string) => void;
@@ -1654,10 +1752,12 @@ function ProfessionalHome({
 
   async function accept(orderId: string) {
     try {
-      await acceptV6Order(orderId);
-      setNotice('Trabajo aceptado. El cliente lo ve en tiempo real.');
+      const acceptedOrder = await acceptV6Order(orderId);
+      setOrders(await listV6Orders());
+      setChatOrder(acceptedOrder);
+      setNotice('Trabajo aceptado. Usá el chat del pedido para coordinar con el cliente.');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'El pedido ya no esta disponible.');
+      setError(caught instanceof Error ? caught.message : 'El pedido ya no está disponible.');
     }
   }
 
@@ -1694,7 +1794,7 @@ function ProfessionalHome({
           </article>
           <article>
             <strong>{money(commission)}</strong>
-            <span>Comision MANITO</span>
+            <span>Comisión MANITO</span>
           </article>
           <article>
             <strong>{money(netIncome)}</strong>
@@ -1721,7 +1821,7 @@ function ProfessionalHome({
               aria-pressed={proServices.some((item) => item.service_id === service.id)}
               onClick={() => toggleService(service.id)}
             >
-              {serviceIcon(service.slug)} {service.name}
+              {serviceIcon(service.slug)} {serviceDisplayName(service)}
             </button>
           ))}
         </div>
@@ -1749,7 +1849,7 @@ function ProfessionalHome({
                 <div className="v6-order-top">
                   <span className="v6-order-icon">{serviceIcon(order.service?.slug || '')}</span>
                   <div>
-                    <strong>{order.service?.name || 'Servicio'}</strong>
+                    <strong>{serviceDisplayName(order.service)}</strong>
                     <p>{order.description}</p>
                     <small>Match {proServices.some((item) => item.service_id === order.service_id) ? '96%' : '72%'} · {V6_MODE_LABEL[order.mode]}</small>
                     <small>
@@ -1808,7 +1908,7 @@ function OrdersList(props: {
       {props.orders.map((order) => (
         <OrderCard key={order.id} order={order} {...props} />
       ))}
-      {!props.orders.length && <Empty title="Todavia esta vacio" body="Los pedidos apareceran aca y se sincronizaran entre dispositivos." />}
+      {!props.orders.length && <Empty title="Todavía está vacío" body="Los pedidos aparecerán acá y se sincronizarán entre dispositivos." />}
     </section>
   );
 }
@@ -1936,7 +2036,7 @@ function OrderCard({
         amount: Number(extraAmount) || 0,
       });
       await refreshCommercialData();
-      setNotice('Adicional enviado para aprobacion.');
+      setNotice('Adicional enviado para aprobación.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo crear adicional.');
     }
@@ -1966,7 +2066,7 @@ function OrderCard({
         stars: ratingStars,
         comment: ratingComment,
       });
-      setNotice('Calificacion enviada.');
+      setNotice('Calificación enviada.');
       setRatingComment('');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo calificar.');
@@ -1979,10 +2079,10 @@ function OrderCard({
       await addV6Complaint({
         orderId: order.id,
         openedBy: profile.id,
-        reason: 'Garantia MANITO',
+        reason: 'Garantía MANITO',
         detail: complaintDetail,
       });
-      setNotice('Reclamo abierto. MANITO revisa la garantia.');
+      setNotice('Reclamo abierto. MANITO revisa la garantía.');
       setComplaintDetail('');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo abrir reclamo.');
@@ -1994,17 +2094,32 @@ function OrderCard({
       <div className="v6-order-top">
         <span className="v6-order-icon">{serviceIcon(order.service?.slug || '')}</span>
         <div>
-          <strong>{order.service?.name || 'Servicio'}</strong>
+          <strong>{serviceDisplayName(order.service)}</strong>
           <p>{order.address} · {shortDate(order.created_at)}</p>
           {other && <small>{profile.role === 'client' ? 'Profesional' : 'Cliente'}: {other.full_name || 'Usuario'}</small>}
           <Status status={order.status} />
+          {order.professional_id ? (
+            <small className="v6-order-hint">
+              <MessageCircle size={13} aria-hidden="true" />
+              {profile.role === 'client'
+                ? 'Coordiná con el prestador por el chat del pedido.'
+                : 'Coordiná con el cliente por el chat del pedido.'}
+            </small>
+          ) : (
+            profile.role === 'client' && (
+              <small className="v6-order-hint">
+                <MessageCircle size={13} aria-hidden="true" />
+                Cuando un prestador acepte, se habilita el chat.
+              </small>
+            )
+          )}
         </div>
         <b>{money(order.price || order.service?.base_price)}</b>
       </div>
       <StatusSteps status={order.status} />
       <div className="v6-meta-row">
-        <span><ShieldCheck size={14} aria-hidden="true" /> Garantia {order.guarantee_days || 7} dias</span>
-        {order.payment_method && <span>Pago {order.payment_method}</span>}
+        <span><ShieldCheck size={14} aria-hidden="true" /> Garantía {order.guarantee_days || 7} días</span>
+        {order.payment_method && <span>Pago {paymentLabel(order.payment_method)}</span>}
         {order.eta_minutes && <span>ETA {order.eta_minutes} min</span>}
         {order.status === 'accepted' && <span>PIN inicio {order.start_pin || 'pendiente'}</span>}
       </div>
@@ -2072,8 +2187,8 @@ function OrderCard({
             <button className="v6-secondary" type="submit">Calificar</button>
           </form>
           <form className="v6-inline-form" onSubmit={submitComplaint}>
-            <input value={complaintDetail} onChange={(event) => setComplaintDetail(event.target.value)} placeholder="Reclamo o garantia" />
-            <button className="v6-danger" type="submit">Usar garantia</button>
+            <input value={complaintDetail} onChange={(event) => setComplaintDetail(event.target.value)} placeholder="Reclamo o garantía" />
+            <button className="v6-danger" type="submit">Usar garantía</button>
           </form>
         </div>
       )}
@@ -2083,7 +2198,7 @@ function OrderCard({
         )}
         {order.professional_id && (
           <button className="v6-secondary" type="button" onClick={() => setChatOrder(order)}>
-            <MessageCircle size={16} aria-hidden="true" /> Chat
+            <MessageCircle size={16} aria-hidden="true" /> Abrir chat
           </button>
         )}
         {profile.role === 'professional' &&
@@ -2125,7 +2240,7 @@ function ProfilePanel({
   const [documents, setDocuments] = useState<V6ProfessionalDocument[]>([]);
   const [portfolio, setPortfolio] = useState<V6PortfolioItem[]>([]);
   const [headline, setHeadline] = useState('Tecnico verificado para urgencias del hogar');
-  const [bio, setBio] = useState('Trabajo con turnos puntuales, presupuesto claro y garantia MANITO.');
+  const [bio, setBio] = useState('Trabajo con turnos puntuales, presupuesto claro y garantía MANITO.');
   const [yearsExperience, setYearsExperience] = useState('3');
   const [insuranceLabel, setInsuranceLabel] = useState('Responsabilidad civil vigente');
   const [portfolioTitle, setPortfolioTitle] = useState('Trabajo terminado');
@@ -2253,13 +2368,13 @@ function ProfilePanel({
         professionalId: profile.id,
         status: onboarding?.status || 'draft',
         currentStep: Math.max(onboarding?.current_step || 1, 8),
-        notes: 'Perfil publico iniciado por el profesional.',
+        notes: 'Perfil público iniciado por el profesional.',
       });
       setProfessionalProfile(nextProfile);
       setOnboarding(nextOnboarding);
       setNotice('Perfil profesional guardado.');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Aplica la migracion V7 para guardar alta profesional.');
+      setError(caught instanceof Error ? caught.message : 'Aplicá la migración V7 para guardar alta profesional.');
     }
   }
 
@@ -2292,7 +2407,7 @@ function ProfilePanel({
       setDocuments(await listV6ProfessionalDocuments(profile.id));
       setDocumentLinks((currentLinks) => ({ ...currentLinks, [kind]: '' }));
       event.currentTarget.reset();
-      setNotice(`${label} guardado para revision.`);
+      setNotice(`${label} guardado para revisión.`);
     } catch (caught) {
       setError(uploadErrorMessage(caught));
     } finally {
@@ -2316,9 +2431,9 @@ function ProfilePanel({
         professionalId: profile.id,
         status: 'submitted',
         currentStep: 16,
-        notes: 'Alta enviada para revision.',
+        notes: 'Alta enviada para revisión.',
       }));
-      setNotice('Alta enviada para revision MANITO.');
+      setNotice('Alta enviada para revisión MANITO.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo enviar alta.');
     } finally {
@@ -2414,12 +2529,12 @@ function ProfilePanel({
               onClick={submitOnboarding}
               disabled={submittingOnboarding}
             >
-              {submittingOnboarding ? 'Enviando...' : 'Enviar alta a revision'}
+              {submittingOnboarding ? 'Enviando...' : 'Enviar alta a revisión'}
             </button>
           </section>
 
           <section className="v6-card">
-            <h2>Perfil publico</h2>
+            <h2>Perfil público</h2>
             <form className="v6-stack" onSubmit={saveProfessionalSurface}>
               <label className="v6-field">
                 <span>Titulo</span>
@@ -2431,7 +2546,7 @@ function ProfilePanel({
               </label>
               <div className="v6-split">
                 <label className="v6-field">
-                  <span>Anios de experiencia</span>
+                  <span>Años de experiencia</span>
                   <input value={yearsExperience} onChange={(event) => setYearsExperience(event.target.value)} />
                 </label>
                 <label className="v6-field">
@@ -2567,7 +2682,7 @@ function ProfilePanel({
                   aria-pressed={proServices.some((item) => item.service_id === service.id)}
                   onClick={() => toggleService(service.id)}
                 >
-                  {serviceIcon(service.slug)} {service.name}
+                  {serviceIcon(service.slug)} {serviceDisplayName(service)}
                 </button>
               ))}
             </div>
@@ -2651,7 +2766,7 @@ function AccountPanel({
       setPaymentProfiles(await listV6PaymentProfiles(profile.id));
       setNotice('Medio de pago guardado.');
     } catch {
-      setNotice('Aplica la migracion V7 para guardar medios de pago.');
+      setNotice('Aplicá la migración V7 para guardar medios de pago.');
     }
   }
 
@@ -2663,7 +2778,7 @@ function AccountPanel({
       </section>
       <section className="v6-card v6-account-cta">
         <h2>Tu cuenta de cliente</h2>
-        <p>Guarda direcciones, favoritos, pedidos recurrentes y datos de facturacion.</p>
+        <p>Guardá direcciones, favoritos, pedidos recurrentes y datos de facturación.</p>
         <button className="v6-primary" type="button" onClick={onOpenProfile}>
           Editar perfil
         </button>
@@ -2725,7 +2840,7 @@ function AccountPanel({
       </section>
       <section className="v6-card v6-account-cta">
         <h2>Trabaja con MANITO</h2>
-        <p>Crea tu perfil profesional, mostra que haces y empeza a recibir pedidos cuando tu cuenta sea aprobada.</p>
+        <p>Creá tu perfil profesional, mostrá qué hacés y empezá a recibir pedidos cuando tu cuenta sea aprobada.</p>
         <button className="v6-secondary" type="button" onClick={onOpenProfile}>
           Quiero ser profesional
         </button>
@@ -2744,7 +2859,7 @@ function AccountPanel({
             </article>
             <article>
               <strong>Comercial</strong>
-              <span>{adminSettings.length ? 'Config desde Supabase' : 'Pendiente de migracion V7'}</span>
+              <span>{adminSettings.length ? 'Config desde Supabase' : 'Pendiente de migración V7'}</span>
             </article>
           </div>
           {adminSettings.map((setting) => (
@@ -2759,7 +2874,7 @@ function AccountPanel({
           </button>
         )}
         <button type="button" onClick={logout}>
-          <LogOut size={17} aria-hidden="true" /> Cerrar sesion
+          <LogOut size={17} aria-hidden="true" /> Cerrar sesión
         </button>
         <button type="button" onClick={resetConfig}>
           <Settings size={17} aria-hidden="true" /> Cambiar backend
@@ -2816,7 +2931,7 @@ function ChatSheet({
         <div className="v6-section-head">
           <div>
             <h2>Chat del pedido</h2>
-            <span>{order.service?.name || 'Servicio'}</span>
+            <span>{serviceDisplayName(order.service)}</span>
           </div>
           <button className="v6-icon-button" type="button" onClick={onClose} aria-label="Cerrar chat">
             ×
