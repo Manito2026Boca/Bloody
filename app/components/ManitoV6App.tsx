@@ -68,6 +68,7 @@ import {
   subscribeV6Messages,
   subscribeV6Orders,
   updateV6Profile,
+  uploadV6MediaFile,
   upsertV6ClientAddress,
   upsertV6ProfessionalDocument,
   upsertV6ProfessionalOnboarding,
@@ -136,7 +137,7 @@ const statusFlow: V6OrderStatus[] = [
   'completed',
 ];
 const deployedAppUrl =
-  'https://manito-v6-real.eaeb3861-253b-4861-ab40-75d3f3ded9cb.chatgpt.site';
+  'https://bloody-eta.vercel.app';
 const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: ReactNode }> = [
   { id: 'card', label: 'Tarjeta', icon: <CreditCard size={17} aria-hidden="true" /> },
   { id: 'wallet', label: 'Billetera', icon: <Wallet size={17} aria-hidden="true" /> },
@@ -2129,6 +2130,13 @@ function ProfilePanel({
   const [insuranceLabel, setInsuranceLabel] = useState('Responsabilidad civil vigente');
   const [portfolioTitle, setPortfolioTitle] = useState('Trabajo terminado');
   const [portfolioDescription, setPortfolioDescription] = useState('Antes y despues documentado para el cliente.');
+  const [portfolioLink, setPortfolioLink] = useState('');
+  const [portfolioBeforeFile, setPortfolioBeforeFile] = useState<File | null>(null);
+  const [portfolioAfterFile, setPortfolioAfterFile] = useState<File | null>(null);
+  const [documentLinks, setDocumentLinks] = useState<Record<string, string>>({});
+  const [savingDocumentKind, setSavingDocumentKind] = useState<string | null>(null);
+  const [savingPortfolio, setSavingPortfolio] = useState(false);
+  const [submittingOnboarding, setSubmittingOnboarding] = useState(false);
 
   useEffect(() => {
     if (role !== 'professional') return;
@@ -2157,6 +2165,52 @@ function ProfilePanel({
       alive = false;
     };
   }, [profile.id, role]);
+
+  const uploadedDocumentKinds = useMemo(
+    () =>
+      new Set(
+        documents
+          .filter(
+            (document) =>
+              Boolean(document.file_path) &&
+              ['uploaded', 'approved'].includes(document.status),
+          )
+          .map((document) => document.kind),
+      ),
+    [documents],
+  );
+
+  function shortEvidencePath(path: string | null) {
+    if (!path) return 'Sin evidencia';
+    if (path.startsWith('http')) {
+      return path.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    }
+    return path.split('/').pop() || 'Archivo guardado';
+  }
+
+  function renderEvidence(path: string | null, label: string) {
+    if (!path) return null;
+    const text = `${label}: ${shortEvidencePath(path)}`;
+    if (path.startsWith('http')) {
+      return (
+        <a className="v6-evidence-link" href={path} target="_blank" rel="noreferrer">
+          {text}
+        </a>
+      );
+    }
+    return <span className="v6-evidence-link">{text}</span>;
+  }
+
+  function uploadErrorMessage(caught: unknown) {
+    const message = caught instanceof Error ? caught.message : '';
+    if (message.toLowerCase().includes('mime') || message.toLowerCase().includes('type')) {
+      return 'Por ahora sube fotos JPG, PNG o WebP. Para PDF, pega un link.';
+    }
+    if (message.toLowerCase().includes('bucket') || message.toLowerCase().includes('storage')) {
+      return 'No se pudo subir el archivo. Pega un link mientras revisamos Storage.';
+    }
+    return message || 'No se pudo subir el archivo.';
+  }
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2209,8 +2263,22 @@ function ProfilePanel({
     }
   }
 
-  async function markDocumentUploaded(kind: string, label: string) {
+  async function saveDocumentEvidence(event: FormEvent<HTMLFormElement>, kind: string, label: string) {
+    event.preventDefault();
+    const fileInput = new FormData(event.currentTarget).get(`${kind}-file`);
+    const file = fileInput instanceof File && fileInput.size > 0 ? fileInput : null;
+    const link = (documentLinks[kind] || '').trim();
+    if (!file && !link) {
+      setError(`Agrega una foto o un link para ${label}.`);
+      return;
+    }
+    setSavingDocumentKind(kind);
     try {
+      const filePath = link || (file ? await uploadV6MediaFile({
+        ownerId: profile.id,
+        area: 'documents',
+        file,
+      }) : null);
       const current = documents.find((document) => document.kind === kind);
       await upsertV6ProfessionalDocument({
         id: current?.id,
@@ -2218,16 +2286,31 @@ function ProfilePanel({
         kind,
         label,
         status: 'uploaded',
-        filePath: `manual/${kind}`,
+        filePath,
+        observation: link ? 'Link aportado por el profesional.' : file?.name || null,
       });
       setDocuments(await listV6ProfessionalDocuments(profile.id));
-      setNotice('Documento marcado como cargado.');
+      setDocumentLinks((currentLinks) => ({ ...currentLinks, [kind]: '' }));
+      event.currentTarget.reset();
+      setNotice(`${label} guardado para revision.`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'No se pudo guardar documento.');
+      setError(uploadErrorMessage(caught));
+    } finally {
+      setSavingDocumentKind(null);
     }
   }
 
   async function submitOnboarding() {
+    const missingDocuments = requiredDocuments.filter((item) => !uploadedDocumentKinds.has(item.kind));
+    if (missingDocuments.length) {
+      setError(`Faltan documentos: ${missingDocuments.map((item) => item.label).join(', ')}.`);
+      return;
+    }
+    if (!proServices.length) {
+      setError('Elegí al menos un servicio para que el alta tenga sentido.');
+      return;
+    }
+    setSubmittingOnboarding(true);
     try {
       setOnboarding(await upsertV6ProfessionalOnboarding({
         professionalId: profile.id,
@@ -2238,21 +2321,43 @@ function ProfilePanel({
       setNotice('Alta enviada para revision MANITO.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo enviar alta.');
+    } finally {
+      setSubmittingOnboarding(false);
     }
   }
 
   async function savePortfolio(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!portfolioTitle.trim()) {
+      setError('Ponele un titulo al trabajo del portfolio.');
+      return;
+    }
+    setSavingPortfolio(true);
     try {
+      const link = portfolioLink.trim();
+      const beforePath = portfolioBeforeFile
+        ? await uploadV6MediaFile({ ownerId: profile.id, area: 'portfolio', file: portfolioBeforeFile })
+        : link || null;
+      const afterPath = portfolioAfterFile
+        ? await uploadV6MediaFile({ ownerId: profile.id, area: 'portfolio', file: portfolioAfterFile })
+        : null;
       await addV6PortfolioItem({
         professionalId: profile.id,
-        title: portfolioTitle,
-        description: portfolioDescription,
+        title: portfolioTitle.trim(),
+        description: portfolioDescription.trim(),
+        beforePath,
+        afterPath,
       });
       setPortfolio(await listV6Portfolio(profile.id));
+      setPortfolioLink('');
+      setPortfolioBeforeFile(null);
+      setPortfolioAfterFile(null);
+      event.currentTarget.reset();
       setNotice('Portfolio actualizado.');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'No se pudo guardar portfolio.');
+      setError(uploadErrorMessage(caught));
+    } finally {
+      setSavingPortfolio(false);
     }
   }
 
@@ -2303,8 +2408,13 @@ function ProfilePanel({
                 </span>
               ))}
             </div>
-            <button className="v6-primary" type="button" onClick={submitOnboarding}>
-              Enviar alta a revision
+            <button
+              className="v6-primary"
+              type="button"
+              onClick={submitOnboarding}
+              disabled={submittingOnboarding}
+            >
+              {submittingOnboarding ? 'Enviando...' : 'Enviar alta a revision'}
             </button>
           </section>
 
@@ -2344,19 +2454,48 @@ function ProfilePanel({
 
           <section className="v6-card">
             <h2>Documentos</h2>
-            <div className="v6-check-grid">
+            <p className="v6-help-text">
+              Sube fotos JPG, PNG o WebP. Si tenes PDF o carpeta compartida, pega el link.
+            </p>
+            <div className="v6-upload-list">
               {requiredDocuments.map((item) => {
                 const current = documents.find((document) => document.kind === item.kind);
+                const uploaded = current?.status === 'uploaded' || current?.status === 'approved';
                 return (
-                  <button
-                    className="v6-check-service"
-                    type="button"
+                  <form
+                    className="v6-upload-card"
                     key={item.kind}
-                    aria-pressed={current?.status === 'uploaded' || current?.status === 'approved'}
-                    onClick={() => markDocumentUploaded(item.kind, item.label)}
+                    onSubmit={(event) => saveDocumentEvidence(event, item.kind, item.label)}
                   >
-                    <Check size={17} aria-hidden="true" /> {item.label}
-                  </button>
+                    <div className="v6-upload-head">
+                      <strong>{item.label}</strong>
+                      <span data-state={uploaded ? 'uploaded' : 'pending'}>
+                        {uploaded ? 'Cargado' : 'Pendiente'}
+                      </span>
+                    </div>
+                    {renderEvidence(current?.file_path || null, 'Evidencia')}
+                    <label className="v6-field">
+                      <span>Foto</span>
+                      <input name={`${item.kind}-file`} type="file" accept="image/jpeg,image/png,image/webp" />
+                    </label>
+                    <label className="v6-field">
+                      <span>Link opcional</span>
+                      <input
+                        value={documentLinks[item.kind] || ''}
+                        onChange={(event) =>
+                          setDocumentLinks((links) => ({ ...links, [item.kind]: event.target.value }))
+                        }
+                        placeholder="https://drive.google.com/..."
+                      />
+                    </label>
+                    <button
+                      className="v6-secondary"
+                      type="submit"
+                      disabled={savingDocumentKind === item.kind}
+                    >
+                      {savingDocumentKind === item.kind ? 'Guardando...' : 'Guardar documento'}
+                    </button>
+                  </form>
                 );
               })}
             </div>
@@ -2373,13 +2512,45 @@ function ProfilePanel({
                 <span>Descripcion</span>
                 <textarea value={portfolioDescription} onChange={(event) => setPortfolioDescription(event.target.value)} />
               </label>
-              <button className="v6-secondary" type="submit">Agregar al portfolio</button>
+              <label className="v6-field">
+                <span>Link a fotos o trabajo</span>
+                <input
+                  value={portfolioLink}
+                  onChange={(event) => setPortfolioLink(event.target.value)}
+                  placeholder="https://..."
+                />
+              </label>
+              <div className="v6-split">
+                <label className="v6-field">
+                  <span>Foto antes</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(event) => setPortfolioBeforeFile(event.target.files?.[0] || null)}
+                  />
+                </label>
+                <label className="v6-field">
+                  <span>Foto despues</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(event) => setPortfolioAfterFile(event.target.files?.[0] || null)}
+                  />
+                </label>
+              </div>
+              <button className="v6-secondary" type="submit" disabled={savingPortfolio}>
+                {savingPortfolio ? 'Guardando...' : 'Agregar al portfolio'}
+              </button>
             </form>
             <div className="v6-quote-list">
               {portfolio.map((item) => (
                 <article className="v6-quote-card" key={item.id}>
                   <strong>{item.title}</strong>
                   <p>{item.description}</p>
+                  <div className="v6-file-list">
+                    {renderEvidence(item.before_path, item.after_path ? 'Antes' : 'Link')}
+                    {renderEvidence(item.after_path, 'Despues')}
+                  </div>
                 </article>
               ))}
             </div>

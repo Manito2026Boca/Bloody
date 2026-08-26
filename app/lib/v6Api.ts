@@ -39,6 +39,14 @@ function isMissingV5Table(error: { message: string; code?: string } | null) {
   );
 }
 
+function safeStorageFileName(name: string) {
+  const cleaned = name
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return cleaned || 'archivo';
+}
+
 export async function getV6Profile(userId: string) {
   const { data, error } = await getV6Supabase()
     .from('profiles')
@@ -566,6 +574,26 @@ export async function upsertV6ProfessionalDocument(input: {
   return data as V6ProfessionalDocument;
 }
 
+export async function uploadV6MediaFile(input: {
+  ownerId: string;
+  area: 'documents' | 'portfolio' | 'orders';
+  file: File;
+}) {
+  const fileName = safeStorageFileName(input.file.name);
+  const path = `${input.ownerId}/${input.area}/${Date.now()}-${fileName}`;
+  const { data, error } = await getV6Supabase()
+    .storage
+    .from('manito-media')
+    .upload(path, input.file, {
+      cacheControl: '3600',
+      contentType: input.file.type || undefined,
+      upsert: false,
+    });
+  fail(error);
+  if (!data?.path) throw new Error('No se pudo guardar el archivo.');
+  return data.path;
+}
+
 export async function listV6Portfolio(userId: string) {
   const { data, error } = await getV6Supabase()
     .from('professional_portfolio')
@@ -581,6 +609,8 @@ export async function addV6PortfolioItem(input: {
   professionalId: string;
   title: string;
   description: string;
+  beforePath?: string | null;
+  afterPath?: string | null;
   serviceId?: number | null;
 }) {
   const { data, error } = await getV6Supabase()
@@ -589,6 +619,8 @@ export async function addV6PortfolioItem(input: {
       professional_id: input.professionalId,
       title: input.title,
       description: input.description || null,
+      before_path: input.beforePath || null,
+      after_path: input.afterPath || null,
       service_id: input.serviceId || null,
     })
     .select('*')
