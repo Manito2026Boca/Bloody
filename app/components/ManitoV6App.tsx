@@ -399,6 +399,18 @@ function isInstalledDisplayMode() {
   );
 }
 
+function isJwtTimingError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes('jwt issued at future');
+}
+
+function friendlySessionError(error: unknown, fallback: string) {
+  if (isJwtTimingError(error)) {
+    return 'Tu sesión quedó trabada porque el dispositivo tiene la hora desfasada. Activá fecha y hora automática y volvé a entrar a MANITO.';
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
 export default function ManitoV6App() {
   const [configured, setConfigured] = useState(() => isV6SupabaseConfigured());
   const [session, setSession] = useState<Session | null>(null);
@@ -439,6 +451,20 @@ export default function ManitoV6App() {
     }
   }, []);
 
+  const resetSession = useCallback(async () => {
+    try {
+      await getV6Supabase().auth.signOut({ scope: 'local' });
+    } catch {
+      // If the token is rejected because of clock skew, clearing UI state is enough.
+    }
+    setSession(null);
+    setProfile(null);
+    setOrders([]);
+    setProServices([]);
+    setError(null);
+    setNotice('Listo. Activá fecha y hora automática si vuelve a pasar, y entrá de nuevo.');
+  }, []);
+
   useEffect(() => {
     if (!configured) {
       return;
@@ -463,9 +489,11 @@ export default function ManitoV6App() {
           await loadData(data.session.user.id);
         }
       })
-      .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : 'No se pudo iniciar.'),
-      )
+      .catch((caught) => {
+        setSession(null);
+        setProfile(null);
+        setError(friendlySessionError(caught, 'No se pudo iniciar.'));
+      })
       .finally(() => setLoading(false));
 
     const { data: listener } = supabase.auth.onAuthStateChange(
@@ -473,7 +501,7 @@ export default function ManitoV6App() {
         setSession(nextSession);
         if (nextSession?.user.id) {
           void loadData(nextSession.user.id).catch((caught) =>
-            setError(caught instanceof Error ? caught.message : 'No se pudo cargar tu perfil.'),
+            setError(friendlySessionError(caught, 'No se pudo cargar tu perfil.')),
           );
         } else {
           setProfileLoading(false);
@@ -583,10 +611,19 @@ export default function ManitoV6App() {
   }
 
   if (!profile) {
+    const profileError = error || 'No se encontró tu perfil.';
+    const canResetSession =
+      profileError.includes('hora desfasada') ||
+      profileError.toLowerCase().includes('jwt issued at future');
     return (
       <main className="v6-app v6-center">
         <section className="v6-card">
-          <p className="v6-alert">{error || 'No se encontro tu perfil.'}</p>
+          <p className="v6-alert">{profileError}</p>
+          {canResetSession && (
+            <button className="v6-primary" type="button" onClick={resetSession}>
+              Volver a ingresar
+            </button>
+          )}
         </section>
       </main>
     );
