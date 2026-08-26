@@ -87,9 +87,9 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 
 ## Modulos de desarrollo sugeridos
 
-1. Disponibilidad profesional persistente: zona, radio, dias, horarios y tarifas.
-2. Evidencias reales del pedido: subir fotos antes/durante/despues y verlas en seguimiento.
-3. Wizard profesional por pasos reales, con guardado parcial y resumen final.
+1. Disponibilidad profesional persistente: zona, radio, dias, horarios y tarifas. Estado: implementado.
+2. Evidencias reales del pedido: subir fotos antes/durante/despues y verlas en seguimiento. Estado: implementado para fotos iniciales del cliente.
+3. Wizard profesional por pasos reales, con guardado parcial y resumen final. Estado: implementado en UI; falta persistir DNI/fecha como datos sensibles separados.
 4. Matching por rubro/zona/disponibilidad usando datos del profesional.
 5. Cita pendiente y notificaciones in-app persistentes.
 6. Chat y contacto del prestador con reglas claras de privacidad.

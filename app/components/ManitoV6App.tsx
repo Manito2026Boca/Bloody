@@ -2578,6 +2578,7 @@ function ProfilePanel({
     'Perfil publico',
     'Datos personales',
     'Documentos',
+    'Portfolio',
     'Zona y tarifas',
     'Revision',
   ];
@@ -2775,47 +2776,6 @@ function ProfilePanel({
   return (
     <>
       <section className="v6-card">
-        <h2>Perfil de cliente</h2>
-        <form className="v6-stack" onSubmit={saveProfile}>
-          <label className="v6-field">
-            <span>Nombre</span>
-            <input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
-          </label>
-          <label className="v6-field">
-            <span>Telefono</span>
-            <input value={phone} onChange={(event) => setPhone(event.target.value)} />
-          </label>
-          <label className="v6-field">
-            <span>Ciudad</span>
-            <input value={city} onChange={(event) => setCity(event.target.value)} />
-          </label>
-          <div className="v6-split">
-            <label className="v6-field">
-              <span>DNI</span>
-              <input
-                value={documentNumber}
-                onChange={(event) => setDocumentNumber(event.target.value)}
-                inputMode="numeric"
-                placeholder="Para el alta profesional"
-              />
-            </label>
-            <label className="v6-field">
-              <span>Fecha de nacimiento</span>
-              <input
-                value={birthDate}
-                onChange={(event) => setBirthDate(event.target.value)}
-                type="date"
-              />
-            </label>
-          </div>
-          <button className="v6-primary" type="submit">
-            <Save size={16} aria-hidden="true" /> Guardar perfil
-          </button>
-        </form>
-      </section>
-
-      <>
-          <section className="v6-card">
             <div className="v6-section-head">
               <h2>Alta profesional</h2>
               <span>{onboarding?.status || 'borrador'} · {professionalProgress}%</span>
@@ -2872,8 +2832,37 @@ function ProfilePanel({
                 </button>
               )}
             </div>
-          </section>
+      </section>
 
+      {professionalStep === 1 && (
+          <section className="v6-card">
+            <h2>Servicios que ofreces</h2>
+            <p className="v6-help-text">
+              Elegi los rubros donde queres recibir pedidos. Despues vas a poder definir zona, horarios y tarifas.
+            </p>
+            <div className="v6-check-grid">
+              {services.map((service) => (
+                <button
+                  className="v6-check-service"
+                  type="button"
+                  key={service.id}
+                  aria-pressed={selectedServiceIds.has(service.id)}
+                  onClick={() => toggleService(service.id)}
+                >
+                  {serviceIcon(service.slug)} {serviceDisplayName(service)}
+                </button>
+              ))}
+            </div>
+            <div className="v6-summary">
+              <span>
+                <BriefcaseBusiness size={17} aria-hidden="true" /> Servicios seleccionados
+              </span>
+              <small>{proServices.length ? `${proServices.length} rubros activos` : 'Todavia no elegiste rubros'}</small>
+            </div>
+          </section>
+      )}
+
+      {professionalStep === 2 && (
           <section className="v6-card">
             <h2>Perfil público</h2>
             <form className="v6-stack" onSubmit={saveProfessionalSurface}>
@@ -2907,7 +2896,51 @@ function ProfilePanel({
               </button>
             </form>
           </section>
+      )}
 
+      {professionalStep === 3 && (
+      <section className="v6-card">
+        <h2>Datos personales</h2>
+        <form className="v6-stack" onSubmit={saveProfile}>
+          <label className="v6-field">
+            <span>Nombre</span>
+            <input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
+          </label>
+          <label className="v6-field">
+            <span>Telefono</span>
+            <input value={phone} onChange={(event) => setPhone(event.target.value)} />
+          </label>
+          <label className="v6-field">
+            <span>Ciudad</span>
+            <input value={city} onChange={(event) => setCity(event.target.value)} />
+          </label>
+          <div className="v6-split">
+            <label className="v6-field">
+              <span>DNI</span>
+              <input
+                value={documentNumber}
+                onChange={(event) => setDocumentNumber(event.target.value)}
+                inputMode="numeric"
+                placeholder="Para el alta profesional"
+              />
+            </label>
+            <label className="v6-field">
+              <span>Fecha de nacimiento</span>
+              <input
+                value={birthDate}
+                onChange={(event) => setBirthDate(event.target.value)}
+                type="date"
+              />
+            </label>
+          </div>
+          <button className="v6-primary" type="submit">
+            <Save size={16} aria-hidden="true" /> Guardar datos
+          </button>
+        </form>
+      </section>
+      )}
+
+      {professionalStep === 4 && (
           <section className="v6-card">
             <h2>Documentos</h2>
             <p className="v6-help-text">
@@ -2956,7 +2989,9 @@ function ProfilePanel({
               })}
             </div>
           </section>
+      )}
 
+      {professionalStep === 5 && (
           <section className="v6-card">
             <h2>Portfolio</h2>
             <form className="v6-stack" onSubmit={savePortfolio}>
@@ -3011,9 +3046,14 @@ function ProfilePanel({
               ))}
             </div>
           </section>
+      )}
 
+      {professionalStep === 6 && (
           <section className="v6-card">
-            <h2>Mis servicios</h2>
+            <h2>Zona, horarios y tarifas</h2>
+            <p className="v6-help-text">
+              Ajusta donde trabajas, cuando estas disponible y cuanto queres cobrar desde cada rubro.
+            </p>
             <div className="v6-split">
               <label className="v6-field">
                 <span>Ciudad o zona de trabajo</span>
@@ -3050,19 +3090,6 @@ function ProfilePanel({
                 <input value={workEnd} onChange={(event) => setWorkEnd(event.target.value)} type="time" />
               </label>
             </div>
-            <div className="v6-check-grid">
-              {services.map((service) => (
-                <button
-                  className="v6-check-service"
-                  type="button"
-                  key={service.id}
-                  aria-pressed={selectedServiceIds.has(service.id)}
-                  onClick={() => toggleService(service.id)}
-                >
-                  {serviceIcon(service.slug)} {serviceDisplayName(service)}
-                </button>
-              ))}
-            </div>
             {proServices.length > 0 && (
               <div className="v6-rate-list">
                 {proServices.map((item) => {
@@ -3086,6 +3113,11 @@ function ProfilePanel({
                 })}
               </div>
             )}
+            {!proServices.length && (
+              <p className="v6-alert">
+                Primero elegi al menos un servicio en el paso 1 para poder cargar tarifas.
+              </p>
+            )}
             <div className="v6-summary">
               <span>
                 <Clock size={17} aria-hidden="true" /> Disponibilidad
@@ -3098,7 +3130,37 @@ function ProfilePanel({
               Guardar zona y tarifas
             </button>
           </section>
-        </>
+      )}
+
+      {professionalStep === 7 && (
+          <section className="v6-card">
+            <h2>Revision MANITO</h2>
+            <div className="v6-summary">
+              <span>
+                <BadgeCheck size={17} aria-hidden="true" /> Resumen de alta
+              </span>
+              <small>
+                {proServices.length} servicios · {completedDocuments}/{requiredDocuments.length} documentos · {portfolio.length} trabajos en portfolio
+              </small>
+            </div>
+            <div className="v6-step-grid">
+              <span className={proServices.length ? 'done' : ''}>Servicios cargados</span>
+              <span className={professionalProfile ? 'done' : ''}>Perfil publico guardado</span>
+              <span className={phone && city ? 'done' : ''}>Datos personales</span>
+              <span className={completedDocuments === requiredDocuments.length ? 'done' : ''}>Documentos completos</span>
+              <span className={portfolio.length ? 'done' : ''}>Portfolio</span>
+              <span className={workZone && workDays.length ? 'done' : ''}>Zona y horarios</span>
+            </div>
+            <button
+              className="v6-primary"
+              type="button"
+              onClick={submitOnboarding}
+              disabled={submittingOnboarding}
+            >
+              {submittingOnboarding ? 'Enviando...' : 'Enviar alta a verificacion'}
+            </button>
+          </section>
+      )}
     </>
   );
 }
