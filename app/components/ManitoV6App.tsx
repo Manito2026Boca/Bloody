@@ -2409,6 +2409,9 @@ function OrderCard({
   const [proposals, setProposals] = useState<V6OrderProposal[]>([]);
   const [extras, setExtras] = useState<V6OrderExtra[]>([]);
   const [photos, setPhotos] = useState<Array<V6OrderPhoto & { signedUrl: string | null }>>([]);
+  const [evidenceStage, setEvidenceStage] = useState<V6OrderPhoto['stage']>('during');
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [uploadingEvidence, setUploadingEvidence] = useState(false);
   const [proposalLabor, setProposalLabor] = useState(String(order.service?.base_price || 18000));
   const [proposalMaterials, setProposalMaterials] = useState('0');
   const [proposalVisit, setProposalVisit] = useState('6500');
@@ -2428,30 +2431,34 @@ function OrderCard({
     setExtras(nextExtras);
   }, [order.id]);
 
+  const refreshPhotos = useCallback(async () => {
+    const nextPhotos = await listV6OrderPhotos(order.id);
+    const photosWithUrls = await Promise.all(
+      nextPhotos.map(async (photo) => ({
+        ...photo,
+        signedUrl: await getV6MediaSignedUrl(photo.file_path),
+      })),
+    );
+    setPhotos(photosWithUrls);
+  }, [order.id]);
+
   useEffect(() => {
     let alive = true;
     Promise.all([
       listV6OrderProposals(order.id),
       listV6OrderExtras(order.id),
-      listV6OrderPhotos(order.id),
     ])
-      .then(async ([nextProposals, nextExtras, nextPhotos]) => {
+      .then(async ([nextProposals, nextExtras]) => {
         if (!alive) return;
         setProposals(nextProposals);
         setExtras(nextExtras);
-        const photosWithUrls = await Promise.all(
-          nextPhotos.map(async (photo) => ({
-            ...photo,
-            signedUrl: await getV6MediaSignedUrl(photo.file_path),
-          })),
-        );
-        if (alive) setPhotos(photosWithUrls);
+        if (alive) await refreshPhotos();
       })
       .catch(() => undefined);
     return () => {
       alive = false;
     };
-  }, [order.id]);
+  }, [order.id, refreshPhotos]);
 
   async function advance() {
     try {
@@ -2569,6 +2576,41 @@ function OrderCard({
     }
   }
 
+  async function uploadOrderEvidence(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!evidenceFile) {
+      setError('Elegí una foto para subir al seguimiento.');
+      return;
+    }
+    setUploadingEvidence(true);
+    try {
+      const filePath = await uploadV6MediaFile({
+        ownerId: profile.id,
+        area: 'orders',
+        file: evidenceFile,
+      });
+      await addV6OrderPhoto({
+        orderId: order.id,
+        uploadedBy: profile.id,
+        stage: evidenceStage,
+        filePath,
+        caption: evidenceFile.name,
+      });
+      await refreshPhotos();
+      setEvidenceFile(null);
+      event.currentTarget.reset();
+      setNotice('Evidencia agregada al seguimiento.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo subir la evidencia.');
+    } finally {
+      setUploadingEvidence(false);
+    }
+  }
+
+  const canUploadEvidence =
+    order.professional_id === profile.id &&
+    ['accepted', 'en_camino', 'en_sitio'].includes(order.status);
+
   return (
     <article className="v6-order">
       <div className="v6-order-top">
@@ -2629,6 +2671,37 @@ function OrderCard({
             )
           ))}
         </div>
+      )}
+      {canUploadEvidence && (
+        <form className="v6-inline-form v6-evidence-form" onSubmit={uploadOrderEvidence}>
+          <div className="v6-section-head compact">
+            <h2>Seguimiento visual</h2>
+            <span>{photos.length} fotos</span>
+          </div>
+          <div className="v6-split">
+            <label className="v6-field">
+              <span>Etapa</span>
+              <select
+                value={evidenceStage}
+                onChange={(event) => setEvidenceStage(event.target.value as V6OrderPhoto['stage'])}
+              >
+                <option value="during">Durante</option>
+                <option value="after">Después</option>
+              </select>
+            </label>
+            <label className="v6-field">
+              <span>Foto</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)}
+              />
+            </label>
+          </div>
+          <button className="v6-secondary" type="submit" disabled={uploadingEvidence}>
+            {uploadingEvidence ? 'Subiendo...' : 'Agregar evidencia'}
+          </button>
+        </form>
       )}
       {order.mode === 'quote' && proposals.length > 0 && (
         <div className="v6-quote-list">

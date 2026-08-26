@@ -1649,6 +1649,7 @@ a.v6-evidence-link {
 }
 
 .v6-photo-strip img,
+.v6-photo-strip [data-nimg],
 .v6-photo-strip span {
   width: 74px;
   height: 74px;
@@ -1657,7 +1658,8 @@ a.v6-evidence-link {
   background: var(--paper);
 }
 
-.v6-photo-strip img {
+.v6-photo-strip img,
+.v6-photo-strip [data-nimg] {
   object-fit: cover;
 }
 
@@ -1684,6 +1686,10 @@ a.v6-evidence-link {
   border-radius: 8px;
   background: rgb(245 239 228 / 46%);
   padding: 10px;
+}
+
+.v6-evidence-form {
+  background: var(--mist);
 }
 
 .v6-inline-form input,
