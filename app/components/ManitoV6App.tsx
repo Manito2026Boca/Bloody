@@ -3856,7 +3856,9 @@ function AccountPanel({
           <h2>Pagos</h2>
           <span>{paymentProfiles.length}</span>
         </div>
-        <p className="v6-muted">Guardamos un método por tipo para evitar duplicados.</p>
+        <p className="v6-muted">
+          Guardamos un método preferido. Cuenta DNI/billetera queda como coordinación por QR o link hasta integrar una pasarela real.
+        </p>
         <div className="v6-choice-grid three">
           {paymentOptions.map((option) => (
             <button
