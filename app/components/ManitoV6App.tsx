@@ -141,6 +141,12 @@ type FeaturedProfessional = {
   pro: boolean;
   priceDelta: number;
 };
+type ServiceGroupId = 'all' | 'home' | 'automotive';
+type ServiceGroup = {
+  id: ServiceGroupId;
+  label: string;
+  slugs: string[];
+};
 
 const statusFlow: V6OrderStatus[] = [
   'accepted',
@@ -214,6 +220,30 @@ const requiredDocuments = [
   { kind: 'tax', label: 'Constancia fiscal' },
   { kind: 'insurance', label: 'Seguro o matricula' },
 ];
+const serviceGroups: ServiceGroup[] = [
+  { id: 'all', label: 'Todos', slugs: [] },
+  {
+    id: 'home',
+    label: 'Hogar',
+    slugs: [
+      'plomeria',
+      'electricidad',
+      'gas',
+      'cerrajeria',
+      'limpieza',
+      'pintura',
+      'jardineria',
+      'aire',
+      'electrodomesticos',
+      'carpinteria',
+    ],
+  },
+  {
+    id: 'automotive',
+    label: 'Automotor',
+    slugs: ['mecanica_automotor', 'gomeria', 'chapa_pintura_auto'],
+  },
+];
 const serviceKeywords: Record<string, string[]> = {
   plomeria: ['plomero', 'plomeria', 'agua', 'canilla', 'bano', 'inodoro', 'perdida', 'gotera', 'cano', 'destapar'],
   electricidad: ['electricista', 'electricidad', 'luz', 'enchufe', 'corto', 'termica', 'disyuntor', 'cable', 'tablero'],
@@ -226,8 +256,8 @@ const serviceKeywords: Record<string, string[]> = {
   electrodomesticos: ['heladera', 'lavarropas', 'horno', 'microondas', 'electrodomestico', 'lavavajillas'],
   carpinteria: ['carpintero', 'mueble', 'madera', 'puerta', 'bisagra', 'estante', 'placard'],
   mecanica_automotor: ['mecanico', 'mecanica', 'auto', 'automotor', 'motor', 'freno', 'embrague', 'bateria', 'arranque', 'service'],
-  gomeria: ['gomeria', 'goma', 'cubierta', 'neumatico', 'pinchadura', 'balanceo', 'alineacion', 'rueda'],
-  chapa_pintura_auto: ['chapista', 'chapa', 'pintura auto', 'choque', 'abolladura', 'paragolpe', 'rayon', 'carroceria'],
+  gomeria: ['gomeria', 'goma', 'cubierta', 'neumatico', 'pinchadura', 'balanceo', 'alineacion', 'rueda', 'auto', 'automotor'],
+  chapa_pintura_auto: ['chapista', 'chapa', 'pintura auto', 'choque', 'abolladura', 'paragolpe', 'rayon', 'carroceria', 'auto', 'automotor'],
 };
 
 function money(value: number | null | undefined) {
@@ -318,6 +348,24 @@ function serviceScore(service: V6Service, query: string) {
     }
     return score;
   }, 0);
+}
+
+function filterServicesByGroup(services: V6Service[], groupId: ServiceGroupId) {
+  const group = serviceGroups.find((item) => item.id === groupId);
+  if (!group || group.id === 'all') return services;
+  return services.filter((service) => group.slugs.includes(service.slug));
+}
+
+function serviceGroupFromQuery(query: string): ServiceGroupId {
+  const normalizedQuery = normalizeText(query);
+  if (
+    ['auto', 'automotor', 'mecanico', 'mecanica', 'chapista', 'gomeria', 'cubierta', 'neumatico'].some((keyword) =>
+      normalizedQuery.includes(keyword),
+    )
+  ) {
+    return 'automotive';
+  }
+  return 'all';
 }
 
 function formatAddress(line?: string | null, city?: string | null) {
@@ -1128,6 +1176,7 @@ function ClientHome({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('card');
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
+  const [serviceGroup, setServiceGroup] = useState<ServiceGroupId>('all');
   const requestFormRef = useRef<HTMLElement | null>(null);
   const selectedProfessional = featuredProfessionals.find(
     (professional) => professional.id === selectedProfessionalId,
@@ -1156,13 +1205,16 @@ function ClientHome({
   const scoreMatches = scoredServices
     .filter((item) => item.score > 0)
     .map((item) => item.service);
-  const filteredServices = !query.trim()
+  const queryGroup = serviceGroupFromQuery(problemQuery);
+  const activeServiceGroup = query.trim() && queryGroup !== 'all' ? queryGroup : serviceGroup;
+  const queryFilteredServices = !query.trim()
     ? services
     : scoreMatches.length
       ? scoreMatches
       : services.filter((service) =>
           normalizeText(`${service.name} ${service.slug}`).includes(query),
         );
+  const filteredServices = filterServicesByGroup(queryFilteredServices, activeServiceGroup);
   const recommendedProfessional = professionalForService(recommendedService);
   const photoNames = photoFiles.map((file) => file.name);
 
@@ -1552,6 +1604,21 @@ function ClientHome({
           <h2>Servicios</h2>
           <span>{filteredServices.length} disponibles</span>
         </div>
+        <div className="v6-chip-row nowrap">
+          {serviceGroups.map((group) => (
+            <button
+              type="button"
+              key={group.id}
+              aria-pressed={activeServiceGroup === group.id}
+              onClick={() => {
+                setServiceGroup(group.id);
+                setProblemQuery('');
+              }}
+            >
+              {group.label}
+            </button>
+          ))}
+        </div>
         <div className="v6-services">
           {filteredServices.map((service) => (
             <button
@@ -1832,6 +1899,7 @@ function SearchPanel({
   setProblemQuery: (query: string) => void;
   onPickService: (service: V6Service) => void;
 }) {
+  const [serviceGroup, setServiceGroup] = useState<ServiceGroupId>('all');
   const scoredServices = useMemo(
     () =>
       services
@@ -1839,10 +1907,15 @@ function SearchPanel({
         .sort((left, right) => right.score - left.score),
     [problemQuery, services],
   );
-  const filteredServices = problemQuery.trim()
+  const queryGroup = serviceGroupFromQuery(problemQuery);
+  const activeServiceGroup = problemQuery.trim() && queryGroup !== 'all' ? queryGroup : serviceGroup;
+  const filteredServicesByQuery = problemQuery.trim()
     ? scoredServices.filter((item) => item.score > 0).map((item) => item.service)
     : services;
-  const visibleServices = filteredServices.length ? filteredServices : services;
+  const filteredServices = filterServicesByGroup(filteredServicesByQuery, activeServiceGroup);
+  const visibleServices = filteredServices.length
+    ? filteredServices
+    : filterServicesByGroup(services, activeServiceGroup);
 
   return (
     <>
@@ -1873,10 +1946,22 @@ function SearchPanel({
           <span>{visibleServices.length} resultados</span>
         </div>
         <div className="v6-chip-row nowrap">
-          <button type="button" aria-pressed={!problemQuery.trim()} onClick={() => setProblemQuery('')}>
-            Todos
-          </button>
-          {services.slice(0, 7).map((service) => (
+          {serviceGroups.map((group) => (
+            <button
+              type="button"
+              key={group.id}
+              aria-pressed={activeServiceGroup === group.id}
+              onClick={() => {
+                setServiceGroup(group.id);
+                setProblemQuery('');
+              }}
+            >
+              {group.label}
+            </button>
+          ))}
+        </div>
+        <div className="v6-chip-row nowrap">
+          {visibleServices.slice(0, 7).map((service) => (
             <button type="button" key={service.id} onClick={() => setProblemQuery(serviceDisplayName(service))}>
               {serviceDisplayName(service)}
             </button>
