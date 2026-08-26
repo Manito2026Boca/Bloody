@@ -424,7 +424,15 @@ function splitStoredAddress(value: string, fallbackCity?: string | null) {
 }
 
 function headerLocation(profile: V6Profile) {
-  return profile.city || 'Agregar ubicación';
+  const location = (profile.city || '').trim();
+  if (!location) return 'Agregar ciudad';
+  if (location.includes(',')) {
+    return location.split(',').map((part) => part.trim()).filter(Boolean).at(-1) || 'Agregar ciudad';
+  }
+  const looksLikeStreetAddress =
+    /\d/.test(location) &&
+    /\b(av\.?|avenida|calle|boulevard|bulevar|pasaje|ruta|diag\.?|diagonal)\b/i.test(location);
+  return looksLikeStreetAddress ? 'Configurar ciudad' : location;
 }
 
 function distanceKm(
