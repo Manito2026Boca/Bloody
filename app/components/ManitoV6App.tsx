@@ -104,6 +104,7 @@ type Tab = 'home' | 'search' | 'orders' | 'favorites' | 'profile' | 'account';
 type AuthMode = 'login' | 'signup';
 type AssignmentMode = 'auto' | 'manual';
 type PaymentMethod = 'card' | 'wallet' | 'cash';
+type AppMode = 'client' | 'professional';
 type NavigatorWithStandalone = Navigator & { standalone?: boolean };
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -189,24 +190,6 @@ const featuredProfessionals: FeaturedProfessional[] = [
     pro: false,
     priceDelta: -1000,
   },
-];
-const onboardingSteps = [
-  'Datos personales',
-  'DNI frente',
-  'DNI dorso',
-  'Selfie',
-  'Teléfono',
-  'Dirección',
-  'CUIT/CUIL',
-  'CBU o CVU',
-  'Categoría principal',
-  'Especialidades',
-  'Tarifas',
-  'Portfolio',
-  'Seguro',
-  'Antecedentes',
-  'Términos',
-  'Revisión MANITO',
 ];
 const requiredDocuments = [
   { kind: 'dni_front', label: 'DNI frente' },
@@ -419,6 +402,7 @@ export default function ManitoV6App() {
   const [proServices, setProServices] = useState<V6ProfessionalService[]>([]);
   const [orders, setOrders] = useState<V6Order[]>([]);
   const [tab, setTab] = useState<Tab>('home');
+  const [appMode, setAppMode] = useState<AppMode>('client');
   const [loading, setLoading] = useState(() => isV6SupabaseConfigured());
   const [profileLoading, setProfileLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -441,11 +425,7 @@ export default function ManitoV6App() {
       setProfile(nextProfile);
       setServices(nextServices);
       setOrders(nextOrders);
-      if (nextProfile.role === 'professional') {
-        setProServices(await listV6ProfessionalServices(userId));
-      } else {
-        setProServices([]);
-      }
+      setProServices(await listV6ProfessionalServices(userId));
     } finally {
       setProfileLoading(false);
     }
@@ -629,8 +609,9 @@ export default function ManitoV6App() {
     );
   }
 
+  const viewProfile = { ...profile, role: appMode } as V6Profile;
   const activeOrders =
-    profile.role === 'professional' ? professionalOrders : clientOrders;
+    appMode === 'professional' ? professionalOrders : clientOrders;
   const currentLocation = headerLocation(profile);
 
   return (
@@ -644,6 +625,28 @@ export default function ManitoV6App() {
           <p className="v6-location">
             <MapPin size={13} aria-hidden="true" /> {currentLocation}
           </p>
+          <div className="v6-mode-switch" aria-label="Modo de uso">
+            <button
+              type="button"
+              aria-pressed={appMode === 'client'}
+              onClick={() => {
+                setAppMode('client');
+                setTab('home');
+              }}
+            >
+              Cliente
+            </button>
+            <button
+              type="button"
+              aria-pressed={appMode === 'professional'}
+              onClick={() => {
+                setAppMode('professional');
+                setTab('home');
+              }}
+            >
+              Profesional
+            </button>
+          </div>
         </div>
         <button className="v6-icon-button" type="button" aria-label="Notificaciones">
           <Bell size={19} aria-hidden="true" />
@@ -663,9 +666,9 @@ export default function ManitoV6App() {
         )}
 
         {tab === 'home' &&
-          (profile.role === 'professional' ? (
+          (appMode === 'professional' ? (
             <ProfessionalHome
-              profile={profile}
+              profile={viewProfile}
               services={services}
               proServices={proServices}
               matchingOrders={matchingOrders}
@@ -679,7 +682,7 @@ export default function ManitoV6App() {
             />
           ) : (
             <ClientHome
-              profile={profile}
+              profile={viewProfile}
               services={services}
               clientOrders={clientOrders}
               selectedService={clientSelectedService}
@@ -710,7 +713,7 @@ export default function ManitoV6App() {
 
         {tab === 'orders' && (
           <OrdersList
-            profile={profile}
+            profile={viewProfile}
             orders={activeOrders}
             setOrders={setOrders}
             setChatOrder={setChatOrder}
@@ -769,7 +772,7 @@ export default function ManitoV6App() {
           onClick={() => setTab('orders')}
           icon={<BriefcaseBusiness size={18} />}
         >
-          {profile.role === 'professional' ? 'Trabajos' : 'Pedidos'}
+          {appMode === 'professional' ? 'Trabajos' : 'Pedidos'}
         </NavButton>
         <NavButton
           active={tab === 'favorites'}
@@ -893,7 +896,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         </p>
         <h1>{mode === 'login' ? 'Entra a MANITO.' : 'Crea tu cuenta.'}</h1>
         <p className="v6-muted">
-          Para probar el circuito, usá una cuenta cliente y otra profesional.
+          Probá el circuito como cliente y profesional desde la misma cuenta.
         </p>
         <div className="v6-tabs">
           <button type="button" aria-pressed={mode === 'login'} onClick={() => setMode('login')}>
@@ -2363,15 +2366,23 @@ function ProfilePanel({
   const [fullName, setFullName] = useState(profile.full_name);
   const [phone, setPhone] = useState(profile.phone || '');
   const [city, setCity] = useState(profile.city || '');
-  const [role, setRole] = useState<V6Role>(profile.role);
+  const [documentNumber, setDocumentNumber] = useState('');
+  const [birthDate, setBirthDate] = useState('');
   const [professionalProfile, setProfessionalProfile] = useState<V6ProfessionalProfile | null>(null);
   const [onboarding, setOnboarding] = useState<V6ProfessionalOnboarding | null>(null);
   const [documents, setDocuments] = useState<V6ProfessionalDocument[]>([]);
   const [portfolio, setPortfolio] = useState<V6PortfolioItem[]>([]);
+  const [professionalStep, setProfessionalStep] = useState(1);
   const [headline, setHeadline] = useState('Tecnico verificado para urgencias del hogar');
   const [bio, setBio] = useState('Trabajo con turnos puntuales, presupuesto claro y garantía MANITO.');
   const [yearsExperience, setYearsExperience] = useState('3');
   const [insuranceLabel, setInsuranceLabel] = useState('Responsabilidad civil vigente');
+  const [workZone, setWorkZone] = useState(profile.city || 'Mar del Plata');
+  const [workRadius, setWorkRadius] = useState('8');
+  const [workDays, setWorkDays] = useState<string[]>(['Lun', 'Mar', 'Mié', 'Jue', 'Vie']);
+  const [workStart, setWorkStart] = useState('08:00');
+  const [workEnd, setWorkEnd] = useState('18:00');
+  const [serviceRates, setServiceRates] = useState<Record<number, string>>({});
   const [portfolioTitle, setPortfolioTitle] = useState('Trabajo terminado');
   const [portfolioDescription, setPortfolioDescription] = useState('Antes y despues documentado para el cliente.');
   const [portfolioLink, setPortfolioLink] = useState('');
@@ -2383,7 +2394,6 @@ function ProfilePanel({
   const [submittingOnboarding, setSubmittingOnboarding] = useState(false);
 
   useEffect(() => {
-    if (role !== 'professional') return;
     let alive = true;
     Promise.all([
       getV6ProfessionalProfile(profile.id),
@@ -2408,7 +2418,7 @@ function ProfilePanel({
     return () => {
       alive = false;
     };
-  }, [profile.id, role]);
+  }, [profile.id]);
 
   const uploadedDocumentKinds = useMemo(
     () =>
@@ -2459,11 +2469,8 @@ function ProfilePanel({
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
-      const changedRole =
-        role !== profile.role
-          ? await completeV6Profile({ fullName, role, phone, city })
-          : await updateV6Profile(profile.id, { full_name: fullName, phone, city });
-      setProfile(changedRole);
+      const changedProfile = await updateV6Profile(profile.id, { full_name: fullName, phone, city });
+      setProfile(changedProfile);
       setNotice('Perfil actualizado.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo guardar perfil.');
@@ -2480,6 +2487,41 @@ function ProfilePanel({
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se guardaron servicios.');
     }
+  }
+
+  const professionalSteps = [
+    'Servicios',
+    'Perfil publico',
+    'Datos personales',
+    'Documentos',
+    'Zona y tarifas',
+    'Revision',
+  ];
+
+  async function saveOnboardingProgress(nextStep: number) {
+    try {
+      const mappedStep = Math.max(1, Math.min(16, Math.ceil((nextStep / professionalSteps.length) * 16)));
+      setOnboarding(await upsertV6ProfessionalOnboarding({
+        professionalId: profile.id,
+        status: onboarding?.status || 'draft',
+        currentStep: Math.max(onboarding?.current_step || 1, mappedStep),
+        notes: 'Alta profesional en progreso.',
+      }));
+    } catch {
+      undefined;
+    }
+  }
+
+  function goToProfessionalStep(nextStep: number) {
+    const boundedStep = Math.max(1, Math.min(professionalSteps.length, nextStep));
+    setProfessionalStep(boundedStep);
+    void saveOnboardingProgress(boundedStep);
+  }
+
+  function toggleWorkDay(day: string) {
+    setWorkDays((current) =>
+      current.includes(day) ? current.filter((item) => item !== day) : [...current, day],
+    );
   }
 
   async function saveProfessionalSurface(event: FormEvent<HTMLFormElement>) {
@@ -2605,10 +2647,16 @@ function ProfilePanel({
     }
   }
 
+  const selectedServiceIds = new Set(proServices.map((item) => item.service_id));
+  const professionalProgress = Math.round((professionalStep / professionalSteps.length) * 100);
+  const completedDocuments = requiredDocuments.filter((item) =>
+    uploadedDocumentKinds.has(item.kind),
+  ).length;
+
   return (
     <>
       <section className="v6-card">
-        <h2>Perfil</h2>
+        <h2>Perfil de cliente</h2>
         <form className="v6-stack" onSubmit={saveProfile}>
           <label className="v6-field">
             <span>Nombre</span>
@@ -2622,44 +2670,89 @@ function ProfilePanel({
             <span>Ciudad</span>
             <input value={city} onChange={(event) => setCity(event.target.value)} />
           </label>
-          <label className="v6-field">
-            <span>Tipo de cuenta</span>
-            <select value={role} onChange={(event) => setRole(event.target.value as V6Role)}>
-              <option value="client">Cliente</option>
-              <option value="professional">Profesional</option>
-            </select>
-          </label>
+          <div className="v6-split">
+            <label className="v6-field">
+              <span>DNI</span>
+              <input
+                value={documentNumber}
+                onChange={(event) => setDocumentNumber(event.target.value)}
+                inputMode="numeric"
+                placeholder="Para el alta profesional"
+              />
+            </label>
+            <label className="v6-field">
+              <span>Fecha de nacimiento</span>
+              <input
+                value={birthDate}
+                onChange={(event) => setBirthDate(event.target.value)}
+                type="date"
+              />
+            </label>
+          </div>
           <button className="v6-primary" type="submit">
             <Save size={16} aria-hidden="true" /> Guardar perfil
           </button>
         </form>
       </section>
 
-      {role === 'professional' && (
-        <>
+      <>
           <section className="v6-card">
             <div className="v6-section-head">
               <h2>Alta profesional</h2>
-              <span>{onboarding?.status || 'borrador'} · paso {onboarding?.current_step || 1}/16</span>
+              <span>{onboarding?.status || 'borrador'} · {professionalProgress}%</span>
             </div>
             <div className="v6-progress">
-              <span style={{ width: `${((onboarding?.current_step || 1) / onboardingSteps.length) * 100}%` }} />
+              <span style={{ width: `${professionalProgress}%` }} />
             </div>
-            <div className="v6-step-grid">
-              {onboardingSteps.map((step, index) => (
-                <span className={index < (onboarding?.current_step || 1) ? 'done' : ''} key={step}>
+            <div className="v6-step-grid v6-wizard-tabs">
+              {professionalSteps.map((step, index) => (
+                <button
+                  className={index + 1 <= professionalStep ? 'done' : ''}
+                  type="button"
+                  key={step}
+                  aria-pressed={professionalStep === index + 1}
+                  onClick={() => goToProfessionalStep(index + 1)}
+                >
                   {index + 1}. {step}
-                </span>
+                </button>
               ))}
             </div>
-            <button
-              className="v6-primary"
-              type="button"
-              onClick={submitOnboarding}
-              disabled={submittingOnboarding}
-            >
-              {submittingOnboarding ? 'Enviando...' : 'Enviar alta a revisión'}
-            </button>
+            <div className="v6-summary">
+              <span>
+                <BadgeCheck size={17} aria-hidden="true" /> Checklist de alta
+              </span>
+              <small>
+                {proServices.length} servicios · {completedDocuments}/{requiredDocuments.length} documentos · paso interno {onboarding?.current_step || 1}/16
+              </small>
+            </div>
+            <div className="v6-wizard-actions">
+              <button
+                className="v6-secondary"
+                type="button"
+                onClick={() => goToProfessionalStep(professionalStep - 1)}
+                disabled={professionalStep === 1}
+              >
+                Atras
+              </button>
+              {professionalStep < professionalSteps.length ? (
+                <button
+                  className="v6-primary"
+                  type="button"
+                  onClick={() => goToProfessionalStep(professionalStep + 1)}
+                >
+                  Continuar
+                </button>
+              ) : (
+                <button
+                  className="v6-primary"
+                  type="button"
+                  onClick={submitOnboarding}
+                  disabled={submittingOnboarding}
+                >
+                  {submittingOnboarding ? 'Enviando...' : 'Enviar a verificacion'}
+                </button>
+              )}
+            </div>
           </section>
 
           <section className="v6-card">
@@ -2802,22 +2895,80 @@ function ProfilePanel({
 
           <section className="v6-card">
             <h2>Mis servicios</h2>
+            <div className="v6-split">
+              <label className="v6-field">
+                <span>Ciudad o zona de trabajo</span>
+                <input value={workZone} onChange={(event) => setWorkZone(event.target.value)} />
+              </label>
+              <label className="v6-field">
+                <span>Radio aproximado en km</span>
+                <input
+                  value={workRadius}
+                  onChange={(event) => setWorkRadius(event.target.value)}
+                  inputMode="numeric"
+                />
+              </label>
+            </div>
+            <div className="v6-work-days" aria-label="Dias de trabajo">
+              {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((day) => (
+                <button
+                  type="button"
+                  key={day}
+                  aria-pressed={workDays.includes(day)}
+                  onClick={() => toggleWorkDay(day)}
+                >
+                  {day}
+                </button>
+              ))}
+            </div>
+            <div className="v6-split">
+              <label className="v6-field">
+                <span>Desde</span>
+                <input value={workStart} onChange={(event) => setWorkStart(event.target.value)} type="time" />
+              </label>
+              <label className="v6-field">
+                <span>Hasta</span>
+                <input value={workEnd} onChange={(event) => setWorkEnd(event.target.value)} type="time" />
+              </label>
+            </div>
             <div className="v6-check-grid">
               {services.map((service) => (
                 <button
                   className="v6-check-service"
                   type="button"
                   key={service.id}
-                  aria-pressed={proServices.some((item) => item.service_id === service.id)}
+                  aria-pressed={selectedServiceIds.has(service.id)}
                   onClick={() => toggleService(service.id)}
                 >
                   {serviceIcon(service.slug)} {serviceDisplayName(service)}
                 </button>
               ))}
             </div>
+            {proServices.length > 0 && (
+              <div className="v6-rate-list">
+                {proServices.map((item) => {
+                  const service = services.find((candidate) => candidate.id === item.service_id);
+                  if (!service) return null;
+                  return (
+                    <label className="v6-field" key={item.service_id}>
+                      <span>Tarifa desde: {serviceDisplayName(service)}</span>
+                      <input
+                        value={serviceRates[item.service_id] ?? String(item.price_from || service.base_price || '')}
+                        onChange={(event) =>
+                          setServiceRates((current) => ({
+                            ...current,
+                            [item.service_id]: event.target.value,
+                          }))
+                        }
+                        inputMode="numeric"
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </section>
         </>
-      )}
     </>
   );
 }
@@ -2903,7 +3054,7 @@ function AccountPanel({
     <>
       <section className="v6-account">
         <h1>{profile.full_name || 'Usuario MANITO'}</h1>
-        <p>{profile.email} · {profile.role === 'professional' ? 'Cuenta profesional' : 'Cuenta cliente'}</p>
+        <p>{profile.email} · cuenta MANITO</p>
       </section>
       <section className="v6-card v6-account-cta">
         <h2>Tu cuenta de cliente</h2>
