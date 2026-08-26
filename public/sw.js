@@ -1,4 +1,4 @@
-const CACHE_NAME = 'manito-shell-v2';
+const CACHE_NAME = 'manito-shell-v3';
 const CORE_ASSETS = [
   '/',
   '/manifest.webmanifest',

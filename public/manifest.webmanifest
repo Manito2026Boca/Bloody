@@ -1,9 +1,9 @@
 {
   "id": "/",
-  "name": "MANITO V6 Real",
+  "name": "MANITO",
   "short_name": "MANITO",
-  "description": "Contratacion y seguimiento de servicios del hogar en Argentina.",
-  "start_url": "/",
+  "description": "Contratación y seguimiento de servicios del hogar en Argentina.",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
