@@ -181,6 +181,14 @@ export async function addV6PaymentProfile(input: {
   last4?: string | null;
   isDefault?: boolean;
 }) {
+  const supabase = getV6Supabase();
+  if (input.isDefault) {
+    const { error: resetError } = await supabase
+      .from('payment_methods')
+      .update({ is_default: false })
+      .eq('profile_id', input.profileId);
+    fail(resetError);
+  }
   const { data, error } = await getV6Supabase()
     .from('payment_methods')
     .upsert({
@@ -188,7 +196,7 @@ export async function addV6PaymentProfile(input: {
       type: input.type,
       label: input.label,
       last4: input.last4 || null,
-      is_default: Boolean(input.isDefault),
+      is_default: input.isDefault ?? false,
     }, { onConflict: 'profile_id,type' })
     .select('*')
     .single();

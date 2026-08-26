@@ -3774,9 +3774,10 @@ function AccountPanel({
         type,
         label: type === 'cash' ? 'Efectivo' : type === 'wallet' ? 'Cuenta DNI / billetera' : 'Tarjeta personal',
         last4: type === 'card' ? '1234' : null,
+        isDefault: true,
       });
       setPaymentProfiles(await listV6PaymentProfiles(profile.id));
-      setNotice(alreadySaved ? 'Medio de pago actualizado.' : 'Medio de pago guardado.');
+      setNotice(alreadySaved ? 'Medio de pago preferido actualizado.' : 'Medio de pago preferido guardado.');
     } catch {
       setNotice('Aplicá la migración V7 para guardar medios de pago.');
     } finally {
@@ -3864,8 +3865,9 @@ function AccountPanel({
         </div>
         <div className="v6-file-list">
           {paymentProfiles.map((payment) => (
-            <span key={payment.id}>
+            <span className={payment.is_default ? 'active' : ''} key={payment.id}>
               {paymentProfileIcon(payment)} {paymentProfileDisplay(payment)}
+              {payment.is_default && <b>Preferido</b>}
             </span>
           ))}
         </div>
