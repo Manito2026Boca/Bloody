@@ -109,6 +109,12 @@ type AuthMode = 'login' | 'signup';
 type AssignmentMode = 'auto' | 'manual';
 type PaymentMethod = 'card' | 'wallet' | 'cash';
 type AppMode = 'client' | 'professional';
+type ProfessionalOrderMatch = {
+  order: V6Order;
+  score: number;
+  reasons: string[];
+  distanceKm: number | null;
+};
 type NavigatorWithStandalone = Navigator & { standalone?: boolean };
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -333,6 +339,117 @@ function splitStoredAddress(value: string, fallbackCity?: string | null) {
 
 function headerLocation(profile: V6Profile) {
   return profile.city || 'Agregar ubicación';
+}
+
+function distanceKm(
+  fromLat: number | null | undefined,
+  fromLng: number | null | undefined,
+  toLat: number | null | undefined,
+  toLng: number | null | undefined,
+) {
+  if (
+    fromLat == null ||
+    fromLng == null ||
+    toLat == null ||
+    toLng == null
+  ) {
+    return null;
+  }
+  const radius = 6371;
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRad(toLat - fromLat);
+  const dLng = toRad(toLng - fromLng);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(fromLat)) *
+      Math.cos(toRad(toLat)) *
+      Math.sin(dLng / 2) ** 2;
+  return radius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function normalizeDayLabel(value: string) {
+  return normalizeText(value).slice(0, 3);
+}
+
+function scheduledDayLabel(value: string) {
+  return ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'][new Date(value).getDay()];
+}
+
+function timeInRange(value: string, start?: string | null, end?: string | null) {
+  if (!start || !end) return true;
+  const minutes = (time: string) => {
+    const [hours = '0', mins = '0'] = time.split(':');
+    return Number(hours) * 60 + Number(mins);
+  };
+  const target = minutes(value);
+  const startMinutes = minutes(start);
+  const endMinutes = minutes(end);
+  if (startMinutes <= endMinutes) {
+    return target >= startMinutes && target <= endMinutes;
+  }
+  return target >= startMinutes || target <= endMinutes;
+}
+
+function evaluateProfessionalOrderMatch(
+  order: V6Order,
+  profile: V6Profile,
+  professionalProfile: V6ProfessionalProfile | null,
+  proServices: V6ProfessionalService[],
+): ProfessionalOrderMatch | null {
+  if (!profile.is_available || order.status !== 'open') return null;
+  const service = proServices.find((item) => item.service_id === order.service_id);
+  if (!service) return null;
+
+  const reasons = ['Rubro activo'];
+  let score = 70;
+  const distance = distanceKm(profile.lat, profile.lng, order.client_lat, order.client_lng);
+  const radius = professionalProfile?.service_radius_km || 8;
+  const city = professionalProfile?.work_city || profile.city;
+
+  if (distance != null) {
+    if (distance > radius) return null;
+    score += Math.max(0, 18 - Math.round(distance));
+    reasons.push(`${distance < 1 ? 'Menos de 1' : distance.toFixed(1)} km`);
+  } else if (city) {
+    const orderAddress = normalizeText(order.address || '');
+    const normalizedCity = normalizeText(city);
+    if (orderAddress && !orderAddress.includes(normalizedCity)) return null;
+    reasons.push(`Zona ${city}`);
+    score += 8;
+  } else {
+    reasons.push('Zona a confirmar');
+  }
+
+  if (order.scheduled_at) {
+    const scheduled = new Date(order.scheduled_at);
+    const activeDays = professionalProfile?.work_days?.length
+      ? professionalProfile.work_days
+      : ['Lun', 'Mar', 'Mie', 'Jue', 'Vie'];
+    const scheduledDay = normalizeDayLabel(scheduledDayLabel(order.scheduled_at));
+    const worksThatDay = activeDays.map(normalizeDayLabel).includes(scheduledDay);
+    const scheduledTime = scheduled.toTimeString().slice(0, 5);
+    if (!worksThatDay) return null;
+    if (!timeInRange(scheduledTime, professionalProfile?.work_starts_at, professionalProfile?.work_ends_at)) {
+      return null;
+    }
+    reasons.push(`Horario ${scheduledTime}`);
+    score += 7;
+  } else {
+    reasons.push('Pedido para coordinar');
+    score += 5;
+  }
+
+  if (service.price_from) {
+    reasons.push(`Tu tarifa desde ${money(service.price_from)}`);
+    score += 4;
+  }
+
+  return {
+    order,
+    reasons,
+    distanceKm: distance,
+    score: Math.min(98, score),
+  };
 }
 
 function professionalForService(service: V6Service | null) {
@@ -1892,6 +2009,31 @@ function ProfessionalHome({
   setError: (message: string) => void;
   setNotice: (message: string) => void;
 }) {
+  const [professionalProfile, setProfessionalProfile] = useState<V6ProfessionalProfile | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    getV6ProfessionalProfile(profile.id)
+      .then((nextProfile) => {
+        if (active) setProfessionalProfile(nextProfile);
+      })
+      .catch(() => {
+        if (active) setProfessionalProfile(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [profile.id]);
+
+  const compatibleMatches = useMemo(
+    () =>
+      matchingOrders
+        .map((order) => evaluateProfessionalOrderMatch(order, profile, professionalProfile, proServices))
+        .filter((match): match is ProfessionalOrderMatch => Boolean(match))
+        .sort((a, b) => b.score - a.score),
+    [matchingOrders, proServices, professionalProfile, profile],
+  );
+
   async function toggleAvailable() {
     try {
       setProfile(await setV6Availability(profile.id, !profile.is_available));
@@ -1970,7 +2112,7 @@ function ProfessionalHome({
             <span>Neto estimado</span>
           </article>
           <article>
-            <strong>{matchingOrders.length}</strong>
+            <strong>{compatibleMatches.length}</strong>
             <span>Pedidos cercanos</span>
           </article>
         </div>
@@ -1999,42 +2141,45 @@ function ProfessionalHome({
       <section className="v6-section">
         <div className="v6-section-head">
           <h2>Pedidos disponibles</h2>
-          <span>{matchingOrders.length} compatibles</span>
+          <span>{compatibleMatches.length} compatibles</span>
         </div>
         {profile.is_available &&
-          matchingOrders.map((order) =>
-            order.mode === 'quote' ? (
-              <OrderCard
-                key={order.id}
-                order={order}
-                profile={profile}
-                setOrders={() => undefined}
-                setChatOrder={setChatOrder}
-                setError={setError}
-                setNotice={setNotice}
-              />
+          compatibleMatches.map((match) =>
+            match.order.mode === 'quote' ? (
+              <div className="v6-match-card" key={match.order.id}>
+                <MatchSummary match={match} />
+                <OrderCard
+                  order={match.order}
+                  profile={profile}
+                  setOrders={() => undefined}
+                  setChatOrder={setChatOrder}
+                  setError={setError}
+                  setNotice={setNotice}
+                />
+              </div>
             ) : (
-              <article className="v6-order" key={order.id}>
+              <article className="v6-order" key={match.order.id}>
                 <div className="v6-order-top">
-                  <span className="v6-order-icon">{serviceIcon(order.service?.slug || '')}</span>
+                  <span className="v6-order-icon">{serviceIcon(match.order.service?.slug || '')}</span>
                   <div>
-                    <strong>{serviceDisplayName(order.service)}</strong>
-                    <p>{order.description}</p>
-                    <small>Match {proServices.some((item) => item.service_id === order.service_id) ? '96%' : '72%'} · {V6_MODE_LABEL[order.mode]}</small>
+                    <strong>{serviceDisplayName(match.order.service)}</strong>
+                    <p>{match.order.description}</p>
+                    <small>Match {match.score}% · {V6_MODE_LABEL[match.order.mode]}</small>
                     <small>
-                      <MapPin size={13} aria-hidden="true" /> {order.address}
+                      <MapPin size={13} aria-hidden="true" /> {match.order.address}
                     </small>
                   </div>
-                  <b>{money(order.service?.base_price)}</b>
+                  <b>{money(match.order.service?.base_price)}</b>
                 </div>
-                <button className="v6-primary" type="button" onClick={() => accept(order.id)}>
+                <MatchSummary match={match} />
+                <button className="v6-primary" type="button" onClick={() => accept(match.order.id)}>
                   Aceptar trabajo
                 </button>
               </article>
             ),
           )}
         {!profile.is_available && <Empty title="Estas desconectado" body="Activa Disponible para ver pedidos abiertos." />}
-        {profile.is_available && !matchingOrders.length && <Empty title="No hay pedidos compatibles" body="Cuando un cliente publique uno de tus servicios aparecera aca." />}
+        {profile.is_available && !compatibleMatches.length && <Empty title="No hay pedidos compatibles" body="Cuando un cliente publique un servicio dentro de tu zona y horario aparecera aca." />}
       </section>
 
       <section className="v6-section">
@@ -2057,6 +2202,16 @@ function ProfessionalHome({
           ))}
       </section>
     </>
+  );
+}
+
+function MatchSummary({ match }: { match: ProfessionalOrderMatch }) {
+  return (
+    <div className="v6-match-summary" aria-label="Motivos de compatibilidad">
+      {match.reasons.map((reason) => (
+        <span key={reason}>{reason}</span>
+      ))}
+    </div>
   );
 }
 
@@ -2484,17 +2639,15 @@ function ProfilePanel({
     };
   }, [profile.id]);
 
-  useEffect(() => {
-    setServiceRates((current) => {
-      const next = { ...current };
-      for (const item of proServices) {
-        if (next[item.service_id] === undefined && item.price_from !== null) {
-          next[item.service_id] = String(item.price_from);
-        }
+  const visibleServiceRates = useMemo(() => {
+    const next = { ...serviceRates };
+    for (const item of proServices) {
+      if (next[item.service_id] === undefined && item.price_from !== null) {
+        next[item.service_id] = String(item.price_from);
       }
-      return next;
-    });
-  }, [proServices]);
+    }
+    return next;
+  }, [proServices, serviceRates]);
 
   const uploadedDocumentKinds = useMemo(
     () =>
@@ -2567,7 +2720,7 @@ function ProfilePanel({
 
   function serviceRatesFor(serviceIds: number[]) {
     return serviceIds.reduce<Record<number, number | null>>((rates, serviceId) => {
-      const parsed = Number(String(serviceRates[serviceId] || '').replace(/\D+/g, ''));
+      const parsed = Number(String(visibleServiceRates[serviceId] || '').replace(/\D+/g, ''));
       rates[serviceId] = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
       return rates;
     }, {});
@@ -2592,9 +2745,7 @@ function ProfilePanel({
         currentStep: Math.max(onboarding?.current_step || 1, mappedStep),
         notes: 'Alta profesional en progreso.',
       }));
-    } catch {
-      undefined;
-    }
+    } catch {}
   }
 
   function goToProfessionalStep(nextStep: number) {
@@ -3099,7 +3250,7 @@ function ProfilePanel({
                     <label className="v6-field" key={item.service_id}>
                       <span>Tarifa desde: {serviceDisplayName(service)}</span>
                       <input
-                        value={serviceRates[item.service_id] ?? String(item.price_from || service.base_price || '')}
+                        value={visibleServiceRates[item.service_id] ?? String(item.price_from || service.base_price || '')}
                         onChange={(event) =>
                           setServiceRates((current) => ({
                             ...current,

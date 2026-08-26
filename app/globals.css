@@ -1884,6 +1884,36 @@ a.v6-evidence-link {
   margin-top: 10px;
 }
 
+.v6-match-card {
+  display: grid;
+  gap: 8px;
+}
+
+.v6-section .v6-match-card + .v6-match-card,
+.v6-section .v6-match-card + .v6-order,
+.v6-section .v6-order + .v6-match-card {
+  margin-top: 10px;
+}
+
+.v6-match-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.v6-match-summary span {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border: 1px solid #bfe1d9;
+  border-radius: 999px;
+  background: var(--mist);
+  color: var(--green-900);
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
 .v6-order-top {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
