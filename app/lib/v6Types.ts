@@ -110,6 +110,9 @@ export type V6ProfessionalProfile = {
   work_days?: string[] | null;
   work_starts_at?: string | null;
   work_ends_at?: string | null;
+  payout_alias?: string | null;
+  payout_cbu?: string | null;
+  wallet_payment_link?: string | null;
   updated_at: string;
 };
 

@@ -542,6 +542,9 @@ export async function upsertV6ProfessionalProfile(input: {
   workDays?: string[];
   workStartsAt?: string | null;
   workEndsAt?: string | null;
+  payoutAlias?: string | null;
+  payoutCbu?: string | null;
+  walletPaymentLink?: string | null;
 }) {
   const { data, error } = await getV6Supabase()
     .from('professional_profiles')
@@ -558,6 +561,9 @@ export async function upsertV6ProfessionalProfile(input: {
       work_days: input.workDays?.length ? input.workDays : ['Lun', 'Mar', 'Mie', 'Jue', 'Vie'],
       work_starts_at: input.workStartsAt || '08:00',
       work_ends_at: input.workEndsAt || '18:00',
+      payout_alias: input.payoutAlias || null,
+      payout_cbu: input.payoutCbu || null,
+      wallet_payment_link: input.walletPaymentLink || null,
     })
     .select('*')
     .single();

@@ -2595,6 +2595,13 @@ function OrderCard({
         {order.eta_minutes && <span>ETA {order.eta_minutes} min</span>}
         {order.status === 'accepted' && <span>PIN inicio {order.start_pin || 'pendiente'}</span>}
       </div>
+      {order.payment_method === 'wallet' && !['completed', 'cancelled'].includes(order.status) && (
+        <p className="v6-note">
+          {profile.role === 'client'
+            ? 'Pago con Cuenta DNI/billetera: cuando el prestador acepte, coordiná QR o link por el chat.'
+            : 'Este pedido prefiere Cuenta DNI/billetera. Compartí tu QR o link de pago por el chat antes de finalizar.'}
+        </p>
+      )}
       {photos.length > 0 && (
         <div className="v6-photo-strip">
           {photos.map((photo) => (
@@ -2735,6 +2742,9 @@ function ProfilePanel({
   const [workDays, setWorkDays] = useState<string[]>(['Lun', 'Mar', 'Mié', 'Jue', 'Vie']);
   const [workStart, setWorkStart] = useState('08:00');
   const [workEnd, setWorkEnd] = useState('18:00');
+  const [payoutAlias, setPayoutAlias] = useState('');
+  const [payoutCbu, setPayoutCbu] = useState('');
+  const [walletPaymentLink, setWalletPaymentLink] = useState('');
   const [serviceRates, setServiceRates] = useState<Record<number, string>>({});
   const [portfolioTitle, setPortfolioTitle] = useState('Trabajo terminado');
   const [portfolioDescription, setPortfolioDescription] = useState('Antes y despues documentado para el cliente.');
@@ -2770,6 +2780,9 @@ function ProfilePanel({
           setWorkDays(nextProfessionalProfile.work_days?.length ? nextProfessionalProfile.work_days : ['Lun', 'Mar', 'Mié', 'Jue', 'Vie']);
           setWorkStart(timeInputValue(nextProfessionalProfile.work_starts_at, '08:00'));
           setWorkEnd(timeInputValue(nextProfessionalProfile.work_ends_at, '18:00'));
+          setPayoutAlias(nextProfessionalProfile.payout_alias || '');
+          setPayoutCbu(nextProfessionalProfile.payout_cbu || '');
+          setWalletPaymentLink(nextProfessionalProfile.wallet_payment_link || '');
         }
       })
       .catch(() => undefined);
@@ -2914,6 +2927,9 @@ function ProfilePanel({
         workDays,
         workStartsAt: workStart,
         workEndsAt: workEnd,
+        payoutAlias: payoutAlias.trim(),
+        payoutCbu: payoutCbu.trim(),
+        walletPaymentLink: walletPaymentLink.trim(),
       });
       const nextOnboarding = await upsertV6ProfessionalOnboarding({
         professionalId: profile.id,
@@ -2944,6 +2960,9 @@ function ProfilePanel({
         workDays,
         workStartsAt: workStart,
         workEndsAt: workEnd,
+        payoutAlias: payoutAlias.trim(),
+        payoutCbu: payoutCbu.trim(),
+        walletPaymentLink: walletPaymentLink.trim(),
       });
       setProfessionalProfile(nextProfile);
       setProServices(await saveV6ProfessionalServices(profile.id, selectedIds, services, serviceRatesFor(selectedIds)));
@@ -3380,6 +3399,40 @@ function ProfilePanel({
                 <input value={workEnd} onChange={(event) => setWorkEnd(event.target.value)} type="time" />
               </label>
             </div>
+            <div className="v6-section-head compact">
+              <h2>Cobro</h2>
+              <span>para coordinar pagos</span>
+            </div>
+            <div className="v6-split">
+              <label className="v6-field">
+                <span>Alias o CVU/CBU</span>
+                <input
+                  value={payoutAlias}
+                  onChange={(event) => setPayoutAlias(event.target.value)}
+                  placeholder="ej: manito.plomero"
+                />
+              </label>
+              <label className="v6-field">
+                <span>CBU/CVU completo</span>
+                <input
+                  value={payoutCbu}
+                  onChange={(event) => setPayoutCbu(event.target.value)}
+                  inputMode="numeric"
+                  placeholder="opcional"
+                />
+              </label>
+            </div>
+            <label className="v6-field">
+              <span>Link de pago o QR de Cuenta DNI</span>
+              <input
+                value={walletPaymentLink}
+                onChange={(event) => setWalletPaymentLink(event.target.value)}
+                placeholder="https://..."
+              />
+            </label>
+            <p className="v6-note">
+              Estos datos sirven para coordinar cobros con billetera o transferencia. MANITO todavía no captura pagos automáticamente.
+            </p>
             {proServices.length > 0 && (
               <div className="v6-rate-list">
                 {proServices.map((item) => {
@@ -3440,6 +3493,7 @@ function ProfilePanel({
               <span className={completedDocuments === requiredDocuments.length ? 'done' : ''}>Documentos completos</span>
               <span className={portfolio.length ? 'done' : ''}>Portfolio</span>
               <span className={workZone && workDays.length ? 'done' : ''}>Zona y horarios</span>
+              <span className={payoutAlias || payoutCbu || walletPaymentLink ? 'done' : ''}>Datos de cobro</span>
             </div>
             <button
               className="v6-primary"
