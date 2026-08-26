@@ -135,6 +135,27 @@ export const CATEGORY_HEURISTICS: CategoryHeuristic[] = [
     preferredMode: 'scheduled',
     keywords: ['bomba', 'cloro', 'pileta', 'piscina', 'verde'],
   },
+  {
+    slug: 'mecanica_automotor',
+    name: 'Mecánica automotor',
+    icon: 'CarFront',
+    preferredMode: 'scheduled',
+    keywords: ['auto', 'automotor', 'bateria', 'frenos', 'mecanico', 'motor', 'service'],
+  },
+  {
+    slug: 'gomeria',
+    name: 'Gomería',
+    icon: 'CircleGauge',
+    preferredMode: 'immediate',
+    keywords: ['alineacion', 'auxilio', 'balanceo', 'cubierta', 'goma', 'gomeria', 'pinchadura', 'rueda'],
+  },
+  {
+    slug: 'chapa_pintura_auto',
+    name: 'Chapa y pintura',
+    icon: 'Car',
+    preferredMode: 'quote',
+    keywords: ['abolladura', 'auto', 'carroceria', 'chapa', 'pintura auto', 'rayon'],
+  },
 ];
 
 export const statusOrder = [

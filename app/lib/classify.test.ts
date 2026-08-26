@@ -17,6 +17,27 @@ describe('classifyNeed', () => {
     expect(result.suggestedMode).toBe('quote');
   });
 
+  it('detects automotive mechanics with accented text', () => {
+    const result = classifyNeed('Necesito un mecánico automotor para revisar frenos');
+
+    expect(result.categorySlug).toBe('mecanica_automotor');
+    expect(result.suggestedMode).toBe('scheduled');
+  });
+
+  it('detects tire repair and roadside wheel issues', () => {
+    const result = classifyNeed('Pinché una goma y necesito gomería o auxilio de rueda');
+
+    expect(result.categorySlug).toBe('gomeria');
+    expect(result.suggestedMode).toBe('immediate');
+  });
+
+  it('routes car body paint work to quote mode', () => {
+    const result = classifyNeed('Tengo una abolladura y rayón en el auto');
+
+    expect(result.categorySlug).toBe('chapa_pintura_auto');
+    expect(result.suggestedMode).toBe('quote');
+  });
+
   it('keeps unknown text explicit instead of inventing a category', () => {
     const result = classifyNeed('Quiero resolver algo raro');
 
