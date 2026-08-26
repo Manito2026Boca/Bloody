@@ -3015,7 +3015,7 @@ function ProfilePanel({
   function uploadErrorMessage(caught: unknown) {
     const message = caught instanceof Error ? caught.message : '';
     if (message.toLowerCase().includes('mime') || message.toLowerCase().includes('type')) {
-      return 'Por ahora subí fotos JPG, PNG o WebP. Para PDF, pegá un link.';
+      return 'Subí JPG, PNG, WebP o PDF de hasta 10 MB. También podés pegar un link.';
     }
     if (message.toLowerCase().includes('bucket') || message.toLowerCase().includes('storage')) {
       return 'No se pudo subir el archivo. Pega un link mientras revisamos Storage.';
@@ -3435,7 +3435,7 @@ function ProfilePanel({
           <section className="v6-card">
             <h2>Documentos</h2>
             <p className="v6-help-text">
-              Subí fotos JPG, PNG o WebP. Si tenés PDF o carpeta compartida, pegá el link.
+              Subí fotos JPG, PNG, WebP o PDF. También podés pegar un link de Drive o carpeta compartida.
             </p>
             <div className="v6-upload-list">
               {requiredDocuments.map((item) => {
@@ -3455,8 +3455,8 @@ function ProfilePanel({
                     </div>
                     {renderEvidence(current?.file_path || null, 'Evidencia')}
                     <label className="v6-field">
-                      <span>Foto</span>
-                      <input name={`${item.kind}-file`} type="file" accept="image/jpeg,image/png,image/webp" />
+                      <span>Archivo</span>
+                      <input name={`${item.kind}-file`} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" />
                     </label>
                     <label className="v6-field">
                       <span>Link opcional</span>
