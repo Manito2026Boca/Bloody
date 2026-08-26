@@ -11,6 +11,7 @@ import type {
   V6Mode,
   V6Order,
   V6OrderExtra,
+  V6OrderPhoto,
   V6OrderProposal,
   V6PaymentMethod,
   V6PaymentProfile,
@@ -193,6 +194,7 @@ export async function saveV6ProfessionalServices(
   userId: string,
   serviceIds: number[],
   services: V6Service[],
+  rates: Record<number, number | null> = {},
 ) {
   const supabase = getV6Supabase();
   const { error: deleteError } = await supabase
@@ -207,7 +209,9 @@ export async function saveV6ProfessionalServices(
     professional_id: userId,
     service_id: serviceId,
     price_from:
-      services.find((service) => service.id === serviceId)?.base_price || null,
+      rates[serviceId] ??
+      services.find((service) => service.id === serviceId)?.base_price ??
+      null,
   }));
   const { data, error } = await supabase
     .from('professional_services')
@@ -395,6 +399,48 @@ export async function addV6OrderExtra(input: {
   return data as V6OrderExtra;
 }
 
+export async function listV6OrderPhotos(orderId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('order_photos')
+    .select('*')
+    .eq('order_id', orderId)
+    .order('created_at');
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6OrderPhoto[];
+}
+
+export async function addV6OrderPhoto(input: {
+  orderId: string;
+  uploadedBy: string;
+  stage: V6OrderPhoto['stage'];
+  filePath: string;
+  caption?: string | null;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('order_photos')
+    .insert({
+      order_id: input.orderId,
+      uploaded_by: input.uploadedBy,
+      stage: input.stage,
+      file_path: input.filePath,
+      caption: input.caption || null,
+    })
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6OrderPhoto;
+}
+
+export async function getV6MediaSignedUrl(filePath: string) {
+  const { data, error } = await getV6Supabase()
+    .storage
+    .from('manito-media')
+    .createSignedUrl(filePath, 600);
+  if (error) return null;
+  return data.signedUrl;
+}
+
 export async function decideV6OrderExtra(extraId: string, status: 'approved' | 'rejected') {
   const { data, error } = await getV6Supabase()
     .from('order_extras')
@@ -487,6 +533,11 @@ export async function upsertV6ProfessionalProfile(input: {
   publicSlug?: string | null;
   responseMinutes?: number | null;
   insuranceLabel?: string | null;
+  workCity?: string | null;
+  serviceRadiusKm?: number | null;
+  workDays?: string[];
+  workStartsAt?: string | null;
+  workEndsAt?: string | null;
 }) {
   const { data, error } = await getV6Supabase()
     .from('professional_profiles')
@@ -498,6 +549,11 @@ export async function upsertV6ProfessionalProfile(input: {
       public_slug: input.publicSlug || null,
       response_minutes: input.responseMinutes || null,
       insurance_label: input.insuranceLabel || null,
+      work_city: input.workCity || null,
+      service_radius_km: input.serviceRadiusKm || 8,
+      work_days: input.workDays?.length ? input.workDays : ['Lun', 'Mar', 'Mie', 'Jue', 'Vie'],
+      work_starts_at: input.workStartsAt || '08:00',
+      work_ends_at: input.workEndsAt || '18:00',
     })
     .select('*')
     .single();

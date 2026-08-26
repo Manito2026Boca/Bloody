@@ -1639,6 +1639,39 @@ a.v6-evidence-link {
   font-weight: 800;
 }
 
+.v6-photo-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 74px;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.v6-photo-strip img,
+.v6-photo-strip span {
+  width: 74px;
+  height: 74px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.v6-photo-strip img {
+  object-fit: cover;
+}
+
+.v6-photo-strip span {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.1;
+  padding: 6px;
+  text-align: center;
+}
+
 .v6-inline-form,
 .v6-aftercare {
   display: grid;

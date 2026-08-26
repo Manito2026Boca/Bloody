@@ -37,6 +37,7 @@ import {
   acceptV6Proposal,
   acceptV6Order,
   addV6Complaint,
+  addV6OrderPhoto,
   addV6OrderExtra,
   addV6PortfolioItem,
   addV6Rating,
@@ -47,12 +48,14 @@ import {
   createV6Order,
   decideV6OrderExtra,
   getV6Profile,
+  getV6MediaSignedUrl,
   getV6ProfessionalOnboarding,
   getV6ProfessionalProfile,
   listV6AdminSettings,
   listV6ClientAddresses,
   listV6Messages,
   listV6OrderExtras,
+  listV6OrderPhotos,
   listV6OrderProposals,
   listV6Orders,
   listV6PaymentProfiles,
@@ -86,6 +89,7 @@ import type {
   V6Mode,
   V6Order,
   V6OrderExtra,
+  V6OrderPhoto,
   V6OrderProposal,
   V6PaymentProfile,
   V6PortfolioItem,
@@ -150,6 +154,12 @@ function paymentLabel(method?: string | null) {
   if (method === 'transfer') return 'Transferencia';
   return paymentOptions.find((option) => option.id === method)?.label || 'A coordinar';
 }
+
+function timeInputValue(value?: string | null, fallback = '08:00') {
+  if (!value) return fallback;
+  return value.slice(0, 5);
+}
+
 const featuredProfessionals: FeaturedProfessional[] = [
   {
     id: 'pro-martin',
@@ -987,7 +997,7 @@ function ClientHome({
   const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>('auto');
   const [selectedProfessionalId, setSelectedProfessionalId] = useState(featuredProfessionals[0].id);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('card');
-  const [photoNames, setPhotoNames] = useState<string[]>([]);
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
   const requestFormRef = useRef<HTMLElement | null>(null);
   const selectedProfessional = featuredProfessionals.find(
@@ -1025,6 +1035,7 @@ function ClientHome({
           normalizeText(`${service.name} ${service.slug}`).includes(query),
         );
   const recommendedProfessional = professionalForService(recommendedService);
+  const photoNames = photoFiles.map((file) => file.name);
 
   function scrollToRequestForm() {
     window.requestAnimationFrame(() => {
@@ -1089,7 +1100,7 @@ function ClientHome({
       ]
         .filter(Boolean)
         .join('\n');
-      await createV6Order({
+      const createdOrder = await createV6Order({
         clientId: profile.id,
         serviceId: selectedService.id,
         description: orderDescription,
@@ -1105,9 +1116,36 @@ function ClientHome({
         lat: coords?.lat || null,
         lng: coords?.lng || null,
       });
+      let photoUploadFailed = false;
+      if (photoFiles.length) {
+        try {
+          await Promise.all(
+            photoFiles.map(async (file) => {
+              const filePath = await uploadV6MediaFile({
+                ownerId: profile.id,
+                area: 'orders',
+                file,
+              });
+              await addV6OrderPhoto({
+                orderId: createdOrder.id,
+                uploadedBy: profile.id,
+                stage: 'before',
+                filePath,
+                caption: file.name,
+              });
+            }),
+          );
+        } catch {
+          photoUploadFailed = true;
+        }
+      }
       setOrders(await listV6Orders());
-      setNotice('Pedido publicado. Ya puede verlo un profesional disponible.');
-      setPhotoNames([]);
+      setNotice(
+        photoUploadFailed
+          ? 'Pedido publicado. Algunas fotos no se pudieron subir; podés compartirlas por chat.'
+          : 'Pedido publicado. Ya puede verlo un profesional disponible.',
+      );
+      setPhotoFiles([]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo publicar.');
     }
@@ -1184,9 +1222,8 @@ function ClientHome({
 
   function updatePhotos(files: FileList | null) {
     const nextFiles = Array.from(files || [])
-      .slice(0, 3)
-      .map((file) => file.name);
-    setPhotoNames(nextFiles);
+      .slice(0, 3);
+    setPhotoFiles(nextFiles);
   }
 
   function applyRecommendation(service: V6Service, nextProblem = problemQuery) {
@@ -2069,6 +2106,7 @@ function OrderCard({
         : 'Finalizar trabajo';
   const [proposals, setProposals] = useState<V6OrderProposal[]>([]);
   const [extras, setExtras] = useState<V6OrderExtra[]>([]);
+  const [photos, setPhotos] = useState<Array<V6OrderPhoto & { signedUrl: string | null }>>([]);
   const [proposalLabor, setProposalLabor] = useState(String(order.service?.base_price || 18000));
   const [proposalMaterials, setProposalMaterials] = useState('0');
   const [proposalVisit, setProposalVisit] = useState('6500');
@@ -2093,11 +2131,19 @@ function OrderCard({
     Promise.all([
       listV6OrderProposals(order.id),
       listV6OrderExtras(order.id),
+      listV6OrderPhotos(order.id),
     ])
-      .then(([nextProposals, nextExtras]) => {
+      .then(async ([nextProposals, nextExtras, nextPhotos]) => {
         if (!alive) return;
         setProposals(nextProposals);
         setExtras(nextExtras);
+        const photosWithUrls = await Promise.all(
+          nextPhotos.map(async (photo) => ({
+            ...photo,
+            signedUrl: await getV6MediaSignedUrl(photo.file_path),
+          })),
+        );
+        if (alive) setPhotos(photosWithUrls);
       })
       .catch(() => undefined);
     return () => {
@@ -2255,6 +2301,19 @@ function OrderCard({
         {order.eta_minutes && <span>ETA {order.eta_minutes} min</span>}
         {order.status === 'accepted' && <span>PIN inicio {order.start_pin || 'pendiente'}</span>}
       </div>
+      {photos.length > 0 && (
+        <div className="v6-photo-strip">
+          {photos.map((photo) => (
+            photo.signedUrl ? (
+              <img src={photo.signedUrl} alt={photo.caption || 'Foto del pedido'} key={photo.id} />
+            ) : (
+              <span key={photo.id}>
+                <Camera size={15} aria-hidden="true" /> {photo.caption || 'Foto del pedido'}
+              </span>
+            )
+          ))}
+        </div>
+      )}
       {order.mode === 'quote' && proposals.length > 0 && (
         <div className="v6-quote-list">
           {proposals.map((proposal) => (
@@ -2412,6 +2471,11 @@ function ProfilePanel({
           setBio((current) => nextProfessionalProfile.bio || current);
           setYearsExperience(String(nextProfessionalProfile.years_experience || 0));
           setInsuranceLabel((current) => nextProfessionalProfile.insurance_label || current);
+          setWorkZone((current) => nextProfessionalProfile.work_city || current);
+          setWorkRadius(String(nextProfessionalProfile.service_radius_km || 8));
+          setWorkDays(nextProfessionalProfile.work_days?.length ? nextProfessionalProfile.work_days : ['Lun', 'Mar', 'Mié', 'Jue', 'Vie']);
+          setWorkStart(timeInputValue(nextProfessionalProfile.work_starts_at, '08:00'));
+          setWorkEnd(timeInputValue(nextProfessionalProfile.work_ends_at, '18:00'));
         }
       })
       .catch(() => undefined);
@@ -2419,6 +2483,18 @@ function ProfilePanel({
       alive = false;
     };
   }, [profile.id]);
+
+  useEffect(() => {
+    setServiceRates((current) => {
+      const next = { ...current };
+      for (const item of proServices) {
+        if (next[item.service_id] === undefined && item.price_from !== null) {
+          next[item.service_id] = String(item.price_from);
+        }
+      }
+      return next;
+    });
+  }, [proServices]);
 
   const uploadedDocumentKinds = useMemo(
     () =>
@@ -2482,11 +2558,19 @@ function ProfilePanel({
     if (current.has(serviceId)) current.delete(serviceId);
     else current.add(serviceId);
     try {
-      setProServices(await saveV6ProfessionalServices(profile.id, [...current], services));
+      setProServices(await saveV6ProfessionalServices(profile.id, [...current], services, serviceRatesFor([...current])));
       setNotice('Servicios guardados.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se guardaron servicios.');
     }
+  }
+
+  function serviceRatesFor(serviceIds: number[]) {
+    return serviceIds.reduce<Record<number, number | null>>((rates, serviceId) => {
+      const parsed = Number(String(serviceRates[serviceId] || '').replace(/\D+/g, ''));
+      rates[serviceId] = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      return rates;
+    }, {});
   }
 
   const professionalSteps = [
@@ -2534,6 +2618,11 @@ function ProfilePanel({
         yearsExperience: Number(yearsExperience) || 0,
         responseMinutes: 35,
         insuranceLabel,
+        workCity: workZone.trim(),
+        serviceRadiusKm: Number(workRadius) || 8,
+        workDays,
+        workStartsAt: workStart,
+        workEndsAt: workEnd,
       });
       const nextOnboarding = await upsertV6ProfessionalOnboarding({
         professionalId: profile.id,
@@ -2546,6 +2635,36 @@ function ProfilePanel({
       setNotice('Perfil profesional guardado.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Aplicá la migración V7 para guardar alta profesional.');
+    }
+  }
+
+  async function saveProfessionalAvailability() {
+    try {
+      const selectedIds = proServices.map((item) => item.service_id);
+      const nextProfile = await upsertV6ProfessionalProfile({
+        professionalId: profile.id,
+        headline,
+        bio,
+        yearsExperience: Number(yearsExperience) || 0,
+        responseMinutes: professionalProfile?.response_minutes || 35,
+        insuranceLabel,
+        workCity: workZone.trim(),
+        serviceRadiusKm: Number(workRadius) || 8,
+        workDays,
+        workStartsAt: workStart,
+        workEndsAt: workEnd,
+      });
+      setProfessionalProfile(nextProfile);
+      setProServices(await saveV6ProfessionalServices(profile.id, selectedIds, services, serviceRatesFor(selectedIds)));
+      setOnboarding(await upsertV6ProfessionalOnboarding({
+        professionalId: profile.id,
+        status: onboarding?.status || 'draft',
+        currentStep: Math.max(onboarding?.current_step || 1, 13),
+        notes: 'Servicios, zona, horarios y tarifas guardados.',
+      }));
+      setNotice('Zona, horarios y tarifas guardados.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo guardar disponibilidad.');
     }
   }
 
@@ -2967,6 +3086,17 @@ function ProfilePanel({
                 })}
               </div>
             )}
+            <div className="v6-summary">
+              <span>
+                <Clock size={17} aria-hidden="true" /> Disponibilidad
+              </span>
+              <small>
+                {workZone || 'Zona sin definir'} · {workRadius || 8} km · {workDays.join(', ')} · {workStart} a {workEnd}
+              </small>
+            </div>
+            <button className="v6-primary" type="button" onClick={saveProfessionalAvailability}>
+              Guardar zona y tarifas
+            </button>
           </section>
         </>
     </>

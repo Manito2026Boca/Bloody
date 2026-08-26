@@ -105,6 +105,11 @@ export type V6ProfessionalProfile = {
   jobs_completed: number;
   response_minutes: number | null;
   insurance_label: string | null;
+  work_city?: string | null;
+  service_radius_km?: number | null;
+  work_days?: string[] | null;
+  work_starts_at?: string | null;
+  work_ends_at?: string | null;
   updated_at: string;
 };
 
@@ -167,6 +172,16 @@ export type V6OrderExtra = {
   status: 'pending' | 'approved' | 'rejected';
   created_at: string;
   decided_at: string | null;
+};
+
+export type V6OrderPhoto = {
+  id: string;
+  order_id: string;
+  uploaded_by: string;
+  stage: 'before' | 'during' | 'after';
+  file_path: string;
+  caption: string | null;
+  created_at: string;
 };
 
 export type V6Rating = {
