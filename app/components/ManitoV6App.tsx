@@ -2085,6 +2085,12 @@ function AppointmentNotice({
     : nextOrder.status === 'accepted'
       ? 'Coordinación pendiente'
       : V6_STATUS_LABEL[nextOrder.status];
+  const appointmentTitle =
+    nextOrder.status === 'open'
+      ? 'Pedido programado pendiente de prestador'
+      : profile.role === 'client'
+        ? 'Tenés una cita con un prestador'
+        : 'Tenés una cita con un cliente';
 
   return (
     <section className="v6-appointment">
@@ -2092,10 +2098,16 @@ function AppointmentNotice({
         <p className="v6-live">
           <Clock size={14} aria-hidden="true" /> Cita pendiente
         </p>
-        <h2>{serviceDisplayName(nextOrder.service)}</h2>
+        <h2>{appointmentTitle}</h2>
         <p>
-          {appointmentLabel} · {nextOrder.address}
+          {serviceDisplayName(nextOrder.service)} · {appointmentLabel}
         </p>
+        <p>{nextOrder.address}</p>
+        <div className="v6-meta-row">
+          <span>{V6_STATUS_LABEL[nextOrder.status]}</span>
+          {nextOrder.payment_method && <span>Pago {paymentLabel(nextOrder.payment_method)}</span>}
+          {nextOrder.eta_minutes && <span>ETA {nextOrder.eta_minutes} min</span>}
+        </div>
         <small>
           {counterpart
             ? `${counterpartLabel}: ${counterpart.full_name || 'Usuario MANITO'}`
