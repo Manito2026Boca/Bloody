@@ -2610,6 +2610,22 @@ function OrderCard({
   const canUploadEvidence =
     order.professional_id === profile.id &&
     ['accepted', 'en_camino', 'en_sitio'].includes(order.status);
+  const canShareTracking = !['completed', 'cancelled'].includes(order.status);
+
+  async function shareOrderTracking() {
+    const text = orderTrackingText(order);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Seguimiento MANITO', text });
+        setNotice('Seguimiento compartido.');
+        return;
+      }
+      await navigator.clipboard?.writeText(text);
+      setNotice('Seguimiento copiado.');
+    } catch {
+      setNotice('No se pudo compartir automáticamente. Copiá el estado desde el pedido.');
+    }
+  }
 
   return (
     <article className="v6-order">
@@ -2779,6 +2795,11 @@ function OrderCard({
         {order.professional_id && (
           <button className="v6-secondary" type="button" onClick={() => setChatOrder(order)}>
             <MessageCircle size={16} aria-hidden="true" /> Abrir chat
+          </button>
+        )}
+        {canShareTracking && (
+          <button className="v6-secondary" type="button" onClick={shareOrderTracking}>
+            <SendHorizontal size={16} aria-hidden="true" /> Compartir seguimiento
           </button>
         )}
         {profile.role === 'professional' &&
