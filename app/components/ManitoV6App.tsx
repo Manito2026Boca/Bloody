@@ -252,6 +252,18 @@ function appointmentDate(order: V6Order) {
   return order.scheduled_at || order.accepted_at || order.created_at;
 }
 
+function orderTrackingText(order: V6Order) {
+  const lines = [
+    `MANITO - ${serviceDisplayName(order.service)}`,
+    `Estado: ${V6_STATUS_LABEL[order.status]}`,
+    `Dirección: ${order.address}`,
+    order.scheduled_at ? `Turno: ${shortDate(order.scheduled_at)}` : null,
+    order.eta_minutes ? `ETA: ${order.eta_minutes} min` : null,
+    order.professional?.full_name ? `Prestador: ${order.professional.full_name}` : 'Prestador: pendiente de asignacion',
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
 function serviceIcon(slug: string) {
   if (slug === 'cerrajeria') return <KeyRound size={20} aria-hidden="true" />;
   if (slug === 'electricidad') return <PlugZap size={20} aria-hidden="true" />;
@@ -1154,11 +1166,15 @@ function ClientHome({
   const recommendedProfessional = professionalForService(recommendedService);
   const photoNames = photoFiles.map((file) => file.name);
 
-  function scrollToRequestForm() {
+  const scrollToRequestForm = useCallback(() => {
     window.requestAnimationFrame(() => {
       requestFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
-  }
+  }, []);
+
+  useEffect(() => {
+    if (selectedService) scrollToRequestForm();
+  }, [scrollToRequestForm, selectedService]);
 
   useEffect(() => {
     let alive = true;
@@ -1263,6 +1279,7 @@ function ClientHome({
           : 'Pedido publicado. Ya puede verlo un profesional disponible.',
       );
       setPhotoFiles([]);
+      onNavigate('orders');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo publicar.');
     }
@@ -1406,14 +1423,25 @@ function ClientHome({
     scrollToRequestForm();
   }
 
-  function shareTracking() {
+  async function shareTracking() {
     const activeOrder = clientOrders.find((order) => !['completed', 'cancelled'].includes(order.status));
     if (!activeOrder) {
       setNotice('Cuando tengas un pedido en curso vas a poder compartir el seguimiento.');
       return;
     }
+    const text = orderTrackingText(activeOrder);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Seguimiento MANITO', text });
+        setNotice('Seguimiento compartido.');
+        return;
+      }
+      await navigator.clipboard?.writeText(text);
+      setNotice('Seguimiento copiado. Pegalo en WhatsApp o donde quieras compartirlo.');
+    } catch {
+      setNotice('Abrí el pedido en curso para ver y compartir el seguimiento.');
+    }
     onNavigate('orders');
-    setNotice('Abrí el pedido en curso para compartir su seguimiento.');
   }
 
   function openAccountShortcut(message: string) {
@@ -2224,16 +2252,23 @@ function OrdersList(props: {
   setNotice: (message: string) => void;
 }) {
   return (
-    <section className="v6-section">
-      <div className="v6-section-head">
-        <h2>{props.profile.role === 'professional' ? 'Mis trabajos' : 'Mis pedidos'}</h2>
-        <span>{props.orders.length}</span>
-      </div>
-      {props.orders.map((order) => (
-        <OrderCard key={order.id} order={order} {...props} />
-      ))}
-      {!props.orders.length && <Empty title="Todavía está vacío" body="Los pedidos aparecerán acá y se sincronizarán entre dispositivos." />}
-    </section>
+    <>
+      <AppointmentNotice
+        orders={props.orders}
+        profile={props.profile}
+        setChatOrder={props.setChatOrder}
+      />
+      <section className="v6-section">
+        <div className="v6-section-head">
+          <h2>{props.profile.role === 'professional' ? 'Mis trabajos' : 'Mis pedidos'}</h2>
+          <span>{props.orders.length}</span>
+        </div>
+        {props.orders.map((order) => (
+          <OrderCard key={order.id} order={order} {...props} />
+        ))}
+        {!props.orders.length && <Empty title="Todavía está vacío" body="Los pedidos aparecerán acá y se sincronizarán entre dispositivos." />}
+      </section>
+    </>
   );
 }
 
@@ -3341,8 +3376,16 @@ function AccountPanel({
     if (typeof window === 'undefined') return '';
     return window.localStorage.getItem(`manito_v6_trusted:${profile.id}`) || '';
   });
+  const [hidePhoneInChat, setHidePhoneInChat] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem(`manito_v6_hide_phone:${profile.id}`) !== 'false';
+  });
   const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
   const [adminSettings, setAdminSettings] = useState<V6AdminSetting[]>([]);
+  const referralCode = `MANITO-${normalizeText(profile.full_name || profile.email || profile.id)
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 6)
+    .toUpperCase() || 'AMIGO'}`;
 
   useEffect(() => {
     let alive = true;
@@ -3375,7 +3418,17 @@ function AccountPanel({
     window.localStorage.setItem(`manito_v6_account_type:${profile.id}`, accountType);
     window.localStorage.setItem(`manito_v6_tax_id:${profile.id}`, taxId);
     window.localStorage.setItem(`manito_v6_trusted:${profile.id}`, trustedContact);
+    window.localStorage.setItem(`manito_v6_hide_phone:${profile.id}`, String(hidePhoneInChat));
     setNotice('Cuenta actualizada.');
+  }
+
+  async function copyReferralCode() {
+    try {
+      await navigator.clipboard?.writeText(referralCode);
+      setNotice('Código de referido copiado.');
+    } catch {
+      setNotice(`Tu código de referido es ${referralCode}.`);
+    }
   }
 
   async function addPayment(type: PaymentMethod) {
@@ -3425,10 +3478,31 @@ function AccountPanel({
             <span>Contacto de confianza</span>
             <input value={trustedContact} onChange={(event) => setTrustedContact(event.target.value)} />
           </label>
+          <label className="v6-toggle-row">
+            <span>
+              <strong>Ocultar teléfono en chat</strong>
+              <small>El prestador coordina por el chat del pedido salvo que vos decidas compartirlo.</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={hidePhoneInChat}
+              onChange={(event) => setHidePhoneInChat(event.target.checked)}
+            />
+          </label>
           <button className="v6-secondary" type="button" onClick={saveAccountPreferences}>
             Guardar cuenta
           </button>
         </div>
+      </section>
+      <section className="v6-card v6-account-cta">
+        <div className="v6-section-head compact">
+          <h2>Referidos</h2>
+          <span>crecé con MANITO</span>
+        </div>
+        <p>Compartí tu código y dejalo listo para una promo de prueba.</p>
+        <button className="v6-secondary" type="button" onClick={copyReferralCode}>
+          {referralCode}
+        </button>
       </section>
       <section className="v6-card">
         <div className="v6-section-head">
