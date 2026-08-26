@@ -1,6 +1,7 @@
 'use client';
 
 import type { Session } from '@supabase/supabase-js';
+import Image from 'next/image';
 import {
   BadgeCheck,
   Banknote,
@@ -2606,7 +2607,14 @@ function OrderCard({
         <div className="v6-photo-strip">
           {photos.map((photo) => (
             photo.signedUrl ? (
-              <img src={photo.signedUrl} alt={photo.caption || 'Foto del pedido'} key={photo.id} />
+              <Image
+                src={photo.signedUrl}
+                alt={photo.caption || 'Foto del pedido'}
+                key={photo.id}
+                width={88}
+                height={88}
+                unoptimized
+              />
             ) : (
               <span key={photo.id}>
                 <Camera size={15} aria-hidden="true" /> {photo.caption || 'Foto del pedido'}
