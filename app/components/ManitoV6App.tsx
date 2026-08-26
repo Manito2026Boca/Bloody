@@ -625,6 +625,7 @@ export default function ManitoV6App() {
   const [isStandalone, setIsStandalone] = useState(() => isInstalledDisplayMode());
   const [clientSelectedService, setClientSelectedService] = useState<V6Service | null>(null);
   const [clientProblemQuery, setClientProblemQuery] = useState('');
+  const lastRealtimeNoticeAt = useRef(0);
 
   const loadData = useCallback(async (userId: string) => {
     setProfileLoading(true);
@@ -713,11 +714,27 @@ export default function ManitoV6App() {
     const channel = subscribeV6Orders(() => {
       void listV6Orders().then((nextOrders) => {
         setOrders(nextOrders);
-        setNotice('Pedido actualizado en tiempo real.');
+        const now = Date.now();
+        if (now - lastRealtimeNoticeAt.current > 15000) {
+          lastRealtimeNoticeAt.current = now;
+          setNotice('Pedido actualizado en tiempo real.');
+        }
       });
     });
     return () => removeV6Channel(channel);
   }, [profile]);
+
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timeout = window.setTimeout(() => setNotice(null), 4200);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
+
+  useEffect(() => {
+    if (!error) return undefined;
+    const timeout = window.setTimeout(() => setError(null), 9000);
+    return () => window.clearTimeout(timeout);
+  }, [error]);
 
   useEffect(() => {
     if ('serviceWorker' in navigator) {
