@@ -90,10 +90,12 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 1. Disponibilidad profesional persistente: zona, radio, dias, horarios y tarifas. Estado: implementado.
 2. Evidencias reales del pedido: subir fotos antes/durante/despues y verlas en seguimiento. Estado: implementado para fotos iniciales del cliente.
 3. Wizard profesional por pasos reales, con guardado parcial y resumen final. Estado: implementado en UI; falta persistir DNI/fecha como datos sensibles separados.
-4. Matching por rubro/zona/disponibilidad usando datos del profesional.
-5. Cita pendiente y notificaciones in-app persistentes.
-6. Chat y contacto del prestador con reglas claras de privacidad.
+4. Matching por rubro/zona/disponibilidad usando datos del profesional. Estado: implementado en frontend; falta mover scoring a backend cuando haya mas volumen.
+5. Cita pendiente y notificaciones in-app persistentes. Estado: implementado aviso in-app en Inicio y Pedidos; falta push/PWA.
+6. Chat y contacto del prestador con reglas claras de privacidad. Estado: chat operativo para pedidos aceptados y preferencia de telefono protegida; falta enforcement backend fino.
 7. Admin de altas profesionales y documentos.
 8. Pagos/adicionales mas robustos.
-9. PWA completa con iconos y manifest final.
+9. PWA completa con iconos y manifest final. Estado: base instalada; falta iconografia final de marca.
 10. QA de permisos y pruebas moviles antes de invitar testers mas amplios.
+11. Categorias y subrubros. Estado: implementado grupo Automotor con subrubros mecanica, gomeria y chapa/pintura; falta admin editable.
+12. Confirmacion de email. Estado: robustecida para Vercel y reloj desfasado/JWT futuro.
