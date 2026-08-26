@@ -165,7 +165,11 @@ export async function listV6PaymentProfiles(userId: string) {
     .order('created_at', { ascending: false });
   if (isMissingV5Table(error)) return [];
   fail(error);
-  return (data || []) as V6PaymentProfile[];
+  const unique = new Map<V6PaymentMethod, V6PaymentProfile>();
+  for (const item of (data || []) as V6PaymentProfile[]) {
+    if (!unique.has(item.type)) unique.set(item.type, item);
+  }
+  return [...unique.values()];
 }
 
 export async function addV6PaymentProfile(input: {
@@ -177,13 +181,13 @@ export async function addV6PaymentProfile(input: {
 }) {
   const { data, error } = await getV6Supabase()
     .from('payment_methods')
-    .insert({
+    .upsert({
       profile_id: input.profileId,
       type: input.type,
       label: input.label,
       last4: input.last4 || null,
       is_default: Boolean(input.isDefault),
-    })
+    }, { onConflict: 'profile_id,type' })
     .select('*')
     .single();
   fail(error);

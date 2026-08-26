@@ -158,13 +158,26 @@ const deployedAppUrl =
   'https://bloody-eta.vercel.app';
 const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: ReactNode }> = [
   { id: 'card', label: 'Tarjeta', icon: <CreditCard size={17} aria-hidden="true" /> },
-  { id: 'wallet', label: 'Billetera', icon: <Wallet size={17} aria-hidden="true" /> },
+  { id: 'wallet', label: 'Cuenta DNI / billetera', icon: <Wallet size={17} aria-hidden="true" /> },
   { id: 'cash', label: 'Efectivo', icon: <Banknote size={17} aria-hidden="true" /> },
 ];
 
 function paymentLabel(method?: string | null) {
   if (method === 'transfer') return 'Transferencia';
   return paymentOptions.find((option) => option.id === method)?.label || 'A coordinar';
+}
+
+function paymentProfileDisplay(payment: V6PaymentProfile) {
+  if (payment.type === 'wallet') return 'Cuenta DNI / billetera digital';
+  if (payment.type === 'cash') return 'Efectivo';
+  if (payment.type === 'transfer') return 'Transferencia';
+  return payment.last4 ? `${payment.label} terminada en ${payment.last4}` : payment.label;
+}
+
+function paymentProfileIcon(payment: V6PaymentProfile) {
+  if (payment.type === 'wallet') return <Wallet size={15} aria-hidden="true" />;
+  if (payment.type === 'cash') return <Banknote size={15} aria-hidden="true" />;
+  return <CreditCard size={15} aria-hidden="true" />;
 }
 
 function timeInputValue(value?: string | null, fallback = '08:00') {
@@ -1791,11 +1804,15 @@ function ClientHome({
               <div className="v6-file-list">
                 {paymentProfiles.map((payment) => (
                   <span key={payment.id}>
-                    <CreditCard size={15} aria-hidden="true" /> {payment.label}
-                    {payment.last4 ? ` terminada en ${payment.last4}` : ''}
+                    {paymentProfileIcon(payment)} {paymentProfileDisplay(payment)}
                   </span>
                 ))}
               </div>
+            )}
+            {paymentMethod === 'wallet' && (
+              <p className="v6-note">
+                Para pruebas, MANITO registra Cuenta DNI/billetera como método preferido. El cobro real se coordina por QR o link hasta integrar un proveedor de pagos.
+              </p>
             )}
 
             {mode === 'quote' && selectedService && (
@@ -3520,14 +3537,15 @@ function AccountPanel({
 
   async function addPayment(type: PaymentMethod) {
     try {
+      const alreadySaved = paymentProfiles.some((payment) => payment.type === type);
       await addV6PaymentProfile({
         profileId: profile.id,
         type,
-        label: type === 'cash' ? 'Efectivo' : type === 'wallet' ? 'Billetera virtual' : 'Tarjeta personal',
+        label: type === 'cash' ? 'Efectivo' : type === 'wallet' ? 'Cuenta DNI / billetera' : 'Tarjeta personal',
         last4: type === 'card' ? '1234' : null,
       });
       setPaymentProfiles(await listV6PaymentProfiles(profile.id));
-      setNotice('Medio de pago guardado.');
+      setNotice(alreadySaved ? 'Medio de pago actualizado.' : 'Medio de pago guardado.');
     } catch {
       setNotice('Aplicá la migración V7 para guardar medios de pago.');
     }
@@ -3596,6 +3614,7 @@ function AccountPanel({
           <h2>Pagos</h2>
           <span>{paymentProfiles.length}</span>
         </div>
+        <p className="v6-muted">Guardamos un método por tipo para evitar duplicados.</p>
         <div className="v6-choice-grid three">
           {paymentOptions.map((option) => (
             <button className="v6-choice" type="button" key={option.id} onClick={() => addPayment(option.id)}>
@@ -3607,8 +3626,7 @@ function AccountPanel({
         <div className="v6-file-list">
           {paymentProfiles.map((payment) => (
             <span key={payment.id}>
-              <CreditCard size={15} aria-hidden="true" /> {payment.label}
-              {payment.last4 ? ` terminada en ${payment.last4}` : ''}
+              {paymentProfileIcon(payment)} {paymentProfileDisplay(payment)}
             </span>
           ))}
         </div>
