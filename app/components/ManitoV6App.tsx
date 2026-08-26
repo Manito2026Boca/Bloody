@@ -862,9 +862,16 @@ export default function ManitoV6App() {
             MANI<span>TO</span>
           </strong>
           <p className="v6-kicker">Tu ubicación</p>
-          <p className="v6-location">
+          <button
+            className="v6-location"
+            type="button"
+            onClick={() => {
+              setTab('profile');
+              setNotice('Completá tu ciudad en Datos personales.');
+            }}
+          >
             <MapPin size={13} aria-hidden="true" /> {currentLocation}
-          </p>
+          </button>
           <div className="v6-mode-switch" aria-label="Modo de uso">
             <button
               type="button"

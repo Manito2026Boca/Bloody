@@ -697,9 +697,21 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  margin: 4px 0 0;
+  border: 0;
+  background: transparent;
   color: white;
+  cursor: pointer;
   font-size: 0.9rem;
   font-weight: 900;
+  line-height: 1.35;
+  padding: 0;
+  text-align: left;
+}
+
+.v6-top .v6-location:focus-visible {
+  outline: 2px solid var(--orange-600);
+  outline-offset: 3px;
 }
 
 .v6-mode-switch {
