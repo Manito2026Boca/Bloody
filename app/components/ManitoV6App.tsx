@@ -1121,7 +1121,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         await completeV6Profile({ fullName, role });
       } else {
         setLocalNotice('Cuenta creada. Te mandamos un email para confirmar y entrar a MANITO.');
-        setNotice('Cuenta creada. Revisa tu email para confirmar el acceso.');
+        setNotice('Cuenta creada. Revisá tu email para confirmar el acceso.');
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo ingresar.');
@@ -3015,7 +3015,7 @@ function ProfilePanel({
   function uploadErrorMessage(caught: unknown) {
     const message = caught instanceof Error ? caught.message : '';
     if (message.toLowerCase().includes('mime') || message.toLowerCase().includes('type')) {
-      return 'Por ahora sube fotos JPG, PNG o WebP. Para PDF, pega un link.';
+      return 'Por ahora subí fotos JPG, PNG o WebP. Para PDF, pegá un link.';
     }
     if (message.toLowerCase().includes('bucket') || message.toLowerCase().includes('storage')) {
       return 'No se pudo subir el archivo. Pega un link mientras revisamos Storage.';

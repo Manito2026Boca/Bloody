@@ -46,9 +46,9 @@ function isJwtTimingError(error: unknown) {
 
 function friendlyConfirmationError(error: unknown) {
   if (isJwtTimingError(error)) {
-    return 'Tu email fue validado, pero el celular parece tener la hora desfasada. Activa fecha y hora automatica y toca Entrar a MANITO.';
+    return 'Tu email fue validado, pero el celular parece tener la hora desfasada. Activá fecha y hora automática y tocá Entrar a MANITO.';
   }
-  return 'No pudimos confirmar el enlace. Proba ingresar con tu email y contrasena.';
+  return 'No pudimos confirmar el enlace. Probá ingresar con tu email y contraseña.';
 }
 
 export default function AuthConfirmationScreen({
@@ -112,7 +112,7 @@ export default function AuthConfirmationScreen({
           if (!data.session) {
             if (!alive) return;
             setState('ready');
-            setMessage('Tu email ya fue confirmado. Ingresa con tu cuenta para seguir.');
+            setMessage('Tu email ya fue confirmado. Ingresá con tu cuenta para seguir.');
             return;
           }
           confirmedEmail = getConfirmedEmail(data);
@@ -153,7 +153,7 @@ export default function AuthConfirmationScreen({
 
         if (!alive) return;
         setState('success');
-        setMessage('Tu cuenta fue confirmada. Ya podes entrar a MANITO.');
+        setMessage('Tu cuenta fue confirmada. Ya podés entrar a MANITO.');
       } catch (caught) {
         if (!alive) return;
         if (isJwtTimingError(caught)) {
