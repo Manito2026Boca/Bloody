@@ -16,6 +16,7 @@ type SupabaseAuthPayload = {
   user?: { email?: string | null } | null;
   session?: { user?: { email?: string | null } | null } | null;
 };
+const deployedAppUrl = 'https://bloody-eta.vercel.app';
 
 function pendingProfileKey(email: string) {
   return `manito_v6_pending_profile:${email.toLowerCase()}`;
@@ -59,7 +60,16 @@ export default function AuthConfirmationScreen({
   const [message, setMessage] = useState('Estamos validando tu cuenta.');
 
   const appUrl = useMemo(() => {
-    if (typeof window === 'undefined') return '/';
+    if (typeof window === 'undefined') return deployedAppUrl;
+    const configuredUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (configuredUrl) return configuredUrl;
+    if (
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname.endsWith('.chatgpt.site')
+    ) {
+      return deployedAppUrl;
+    }
     return window.location.origin;
   }, []);
 

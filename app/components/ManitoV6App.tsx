@@ -778,7 +778,9 @@ export default function ManitoV6App() {
   }
 
   if (!profile) {
-    const profileError = error || 'No se encontró tu perfil.';
+    const profileError = error
+      ? friendlySessionError(error, 'No se encontró tu perfil.')
+      : 'No se encontró tu perfil.';
     const canResetSession =
       profileError.includes('hora desfasada') ||
       profileError.toLowerCase().includes('jwt issued at future');
