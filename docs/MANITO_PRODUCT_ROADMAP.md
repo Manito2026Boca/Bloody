@@ -49,7 +49,7 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 - Presupuesto y precio final separado en visita, mano de obra, materiales, adicional y fee MANITO.
 - Flujo de adicionales aceptados por cliente antes de sumarse al precio.
 - Recibos/comprobantes y conciliacion interna.
-- Integracion real futura con Mercado Pago u otro proveedor local.
+- Cuenta DNI/billetera como preferencia de pago coordinada por QR/link; integracion real futura con Banco Provincia, Mercado Pago u otro proveedor local.
 
 ## 6. Notificaciones y comunicacion
 
@@ -94,7 +94,7 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 5. Cita pendiente y notificaciones in-app persistentes. Estado: implementado aviso in-app en Inicio y Pedidos; falta push/PWA.
 6. Chat y contacto del prestador con reglas claras de privacidad. Estado: chat operativo para pedidos aceptados y preferencia de telefono protegida; falta enforcement backend fino.
 7. Admin de altas profesionales y documentos.
-8. Pagos/adicionales mas robustos.
+8. Pagos/adicionales mas robustos. Estado: metodos deduplicados, Cuenta DNI/billetera agregada como preferencia y datos de cobro profesional privados; falta pasarela real.
 9. PWA completa con iconos y manifest final. Estado: base instalada; falta iconografia final de marca.
 10. QA de permisos y pruebas moviles antes de invitar testers mas amplios.
 11. Categorias y subrubros. Estado: implementado grupo Automotor con subrubros mecanica, gomeria y chapa/pintura; falta admin editable.
