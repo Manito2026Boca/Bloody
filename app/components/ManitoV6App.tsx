@@ -1352,9 +1352,11 @@ export default function ManitoV6App() {
           <AccountPanel
             key={`${profile.id}:${profile.city || ''}:${profile.phone || ''}`}
             profile={profile}
+            clientOrders={clientOrders}
             canInstall={Boolean(installPrompt) && !isStandalone}
             onInstall={installApp}
             onUsePhoneLocation={usePhoneLocation}
+            onNavigate={setTab}
             onProfileChange={setProfile}
             onOpenProfile={() => setTab('profile')}
             savingPhoneLocation={savingPhoneLocation}
@@ -4316,18 +4318,22 @@ function ProfilePanel({
 
 function AccountPanel({
   profile,
+  clientOrders,
   canInstall,
   onInstall,
   onUsePhoneLocation,
+  onNavigate,
   onProfileChange,
   onOpenProfile,
   savingPhoneLocation,
   setNotice,
 }: {
   profile: V6Profile;
+  clientOrders: V6Order[];
   canInstall: boolean;
   onInstall: () => void;
   onUsePhoneLocation: () => void;
+  onNavigate: (tab: Tab) => void;
   onProfileChange: (profile: V6Profile) => void;
   onOpenProfile: () => void;
   savingPhoneLocation: boolean;
@@ -4427,6 +4433,46 @@ function AccountPanel({
     }
   }
 
+  function goToRecurringOrders() {
+    const hasOrders = clientOrders.length > 0;
+    onNavigate(hasOrders ? 'orders' : 'home');
+    setNotice(
+      hasOrders
+        ? 'Abrí un pedido anterior para repetirlo o usarlo como referencia.'
+        : 'Todavía no hay pedidos habituales. Creá el primero desde Inicio.',
+    );
+  }
+
+  async function shareActiveTracking() {
+    const activeOrder = clientOrders.find((order) => !['completed', 'cancelled'].includes(order.status));
+    if (!activeOrder) {
+      onNavigate('orders');
+      setNotice('Cuando tengas un pedido en curso vas a poder compartir el seguimiento.');
+      return;
+    }
+
+    const text = orderTrackingText(activeOrder);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Seguimiento MANITO', text });
+        setNotice('Seguimiento compartido.');
+        return;
+      }
+      await navigator.clipboard?.writeText(text);
+      setNotice('Seguimiento copiado. Pegalo en WhatsApp o donde quieras compartirlo.');
+    } catch {
+      setNotice('Abrí el pedido en curso para ver y compartir el seguimiento.');
+    }
+    onNavigate('orders');
+  }
+
+  function focusTrustedContact() {
+    const target = document.getElementById('trusted-contact-input');
+    target?.focus();
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setNotice('Cargá un contacto de confianza para compartirle seguimientos.');
+  }
+
   async function addPayment(type: PaymentMethod) {
     if (savingPaymentType) return;
     setSavingPaymentType(type);
@@ -4519,7 +4565,11 @@ function AccountPanel({
           </label>
           <label className="v6-field">
             <span>Contacto de confianza</span>
-            <input value={trustedContact} onChange={(event) => setTrustedContact(event.target.value)} />
+            <input
+              id="trusted-contact-input"
+              value={trustedContact}
+              onChange={(event) => setTrustedContact(event.target.value)}
+            />
           </label>
           <label className="v6-toggle-row">
             <span>
@@ -4581,10 +4631,21 @@ function AccountPanel({
       <section className="v6-card">
         <h2>Beneficios</h2>
         <div className="v6-step-grid">
-          <span className="done">Referidos: invitá y ganá crédito</span>
-          <span className="done">Recurrentes: repetir servicios habituales</span>
-          <span className="done">Favoritos: volver a contratar profesionales</span>
-          <span className="done">Compartir seguimiento con contacto de confianza</span>
+          <button className="done" type="button" onClick={copyReferralCode}>
+            Referidos: invitá y ganá crédito
+          </button>
+          <button className="done" type="button" onClick={goToRecurringOrders}>
+            Recurrentes: repetir servicios habituales
+          </button>
+          <button className="done" type="button" onClick={() => onNavigate('favorites')}>
+            Favoritos: volver a contratar profesionales
+          </button>
+          <button className="done" type="button" onClick={shareActiveTracking}>
+            Compartir seguimiento con contacto de confianza
+          </button>
+          <button className="done" type="button" onClick={focusTrustedContact}>
+            Configurar contacto de confianza
+          </button>
         </div>
       </section>
       <section className="v6-card v6-account-cta">
