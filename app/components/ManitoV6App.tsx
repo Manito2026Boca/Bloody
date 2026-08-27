@@ -839,9 +839,9 @@ export default function ManitoV6App() {
           if (pending) {
             const parsed = JSON.parse(pending) as {
               fullName: string;
-              role: V6Role;
+              role?: V6Role;
             };
-            await completeV6Profile(parsed);
+            await completeV6Profile({ fullName: parsed.fullName, role: parsed.role || 'client' });
             window.localStorage.removeItem(pendingProfileKey(email));
           }
           await loadData(data.session.user.id);
@@ -1256,7 +1256,6 @@ function SetupScreen({ onConnected }: { onConnected: () => void }) {
 function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
   const [mode, setMode] = useState<AuthMode>('login');
   const [fullName, setFullName] = useState('');
-  const [role, setRole] = useState<V6Role>('client');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -1279,7 +1278,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
 
       window.localStorage.setItem(
         pendingProfileKey(email),
-        JSON.stringify({ fullName, role }),
+        JSON.stringify({ fullName, role: 'client' }),
       );
       const { data, error: signupError } = await supabase.auth.signUp({
         email,
@@ -1291,7 +1290,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
       });
       if (signupError) throw signupError;
       if (data.session) {
-        await completeV6Profile({ fullName, role });
+        await completeV6Profile({ fullName, role: 'client' });
       } else {
         setLocalNotice('Cuenta creada. Te mandamos un email para confirmar y entrar a MANITO.');
         setNotice('Cuenta creada. Revisá tu email para confirmar el acceso.');
@@ -1307,9 +1306,9 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         <p className="v6-logo">
           MANI<span>TO</span>
         </p>
-        <h1>{mode === 'login' ? 'Entra a MANITO.' : 'Crea tu cuenta.'}</h1>
+        <h1>{mode === 'login' ? 'Entra a MANITO.' : 'Crea tu cuenta MANITO.'}</h1>
         <p className="v6-muted">
-          Probá el circuito como cliente y profesional desde la misma cuenta.
+          Entrás como cliente. Después podés activar tu perfil profesional desde Cuenta.
         </p>
         <div className="v6-tabs">
           <button type="button" aria-pressed={mode === 'login'} onClick={() => setMode('login')}>
@@ -1325,13 +1324,6 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
               <label className="v6-field">
                 <span>Nombre y apellido</span>
                 <input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
-              </label>
-              <label className="v6-field">
-                <span>Tipo de cuenta</span>
-                <select value={role} onChange={(event) => setRole(event.target.value as V6Role)}>
-                  <option value="client">Quiero contratar servicios</option>
-                  <option value="professional">Quiero trabajar con MANITO</option>
-                </select>
               </label>
             </>
           )}

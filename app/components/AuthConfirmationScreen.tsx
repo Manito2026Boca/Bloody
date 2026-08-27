@@ -9,7 +9,7 @@ import type { V6Role } from '../lib/v6Types';
 type ConfirmationState = 'loading' | 'success' | 'ready' | 'error';
 type PendingProfile = {
   fullName: string;
-  role: V6Role;
+  role?: V6Role;
 };
 
 type SupabaseAuthPayload = {
@@ -31,7 +31,7 @@ async function completePendingProfile(email: string) {
   const raw = window.localStorage.getItem(pendingProfileKey(email));
   if (!raw) return;
   const pending = JSON.parse(raw) as PendingProfile;
-  await completeV6Profile(pending);
+  await completeV6Profile({ fullName: pending.fullName, role: pending.role || 'client' });
   window.localStorage.removeItem(pendingProfileKey(email));
 }
 
