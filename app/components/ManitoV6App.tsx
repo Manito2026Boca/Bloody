@@ -1390,6 +1390,12 @@ function ClientHome({
   const recommendedSpecialties = recommendedService
     ? detectSpecialtiesForService(recommendedService, specialties, `${problemQuery}\n${description}`)
     : [];
+  const selectedServiceSpecialties = selectedService
+    ? specialties.filter((specialty) => specialty.service_id === selectedService.id)
+    : [];
+  const selectedServiceSpecialtyMatches = selectedService
+    ? detectSpecialtiesForService(selectedService, specialties, `${problemQuery}\n${description}`)
+    : [];
   const query = normalizeText(problemQuery);
   const scoreMatches = scoredServices
     .filter((item) => item.score > 0)
@@ -1654,6 +1660,20 @@ function ClientHome({
     scrollToRequestForm();
   }
 
+  function addSpecialtyToRequest(specialty: V6Specialty) {
+    setDescription((current) => {
+      if (normalizeText(current).includes(normalizeText(specialty.name))) return current;
+      const prefix = current.trim() ? `${current.trim()}\n` : '';
+      return `${prefix}Detalle: ${specialty.name}`;
+    });
+    setProblemQuery(
+      normalizeText(problemQuery).includes(normalizeText(specialty.name))
+        ? problemQuery
+        : `${problemQuery.trim()} ${specialty.name}`.trim(),
+    );
+    setNotice(`${specialty.name} agregado al pedido.`);
+  }
+
   function repeatLastOrder() {
     const lastOrder = clientOrders[0];
     if (!lastOrder) {
@@ -1849,6 +1869,30 @@ function ClientHome({
               <span>Que necesitas?</span>
               <textarea value={description} onChange={(event) => setDescription(event.target.value)} required />
             </label>
+            {selectedServiceSpecialties.length > 0 && (
+              <div className="v6-specialty-panel compact">
+                <div className="v6-section-head compact">
+                  <h2>Especialidad</h2>
+                  <span>
+                    {selectedServiceSpecialtyMatches[0]
+                      ? `detecté ${selectedServiceSpecialtyMatches[0].specialty.name}`
+                      : 'opcional'}
+                  </span>
+                </div>
+                <div className="v6-chip-list">
+                  {selectedServiceSpecialties.map((specialty) => (
+                    <button
+                      type="button"
+                      key={specialty.id}
+                      aria-pressed={selectedServiceSpecialtyMatches.some((match) => match.specialty.id === specialty.id)}
+                      onClick={() => addSpecialtyToRequest(specialty)}
+                    >
+                      {specialty.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="v6-split">
               <label className="v6-field">

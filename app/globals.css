@@ -913,6 +913,11 @@ a {
   border-top: 1px solid var(--line);
 }
 
+.v6-specialty-panel.compact {
+  margin-top: 0;
+  padding-top: 8px;
+}
+
 .v6-specialty-group {
   display: grid;
   gap: 8px;
