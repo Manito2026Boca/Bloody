@@ -147,7 +147,14 @@ type ProfessionalCandidate = {
   etaMinutes: number | null;
   distanceKm: number | null;
 };
-type ServiceGroupId = 'all' | 'home' | 'automotive';
+type ServiceGroupId =
+  | 'all'
+  | 'home'
+  | 'projects'
+  | 'technology'
+  | 'learning'
+  | 'events'
+  | 'automotive';
 type ServiceGroup = {
   id: ServiceGroupId;
   label: string;
@@ -227,10 +234,37 @@ const serviceGroups: ServiceGroup[] = [
       'mudanzas',
       'carpinteria',
       'fumigacion',
-      'tecnologia',
       'albanileria',
       'pileta',
     ],
+  },
+  {
+    id: 'projects',
+    label: 'Proyectos',
+    slugs: [
+      'arquitectura',
+      'ingenieria',
+      'diseno_interiores',
+      'albanileria',
+      'carpinteria',
+      'pintura',
+      'mudanzas',
+    ],
+  },
+  {
+    id: 'technology',
+    label: 'Tecnología',
+    slugs: ['tecnologia', 'soporte_remoto', 'electro'],
+  },
+  {
+    id: 'learning',
+    label: 'Aprendizaje',
+    slugs: ['profesores_particulares'],
+  },
+  {
+    id: 'events',
+    label: 'Eventos',
+    slugs: ['fotografia'],
   },
   {
     id: 'automotive',
@@ -255,6 +289,12 @@ const serviceKeywords: Record<string, string[]> = {
   tecnologia: ['pc', 'notebook', 'wifi', 'redes', 'impresora', 'software', 'computadora'],
   albanileria: ['albanil', 'revoque', 'piso', 'pared', 'obra', 'reparacion'],
   pileta: ['pileta', 'piscina', 'bomba', 'filtro', 'cloro', 'mantenimiento'],
+  arquitectura: ['arquitecto', 'arquitectura', 'plano', 'planos', 'reforma', 'ampliacion', 'obra', 'proyecto', 'regularizacion', 'render', 'direccion de obra'],
+  ingenieria: ['ingeniero', 'ingenieria', 'calculo', 'estructura', 'estructural', 'peritaje', 'seguridad e higiene', 'instalacion', 'industrial', 'civil', 'mecanica electrica'],
+  diseno_interiores: ['disenador', 'diseno interior', 'interiores', 'decoracion', 'ambientacion', 'mobiliario', 'iluminacion decorativa', 'terminaciones'],
+  fotografia: ['fotografo', 'fotografia', 'foto', 'fotos', 'evento', 'producto', 'retrato', 'video', 'edicion', 'inmueble'],
+  profesores_particulares: ['profesor', 'particular', 'clase', 'apoyo escolar', 'matematica', 'ingles', 'portugues', 'universitario', 'musica', 'examen'],
+  soporte_remoto: ['soporte remoto', 'asistencia remota', 'computadora', 'pc', 'notebook', 'wifi', 'red', 'software', 'celular', 'backup', 'seguridad'],
   mecanica_automotor: ['mecanico', 'mecanica', 'auto', 'automotor', 'motor', 'freno', 'embrague', 'bateria', 'arranque', 'service'],
   gomeria: ['gomeria', 'goma', 'cubierta', 'neumatico', 'pinchadura', 'balanceo', 'alineacion', 'rueda', 'auto', 'automotor'],
   chapa_pintura_auto: ['chapista', 'chapa', 'pintura auto', 'choque', 'abolladura', 'paragolpe', 'rayon', 'carroceria', 'auto', 'automotor'],
@@ -297,6 +337,12 @@ function orderTrackingText(order: V6Order) {
 function serviceIcon(slug: string) {
   if (slug === 'cerrajeria') return <KeyRound size={20} aria-hidden="true" />;
   if (slug === 'electricidad') return <PlugZap size={20} aria-hidden="true" />;
+  if (['arquitectura', 'ingenieria', 'diseno_interiores'].includes(slug)) {
+    return <BriefcaseBusiness size={20} aria-hidden="true" />;
+  }
+  if (slug === 'fotografia') return <Camera size={20} aria-hidden="true" />;
+  if (slug === 'profesores_particulares') return <Users size={20} aria-hidden="true" />;
+  if (slug === 'soporte_remoto') return <PlugZap size={20} aria-hidden="true" />;
   if (['mecanica_automotor', 'gomeria', 'chapa_pintura_auto'].includes(slug)) {
     return <Wrench size={20} aria-hidden="true" />;
   }
@@ -314,6 +360,12 @@ function serviceDisplayName(service?: Pick<V6Service, 'slug' | 'name'> | null) {
     tecnologia: 'PC y tecnología',
     albanileria: 'Albañilería',
     pileta: 'Piletas',
+    arquitectura: 'Arquitectura',
+    ingenieria: 'Ingeniería',
+    diseno_interiores: 'Diseño de interiores',
+    fotografia: 'Fotografía',
+    profesores_particulares: 'Profesores particulares',
+    soporte_remoto: 'Soporte tecnológico remoto',
     mecanica_automotor: 'Mecánica automotor',
     gomeria: 'Gomería',
     chapa_pintura_auto: 'Chapa y pintura',
@@ -384,6 +436,42 @@ const specialtyKeywordHints: Record<string, string[]> = {
   'pc y notebooks': ['pc', 'notebook', 'computadora'],
   bombas: ['bomba', 'pileta'],
   filtros: ['filtro', 'pileta'],
+  'proyecto de vivienda': ['casa', 'vivienda', 'proyecto', 'construir'],
+  'reformas y ampliaciones': ['reforma', 'ampliacion', 'agrandar', 'remodelar'],
+  planos: ['plano', 'planos', 'municipal', 'obra'],
+  regularizaciones: ['regularizar', 'regularizacion', 'habilitar', 'municipal'],
+  'direccion de obra': ['direccion de obra', 'obra', 'seguimiento'],
+  relevamientos: ['relevar', 'medir', 'relevamiento'],
+  'consultas tecnicas': ['consulta tecnica', 'asesoria', 'opinion profesional'],
+  'computo y presupuesto': ['computo', 'presupuesto', 'materiales'],
+  'renderizado / visualizacion': ['render', 'renderizado', 'visualizacion'],
+  'ingenieria civil': ['civil', 'estructura', 'obra'],
+  'ingenieria electrica': ['ingeniero electrico', 'instalacion electrica', 'potencia'],
+  'ingenieria mecanica': ['mecanica', 'maquina', 'equipo'],
+  'seguridad e higiene': ['seguridad e higiene', 'higiene', 'riesgo laboral'],
+  'calculo estructural': ['calculo', 'estructura', 'estructural'],
+  peritajes: ['peritaje', 'informe tecnico', 'dano'],
+  consultoria: ['consultoria', 'asesoria'],
+  ambientacion: ['ambientacion', 'decoracion'],
+  'distribucion de espacios': ['distribucion', 'espacio', 'layout'],
+  mobiliario: ['mueble', 'mobiliario'],
+  'iluminacion decorativa': ['iluminacion decorativa', 'luces', 'ambiente'],
+  eventos: ['evento', 'cumpleanos', 'casamiento', 'fiesta'],
+  producto: ['producto', 'catalogo', 'marca'],
+  retratos: ['retrato', 'perfil', 'book'],
+  inmuebles: ['inmueble', 'departamento', 'casa en venta'],
+  'video corto': ['video', 'reel', 'redes'],
+  edicion: ['editar', 'edicion', 'retoque'],
+  'apoyo escolar': ['apoyo escolar', 'tarea', 'primaria', 'secundaria'],
+  matematica: ['matematica', 'algebra', 'analisis'],
+  ingles: ['ingles', 'idioma'],
+  portugues: ['portugues', 'idioma'],
+  universitario: ['universidad', 'facultad', 'parcial', 'final'],
+  musica: ['musica', 'guitarra', 'piano'],
+  'instalacion de software': ['instalar programa', 'software', 'windows'],
+  'configuracion de celulares': ['celular', 'telefono', 'configurar'],
+  'asistencia remota': ['remoto', 'teamviewer', 'anydesk'],
+  'backup y seguridad': ['backup', 'copia', 'seguridad', 'virus'],
 };
 
 function specialtyScore(specialty: V6Specialty, query: string) {
@@ -506,6 +594,34 @@ function filterServicesByGroup(services: V6Service[], groupId: ServiceGroupId) {
 
 function serviceGroupFromQuery(query: string): ServiceGroupId {
   const normalizedQuery = normalizeText(query);
+  if (
+    ['arquitecto', 'arquitectura', 'ingeniero', 'ingenieria', 'plano', 'reforma', 'obra', 'render', 'interiorismo', 'diseno interior'].some((keyword) =>
+      normalizedQuery.includes(keyword),
+    )
+  ) {
+    return 'projects';
+  }
+  if (
+    ['pc', 'notebook', 'wifi', 'internet', 'software', 'soporte remoto', 'celular', 'computadora'].some((keyword) =>
+      normalizedQuery.includes(keyword),
+    )
+  ) {
+    return 'technology';
+  }
+  if (
+    ['profesor', 'clase', 'apoyo escolar', 'matematica', 'ingles', 'portugues', 'examen'].some((keyword) =>
+      normalizedQuery.includes(keyword),
+    )
+  ) {
+    return 'learning';
+  }
+  if (
+    ['fotografo', 'fotografia', 'fotos', 'evento', 'retrato', 'video'].some((keyword) =>
+      normalizedQuery.includes(keyword),
+    )
+  ) {
+    return 'events';
+  }
   if (
     ['auto', 'automotor', 'mecanico', 'mecanica', 'chapista', 'gomeria', 'cubierta', 'neumatico'].some((keyword) =>
       normalizedQuery.includes(keyword),
@@ -1024,8 +1140,8 @@ export default function ManitoV6App() {
             className="v6-location"
             type="button"
             onClick={() => {
-              setTab('profile');
-              setNotice('Completá tu ciudad en Datos personales.');
+              setTab('account');
+              setNotice('Completá tu ciudad en Ubicación principal.');
             }}
           >
             <MapPin size={13} aria-hidden="true" /> {currentLocation}
@@ -1167,6 +1283,7 @@ export default function ManitoV6App() {
             profile={profile}
             canInstall={Boolean(installPrompt) && !isStandalone}
             onInstall={installApp}
+            onProfileChange={setProfile}
             onOpenProfile={() => setTab('profile')}
             setNotice={setNotice}
           />
@@ -4128,15 +4245,20 @@ function AccountPanel({
   profile,
   canInstall,
   onInstall,
+  onProfileChange,
   onOpenProfile,
   setNotice,
 }: {
   profile: V6Profile;
   canInstall: boolean;
   onInstall: () => void;
+  onProfileChange: (profile: V6Profile) => void;
   onOpenProfile: () => void;
   setNotice: (message: string) => void;
 }) {
+  const [locationCity, setLocationCity] = useState(profile.city || '');
+  const [locationPhone, setLocationPhone] = useState(profile.phone || '');
+  const [savingLocation, setSavingLocation] = useState(false);
   const [accountType, setAccountType] = useState(() => {
     if (typeof window === 'undefined') return 'particular';
     return window.localStorage.getItem(`manito_v6_account_type:${profile.id}`) || 'particular';
@@ -4196,6 +4318,29 @@ function AccountPanel({
     setNotice('Cuenta actualizada.');
   }
 
+  async function saveLocation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (savingLocation) return;
+    if (!locationCity.trim()) {
+      setNotice('Escribí tu ciudad.');
+      return;
+    }
+    setSavingLocation(true);
+    try {
+      const updated = await updateV6Profile(profile.id, {
+        full_name: profile.full_name,
+        phone: locationPhone.trim() || null,
+        city: locationCity.trim(),
+      });
+      onProfileChange(updated);
+      setNotice('Ubicación principal actualizada.');
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : 'No se pudo guardar la ubicación.');
+    } finally {
+      setSavingLocation(false);
+    }
+  }
+
   async function copyReferralCode() {
     try {
       await navigator.clipboard?.writeText(referralCode);
@@ -4238,6 +4383,34 @@ function AccountPanel({
         <button className="v6-primary" type="button" onClick={onOpenProfile}>
           Editar perfil
         </button>
+      </section>
+      <section className="v6-card">
+        <h2>Ubicación principal</h2>
+        <p className="v6-muted">
+          MANITO usa esta ciudad para mostrar la ubicación arriba y ordenar profesionales cercanos.
+        </p>
+        <form className="v6-stack" onSubmit={saveLocation}>
+          <label className="v6-field">
+            <span>Ciudad</span>
+            <input
+              value={locationCity}
+              onChange={(event) => setLocationCity(event.target.value)}
+              placeholder="Ej: Mar del Plata"
+              required
+            />
+          </label>
+          <label className="v6-field">
+            <span>Teléfono</span>
+            <input
+              value={locationPhone}
+              onChange={(event) => setLocationPhone(event.target.value)}
+              placeholder="Opcional"
+            />
+          </label>
+          <button className="v6-secondary" type="submit" disabled={savingLocation}>
+            {savingLocation ? 'Guardando...' : 'Guardar ubicación'}
+          </button>
+        </form>
       </section>
       <section className="v6-card">
         <h2>Datos de cuenta</h2>
