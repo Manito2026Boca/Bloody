@@ -664,13 +664,14 @@ function splitStoredAddress(value: string, fallbackCity?: string | null) {
 function headerLocation(profile: V6Profile) {
   const location = (profile.city || '').trim();
   if (!location) return 'Agregar ciudad';
-  if (location.includes(',')) {
-    return location.split(',').map((part) => part.trim()).filter(Boolean).at(-1) || 'Agregar ciudad';
-  }
   const looksLikeStreetAddress =
     /\d/.test(location) &&
     /\b(av\.?|avenida|calle|boulevard|bulevar|pasaje|ruta|diag\.?|diagonal)\b/i.test(location);
-  return looksLikeStreetAddress ? 'Configurar ciudad' : location;
+  if (location.includes(',')) {
+    const parts = location.split(',').map((part) => part.trim()).filter(Boolean);
+    return parts.slice(0, looksLikeStreetAddress ? 2 : 3).join(', ') || 'Agregar ciudad';
+  }
+  return location;
 }
 
 function distanceKm(
@@ -931,6 +932,10 @@ function readableReverseLocation(data: ReverseGeocodeResponse): ReverseGeocodeRe
   const road =
     address.road ||
     address.pedestrian ||
+    address.footway ||
+    address.path ||
+    address.cycleway ||
+    address.residential ||
     address.neighbourhood ||
     address.suburb ||
     null;
@@ -945,7 +950,7 @@ async function reverseGeocodePhoneLocation(lat: number, lng: number): Promise<Re
   const url = new URL('https://nominatim.openstreetmap.org/reverse');
   url.searchParams.set('format', 'jsonv2');
   url.searchParams.set('addressdetails', '1');
-  url.searchParams.set('zoom', '16');
+  url.searchParams.set('zoom', '18');
   url.searchParams.set('lat', String(lat));
   url.searchParams.set('lon', String(lng));
   url.searchParams.set('accept-language', 'es-AR,es');
@@ -1183,8 +1188,8 @@ export default function ManitoV6App() {
       const lng = position.coords.longitude;
       const reverseLocation = await reverseGeocodePhoneLocation(lat, lng).catch(() => null);
       const nextCity =
-        reverseLocation?.city ||
         reverseLocation?.label ||
+        reverseLocation?.city ||
         (profile.city && profile.city !== 'Ubicación actual' ? profile.city : coordinateFallback(lat, lng));
       const updated = await updateV6Profile(profile.id, {
         full_name: profile.full_name,

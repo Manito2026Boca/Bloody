@@ -704,6 +704,7 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  max-width: min(100%, 360px);
   margin: 4px 0 0;
   border: 0;
   background: transparent;
@@ -714,6 +715,7 @@ a {
   line-height: 1.35;
   padding: 0;
   text-align: left;
+  overflow-wrap: anywhere;
 }
 
 .v6-top .v6-location:focus-visible {
