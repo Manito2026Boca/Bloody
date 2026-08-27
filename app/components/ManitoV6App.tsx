@@ -1882,9 +1882,9 @@ function ClientHome({
         </div>
         <div className="v6-mode-grid">
           {([
-            { id: 'immediate', title: 'Ahora', body: 'Profesional disponible lo antes posible', icon: <PlugZap size={22} aria-hidden="true" /> },
-            { id: 'scheduled', title: 'Programar', body: 'Elegí día y horario', icon: <Clock size={22} aria-hidden="true" /> },
-            { id: 'quote', title: 'Presupuestar', body: 'Compará propuestas antes de decidir', icon: <MessageCircle size={22} aria-hidden="true" /> },
+            { id: 'immediate', title: 'Ahora', body: 'Lo antes posible', icon: <PlugZap size={20} aria-hidden="true" /> },
+            { id: 'scheduled', title: 'Programar', body: 'Día y horario', icon: <Clock size={20} aria-hidden="true" /> },
+            { id: 'quote', title: 'Presupuestar', body: 'Comparar precios', icon: <MessageCircle size={20} aria-hidden="true" /> },
           ] as Array<{ id: V6Mode; title: string; body: string; icon: ReactNode }>).map((item) => (
             <button
               className="v6-mode-card"
