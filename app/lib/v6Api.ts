@@ -22,8 +22,10 @@ import type {
   V6ProfessionalPayoutDetails,
   V6ProfessionalProfile,
   V6ProfessionalService,
+  V6ProfessionalSpecialty,
   V6Role,
   V6Service,
+  V6Specialty,
 } from './v6Types';
 
 function fail(error: { message: string } | null) {
@@ -110,6 +112,19 @@ export async function listV6Services() {
   return (data || []) as V6Service[];
 }
 
+export async function listV6Specialties() {
+  const { data, error } = await getV6Supabase()
+    .from('specialties')
+    .select('*')
+    .eq('active', true)
+    .order('service_id')
+    .order('position')
+    .order('name');
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6Specialty[];
+}
+
 export async function listV6ProfessionalServices(userId: string) {
   const { data, error } = await getV6Supabase()
     .from('professional_services')
@@ -117,6 +132,56 @@ export async function listV6ProfessionalServices(userId: string) {
     .eq('professional_id', userId);
   fail(error);
   return (data || []) as V6ProfessionalService[];
+}
+
+export async function listV6ProfessionalSpecialties(userId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_specialties')
+    .select('*')
+    .eq('professional_id', userId);
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6ProfessionalSpecialty[];
+}
+
+export async function saveV6ProfessionalSpecialties(
+  userId: string,
+  specialtyIds: number[],
+  specialties: V6Specialty[],
+) {
+  const supabase = getV6Supabase();
+  const { error: deleteError } = await supabase
+    .from('professional_specialties')
+    .delete()
+    .eq('professional_id', userId);
+  if (isMissingV5Table(deleteError)) return [];
+  fail(deleteError);
+
+  if (!specialtyIds.length) return [];
+
+  const rows = specialtyIds
+    .map((specialtyId) => {
+      const specialty = specialties.find((item) => item.id === specialtyId);
+      if (!specialty) return null;
+      return {
+        professional_id: userId,
+        service_id: specialty.service_id,
+        specialty_id: specialty.id,
+      };
+    })
+    .filter(
+      (row): row is { professional_id: string; service_id: number; specialty_id: number } =>
+        Boolean(row),
+    );
+
+  if (!rows.length) return [];
+
+  const { data, error } = await supabase
+    .from('professional_specialties')
+    .insert(rows)
+    .select('*');
+  fail(error);
+  return (data || []) as V6ProfessionalSpecialty[];
 }
 
 export async function listV6ClientAddresses(userId: string) {

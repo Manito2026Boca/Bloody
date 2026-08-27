@@ -64,10 +64,13 @@ import {
   listV6Portfolio,
   listV6ProfessionalDocuments,
   listV6ProfessionalServices,
+  listV6ProfessionalSpecialties,
   listV6Services,
+  listV6Specialties,
   removeV6Channel,
   sendV6OrderProposal,
   saveV6ProfessionalServices,
+  saveV6ProfessionalSpecialties,
   sendV6Message,
   setV6Availability,
   subscribeV6Messages,
@@ -102,8 +105,10 @@ import type {
   V6ProfessionalOnboarding,
   V6ProfessionalProfile,
   V6ProfessionalService,
+  V6ProfessionalSpecialty,
   V6Role,
   V6Service,
+  V6Specialty,
 } from '../lib/v6Types';
 import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 
@@ -258,10 +263,16 @@ const serviceGroups: ServiceGroup[] = [
       'cerrajeria',
       'limpieza',
       'pintura',
-      'jardineria',
+      'jardin',
+      'arreglos',
       'aire',
-      'electrodomesticos',
+      'electro',
+      'mudanzas',
       'carpinteria',
+      'fumigacion',
+      'tecnologia',
+      'albanileria',
+      'pileta',
     ],
   },
   {
@@ -277,10 +288,16 @@ const serviceKeywords: Record<string, string[]> = {
   cerrajeria: ['cerrajero', 'cerradura', 'llave', 'puerta', 'traba', 'candado', 'abrir'],
   limpieza: ['limpieza', 'limpiar', 'mucama', 'profunda', 'departamento', 'oficina'],
   pintura: ['pintor', 'pintura', 'pintar', 'pared', 'humedad', 'enduir', 'color'],
-  jardineria: ['jardinero', 'jardineria', 'pasto', 'cesped', 'plantas', 'podar', 'jardin'],
+  jardin: ['jardinero', 'jardineria', 'pasto', 'cesped', 'plantas', 'podar', 'jardin', 'riego'],
+  arreglos: ['arreglos', 'mueble', 'colocar', 'perforar', 'montaje', 'mantenimiento general'],
   aire: ['aire', 'acondicionado', 'split', 'frio', 'calor', 'filtro', 'instalar aire'],
-  electrodomesticos: ['heladera', 'lavarropas', 'horno', 'microondas', 'electrodomestico', 'lavavajillas'],
+  electro: ['heladera', 'lavarropas', 'horno', 'microondas', 'electrodomestico', 'lavavajillas'],
+  mudanzas: ['mudanza', 'flete', 'embalaje', 'traslado', 'desarmar muebles'],
   carpinteria: ['carpintero', 'mueble', 'madera', 'puerta', 'bisagra', 'estante', 'placard'],
+  fumigacion: ['fumigacion', 'cucaracha', 'hormiga', 'roedor', 'desinsectacion'],
+  tecnologia: ['pc', 'notebook', 'wifi', 'redes', 'impresora', 'software', 'computadora'],
+  albanileria: ['albanil', 'revoque', 'piso', 'pared', 'obra', 'reparacion'],
+  pileta: ['pileta', 'piscina', 'bomba', 'filtro', 'cloro', 'mantenimiento'],
   mecanica_automotor: ['mecanico', 'mecanica', 'auto', 'automotor', 'motor', 'freno', 'embrague', 'bateria', 'arranque', 'service'],
   gomeria: ['gomeria', 'goma', 'cubierta', 'neumatico', 'pinchadura', 'balanceo', 'alineacion', 'rueda', 'auto', 'automotor'],
   chapa_pintura_auto: ['chapista', 'chapa', 'pintura auto', 'choque', 'abolladura', 'paragolpe', 'rayon', 'carroceria', 'auto', 'automotor'],
@@ -334,8 +351,12 @@ function serviceDisplayName(service?: Pick<V6Service, 'slug' | 'name'> | null) {
   const names: Record<string, string> = {
     plomeria: 'Plomería',
     cerrajeria: 'Cerrajería',
-    jardineria: 'Jardinería',
+    jardin: 'Jardinería',
     gas: 'Gasista',
+    electro: 'Electrodomésticos',
+    tecnologia: 'PC y tecnología',
+    albanileria: 'Albañilería',
+    pileta: 'Piletas',
     mecanica_automotor: 'Mecánica automotor',
     gomeria: 'Gomería',
     chapa_pintura_auto: 'Chapa y pintura',
@@ -2182,6 +2203,16 @@ function serviceDescription(slug: string) {
   if (slug === 'gas') return 'Revisión, pérdidas, calefones, cocinas y trabajos con gasistas.';
   if (slug === 'cerrajeria') return 'Aperturas, cambios de cerradura y urgencias de acceso.';
   if (slug === 'pintura') return 'Pintura interior y exterior, retoques y ambientes completos.';
+  if (slug === 'jardin') return 'Corte de césped, poda, mantenimiento, terrenos y riego.';
+  if (slug === 'arreglos') return 'Armado de muebles, colocaciones, perforaciones, montajes y mantenimiento.';
+  if (slug === 'aire') return 'Instalación, limpieza, carga de gas, diagnóstico y mantenimiento de splits.';
+  if (slug === 'electro') return 'Heladeras, lavarropas, hornos, microondas y diagnóstico de equipos.';
+  if (slug === 'mudanzas') return 'Fletes, mudanzas completas, embalaje, armado y desarmado.';
+  if (slug === 'carpinteria') return 'Muebles a medida, puertas, estantes y reparaciones de madera.';
+  if (slug === 'fumigacion') return 'Control de cucarachas, hormigas, roedores y desinsectación.';
+  if (slug === 'tecnologia') return 'PC, notebooks, Wi-Fi, redes, impresoras e instalación de software.';
+  if (slug === 'albanileria') return 'Revoques, pisos, paredes y reparaciones de albañilería.';
+  if (slug === 'pileta') return 'Limpieza, bombas, filtros y mantenimiento de piletas.';
   if (slug === 'mecanica_automotor') return 'Diagnóstico, frenos, batería, arranque, service y fallas generales.';
   if (slug === 'gomeria') return 'Pinchaduras, cubiertas, alineación, balanceo y auxilio de ruedas.';
   if (slug === 'chapa_pintura_auto') return 'Chapa, pintura, rayones, abolladuras y arreglos de carrocería.';
@@ -2912,6 +2943,8 @@ function ProfilePanel({
   const [onboarding, setOnboarding] = useState<V6ProfessionalOnboarding | null>(null);
   const [documents, setDocuments] = useState<V6ProfessionalDocument[]>([]);
   const [portfolio, setPortfolio] = useState<V6PortfolioItem[]>([]);
+  const [specialties, setSpecialties] = useState<V6Specialty[]>([]);
+  const [proSpecialties, setProSpecialties] = useState<V6ProfessionalSpecialty[]>([]);
   const [professionalStep, setProfessionalStep] = useState(1);
   const [headline, setHeadline] = useState('Tecnico verificado para urgencias del hogar');
   const [bio, setBio] = useState('Trabajo con turnos puntuales, presupuesto claro y garantía MANITO.');
@@ -2944,13 +2977,25 @@ function ProfilePanel({
       getV6ProfessionalOnboarding(profile.id),
       listV6ProfessionalDocuments(profile.id),
       listV6Portfolio(profile.id),
+      listV6Specialties(),
+      listV6ProfessionalSpecialties(profile.id),
     ])
-      .then(([nextProfessionalProfile, nextPayoutDetails, nextOnboarding, nextDocuments, nextPortfolio]) => {
+      .then(([
+        nextProfessionalProfile,
+        nextPayoutDetails,
+        nextOnboarding,
+        nextDocuments,
+        nextPortfolio,
+        nextSpecialties,
+        nextProSpecialties,
+      ]) => {
         if (!alive) return;
         setProfessionalProfile(nextProfessionalProfile);
         setOnboarding(nextOnboarding);
         setDocuments(nextDocuments);
         setPortfolio(nextPortfolio);
+        setSpecialties(nextSpecialties);
+        setProSpecialties(nextProSpecialties);
         if (nextProfessionalProfile) {
           setHeadline((current) => nextProfessionalProfile.headline || current);
           setBio((current) => nextProfessionalProfile.bio || current);
@@ -2983,6 +3028,30 @@ function ProfilePanel({
     }
     return next;
   }, [proServices, serviceRates]);
+
+  const selectedServiceIds = useMemo(
+    () => new Set(proServices.map((item) => item.service_id)),
+    [proServices],
+  );
+  const selectedSpecialtyIds = useMemo(
+    () => new Set(proSpecialties.map((item) => item.specialty_id)),
+    [proSpecialties],
+  );
+  const specialtiesByService = useMemo(
+    () =>
+      specialties.reduce<Record<number, V6Specialty[]>>((groups, specialty) => {
+        groups[specialty.service_id] = [...(groups[specialty.service_id] || []), specialty];
+        return groups;
+      }, {}),
+    [specialties],
+  );
+  const selectedSpecialtyNames = useMemo(
+    () =>
+      proSpecialties
+        .map((item) => specialties.find((specialty) => specialty.id === item.specialty_id)?.name)
+        .filter((name): name is string => Boolean(name)),
+    [proSpecialties, specialties],
+  );
 
   const uploadedDocumentKinds = useMemo(
     () =>
@@ -3045,11 +3114,30 @@ function ProfilePanel({
     const current = new Set(proServices.map((item) => item.service_id));
     if (current.has(serviceId)) current.delete(serviceId);
     else current.add(serviceId);
+    const nextServiceIds = [...current];
+    const nextSpecialtyIds = proSpecialties
+      .filter((item) => current.has(item.service_id))
+      .map((item) => item.specialty_id);
     try {
-      setProServices(await saveV6ProfessionalServices(profile.id, [...current], services, serviceRatesFor([...current])));
+      const nextServices = await saveV6ProfessionalServices(profile.id, nextServiceIds, services, serviceRatesFor(nextServiceIds));
+      setProServices(nextServices);
+      setProSpecialties(await saveV6ProfessionalSpecialties(profile.id, nextSpecialtyIds, specialties));
       setNotice('Servicios guardados.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se guardaron servicios.');
+    }
+  }
+
+  async function toggleSpecialty(specialty: V6Specialty) {
+    if (!selectedServiceIds.has(specialty.service_id)) return;
+    const current = new Set(proSpecialties.map((item) => item.specialty_id));
+    if (current.has(specialty.id)) current.delete(specialty.id);
+    else current.add(specialty.id);
+    try {
+      setProSpecialties(await saveV6ProfessionalSpecialties(profile.id, [...current], specialties));
+      setNotice('Especialidades guardadas.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se guardaron especialidades.');
     }
   }
 
@@ -3155,6 +3243,13 @@ function ProfilePanel({
       });
       setProfessionalProfile(nextProfile);
       setProServices(await saveV6ProfessionalServices(profile.id, selectedIds, services, serviceRatesFor(selectedIds)));
+      setProSpecialties(await saveV6ProfessionalSpecialties(
+        profile.id,
+        proSpecialties
+          .filter((item) => selectedIds.includes(item.service_id))
+          .map((item) => item.specialty_id),
+        specialties,
+      ));
       setOnboarding(await upsertV6ProfessionalOnboarding({
         professionalId: profile.id,
         status: onboarding?.status || 'draft',
@@ -3265,7 +3360,6 @@ function ProfilePanel({
     }
   }
 
-  const selectedServiceIds = new Set(proServices.map((item) => item.service_id));
   const professionalProgress = Math.round((professionalStep / professionalSteps.length) * 100);
   const completedDocuments = requiredDocuments.filter((item) =>
     uploadedDocumentKinds.has(item.kind),
@@ -3351,11 +3445,48 @@ function ProfilePanel({
                 </button>
               ))}
             </div>
+            {proServices.length > 0 && (
+              <div className="v6-specialty-panel">
+                <div className="v6-section-head compact">
+                  <h2>Especialidades</h2>
+                  <span>opcional</span>
+                </div>
+                <p className="v6-help-text">
+                  Marcá las tareas que mejor hacés. MANITO las usa para recomendarte pedidos más compatibles.
+                </p>
+                {proServices.map((item) => {
+                  const service = services.find((candidate) => candidate.id === item.service_id);
+                  const serviceSpecialties = specialtiesByService[item.service_id] || [];
+                  if (!service || !serviceSpecialties.length) return null;
+                  return (
+                    <div className="v6-specialty-group" key={item.service_id}>
+                      <strong>{serviceDisplayName(service)}</strong>
+                      <div className="v6-chip-list">
+                        {serviceSpecialties.map((specialty) => (
+                          <button
+                            type="button"
+                            key={specialty.id}
+                            aria-pressed={selectedSpecialtyIds.has(specialty.id)}
+                            onClick={() => toggleSpecialty(specialty)}
+                          >
+                            {specialty.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <div className="v6-summary">
               <span>
                 <BriefcaseBusiness size={17} aria-hidden="true" /> Servicios seleccionados
               </span>
-              <small>{proServices.length ? `${proServices.length} rubros activos` : 'Todavía no elegiste rubros'}</small>
+              <small>
+                {proServices.length
+                  ? `${proServices.length} rubros · ${proSpecialties.length} especialidades`
+                  : 'Todavía no elegiste rubros'}
+              </small>
             </div>
           </section>
       )}
@@ -3672,11 +3803,14 @@ function ProfilePanel({
                 <BadgeCheck size={17} aria-hidden="true" /> Resumen de alta
               </span>
               <small>
-                {proServices.length} servicios · {completedDocuments}/{requiredDocuments.length} documentos · {portfolio.length} trabajos en portfolio
+                {proServices.length} rubros · {proSpecialties.length} especialidades · {completedDocuments}/{requiredDocuments.length} documentos · {portfolio.length} trabajos en portfolio
               </small>
             </div>
             <div className="v6-step-grid">
               <span className={proServices.length ? 'done' : ''}>Servicios cargados</span>
+              <span className={selectedSpecialtyNames.length ? 'done' : ''}>
+                {selectedSpecialtyNames.length ? `${selectedSpecialtyNames.length} especialidades` : 'Especialidades opcionales'}
+              </span>
               <span className={professionalProfile ? 'done' : ''}>Perfil público guardado</span>
               <span className={phone && city ? 'done' : ''}>Datos personales</span>
               <span className={completedDocuments === requiredDocuments.length ? 'done' : ''}>Documentos completos</span>

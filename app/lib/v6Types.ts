@@ -41,6 +41,22 @@ export type V6ProfessionalService = {
   price_from: number | null;
 };
 
+export type V6Specialty = {
+  id: number;
+  service_id: number;
+  name: string;
+  position: number;
+  active: boolean;
+  created_at: string;
+};
+
+export type V6ProfessionalSpecialty = {
+  professional_id: string;
+  service_id: number;
+  specialty_id: number;
+  created_at: string;
+};
+
 export type V6Order = {
   id: string;
   client_id: string;
