@@ -46,6 +46,7 @@ import {
   advanceV6Order,
   cancelV6Order,
   completeV6Profile,
+  createV6RecurringServicePlan,
   createV6Order,
   decideV6OrderExtra,
   getV6Profile,
@@ -121,6 +122,7 @@ type AuthMode = 'login' | 'signup';
 type AssignmentMode = 'auto' | 'manual';
 type PaymentMethod = 'card' | 'wallet' | 'cash';
 type AppMode = 'client' | 'professional';
+type RecurrenceFrequency = 'weekly' | 'biweekly' | 'monthly';
 type ProfessionalOrderMatch = {
   order: V6Order;
   score: number;
@@ -176,6 +178,36 @@ const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: ReactNode 
   { id: 'wallet', label: 'Cuenta DNI / billetera', icon: <Wallet size={17} aria-hidden="true" /> },
   { id: 'cash', label: 'Efectivo', icon: <Banknote size={17} aria-hidden="true" /> },
 ];
+const contractModeOptions: Array<{ id: V6Mode; title: string; body: string; icon: ReactNode }> = [
+  { id: 'immediate', title: 'Ahora', body: 'Lo antes posible', icon: <PlugZap size={20} aria-hidden="true" /> },
+  { id: 'scheduled', title: 'Programar', body: 'Día y horario', icon: <Clock size={20} aria-hidden="true" /> },
+  { id: 'quote', title: 'Presupuestar', body: 'Comparar precios', icon: <MessageCircle size={20} aria-hidden="true" /> },
+];
+const recurrenceOptions: Array<{ id: RecurrenceFrequency; label: string }> = [
+  { id: 'weekly', label: 'Semanal' },
+  { id: 'biweekly', label: 'Quincenal' },
+  { id: 'monthly', label: 'Mensual' },
+];
+
+function serviceSupportsMode(service: V6Service | null, mode: V6Mode) {
+  if (!service) return true;
+  if (mode === 'immediate') return service.allow_immediate !== false;
+  if (mode === 'scheduled') return service.allow_scheduled !== false;
+  return service.allow_quote !== false;
+}
+
+function firstSupportedMode(service: V6Service): V6Mode {
+  return contractModeOptions.find((option) => serviceSupportsMode(service, option.id))?.id || 'scheduled';
+}
+
+function unsupportedModeMessage(service: V6Service, mode: V6Mode) {
+  const modeName = contractModeOptions.find((option) => option.id === mode)?.title || 'esta modalidad';
+  return `${serviceDisplayName(service)} no está disponible para ${modeName}. Elegí otra modalidad para este servicio.`;
+}
+
+function supportsRecurringService(service: V6Service | null) {
+  return Boolean(service?.supports_recurring);
+}
 
 function paymentLabel(method?: string | null) {
   if (method === 'transfer') return 'Transferencia';
@@ -327,13 +359,22 @@ function appointmentDate(order: V6Order) {
 function orderTrackingText(order: V6Order) {
   const lines = [
     `MANITO - ${serviceDisplayName(order.service)}`,
-    `Estado: ${V6_STATUS_LABEL[order.status]}`,
+    `Estado: ${orderStatusText(order)}`,
     `Dirección: ${order.address}`,
     order.scheduled_at ? `Turno: ${shortDate(order.scheduled_at)}` : null,
     order.eta_minutes ? `ETA: ${order.eta_minutes} min` : null,
     order.professional?.full_name ? `Prestador: ${order.professional.full_name}` : 'Prestador: pendiente de asignacion',
   ].filter(Boolean);
   return lines.join('\n');
+}
+
+function orderStatusText(order: V6Order, proposalsCount = 0) {
+  if (order.status === 'open' && order.mode === 'quote') {
+    return proposalsCount > 0 ? 'Propuestas recibidas' : 'Esperando presupuestos';
+  }
+  if (order.status === 'open' && order.mode === 'scheduled') return 'Esperando profesional';
+  if (order.status === 'open' && order.mode === 'immediate') return 'Buscando ahora';
+  return V6_STATUS_LABEL[order.status];
 }
 
 function serviceIcon(slug: string) {
@@ -528,14 +569,19 @@ function professionalCandidatesForService({
   specialties,
   query,
   clientCoords,
+  mode = 'immediate',
+  scheduledAt = '',
 }: {
   service: V6Service | null;
   professionals: V6PublicProfessional[];
   specialties: V6Specialty[];
   query: string;
   clientCoords: { lat: number; lng: number } | null;
+  mode?: V6Mode;
+  scheduledAt?: string;
 }) {
   if (!service) return [];
+  if (mode === 'scheduled' && !scheduledAt) return [];
   const detectedSpecialties = detectSpecialtiesForService(service, specialties, query);
   const detectedIds = new Set(detectedSpecialties.map((match) => match.specialty.id));
 
@@ -543,6 +589,7 @@ function professionalCandidatesForService({
     .map((professional) => {
       const proService = professional.services.find((item) => item.service_id === service.id);
       if (!proService) return null;
+      if (mode === 'immediate' && !professional.profile.is_available) return null;
       const distance = clientCoords
         ? distanceKm(
             professional.profile.lat,
@@ -553,26 +600,44 @@ function professionalCandidatesForService({
         : null;
       const radius = professional.professional_profile?.service_radius_km || 8;
       if (distance != null && distance > radius) return null;
+      const reasons = [
+        mode === 'immediate' ? 'Disponible ahora' : mode === 'scheduled' ? 'Agenda compatible' : 'Puede presupuestar',
+        professional.professional_profile?.verified ? 'Verificado' : 'Verificación pendiente',
+      ];
+
+      if (mode === 'scheduled' && scheduledAt) {
+        const scheduled = new Date(scheduledAt);
+        const activeDays = professional.professional_profile?.work_days?.length
+          ? professional.professional_profile.work_days
+          : ['Lun', 'Mar', 'Mie', 'Jue', 'Vie'];
+        const scheduledDay = normalizeDayLabel(scheduledDayLabel(scheduledAt));
+        const worksThatDay = activeDays.map(normalizeDayLabel).includes(scheduledDay);
+        const scheduledTime = scheduled.toTimeString().slice(0, 5);
+        if (!worksThatDay) return null;
+        if (!timeInRange(scheduledTime, professional.professional_profile?.work_starts_at, professional.professional_profile?.work_ends_at)) {
+          return null;
+        }
+        reasons.push(`Horario ${scheduledTime}`);
+      }
 
       const matchedSpecialties = professional.specialties
         .filter((item) => item.service_id === service.id && detectedIds.has(item.specialty_id))
         .map((item) => specialties.find((specialty) => specialty.id === item.specialty_id))
         .filter((item): item is V6Specialty => Boolean(item));
       const specialtyNames = matchedSpecialties.map((item) => item.name);
-      const reasons = [
-        'Disponible',
-        professional.professional_profile?.verified ? 'Verificado' : 'Verificación pendiente',
+      const distanceReason =
         distance != null
           ? `${distance < 1 ? 'Menos de 1' : distance.toFixed(1)} km`
-          : professional.professional_profile?.work_city || professional.profile.city || null,
-        specialtyNames[0] ? `Especialidad: ${specialtyNames.slice(0, 2).join(', ')}` : null,
-      ].filter(Boolean) as string[];
+          : professional.professional_profile?.work_city || professional.profile.city || null;
+      if (distanceReason) reasons.push(distanceReason);
+      if (specialtyNames[0]) reasons.push(`Especialidad: ${specialtyNames.slice(0, 2).join(', ')}`);
       const score =
         62 +
         (professional.professional_profile?.verified ? 12 : 0) +
         Math.min(12, professional.professional_profile?.jobs_completed || 0) +
         (matchedSpecialties.length ? 14 : detectedSpecialties.length ? 2 : 0) +
-        (distance != null ? Math.max(0, 10 - Math.round(distance)) : 3);
+        (distance != null ? Math.max(0, 10 - Math.round(distance)) : 3) +
+        (mode === 'immediate' ? 4 : mode === 'scheduled' ? 2 : 0);
 
       return {
         professional,
@@ -733,7 +798,8 @@ function evaluateProfessionalOrderMatch(
   proSpecialties: V6ProfessionalSpecialty[],
   specialties: V6Specialty[],
 ): ProfessionalOrderMatch | null {
-  if (!profile.is_available || order.status !== 'open') return null;
+  if (order.status !== 'open') return null;
+  if (order.mode === 'immediate' && !profile.is_available) return null;
   const service = proServices.find((item) => item.service_id === order.service_id);
   if (!service) return null;
 
@@ -1642,6 +1708,8 @@ function ClientHome({
   const [addressCity, setAddressCity] = useState(profile.city || '');
   const [mode, setMode] = useState<V6Mode>('immediate');
   const [scheduledAt, setScheduledAt] = useState('');
+  const [repeatService, setRepeatService] = useState(false);
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceFrequency>('weekly');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>(() =>
     loadSavedAddresses(profile.id),
@@ -1664,26 +1732,34 @@ function ClientHome({
         specialties,
         query: `${problemQuery}\n${description}`,
         clientCoords: coords,
+        mode,
+        scheduledAt,
       }),
-    [coords, description, problemQuery, publicProfessionals, selectedService, specialties],
+    [coords, description, mode, problemQuery, publicProfessionals, scheduledAt, selectedService, specialties],
   );
   const selectedProfessionalCandidate =
     candidateProfessionals.find((candidate) => candidate.professional.profile.id === selectedProfessionalId) ||
     candidateProfessionals[0] ||
     null;
   const effectiveAssignmentMode =
-    assignmentMode === 'manual' && candidateProfessionals.length ? 'manual' : 'auto';
+    mode !== 'quote' && assignmentMode === 'manual' && candidateProfessionals.length ? 'manual' : 'auto';
   const estimatedPrice = selectedService
-    ? (effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate?.priceFrom
+    ? mode === 'quote'
+      ? null
+      : (effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate?.priceFrom
         ? selectedProfessionalCandidate.priceFrom
         : selectedBasePrice) + (mode === 'scheduled' ? 2000 : 0)
     : null;
   const etaText =
-    mode === 'scheduled'
+    mode === 'quote'
+      ? 'Profesionales envían propuestas'
+      : mode === 'scheduled'
       ? 'Horario reservado'
       : selectedProfessionalCandidate?.etaMinutes
         ? `${selectedProfessionalCandidate.etaMinutes} min`
         : '30-45 min';
+  const modeIsSupported = serviceSupportsMode(selectedService, mode);
+  const canRepeatSelectedService = mode === 'scheduled' && supportsRecurringService(selectedService);
   const scoredServices = useMemo(
     () =>
       services
@@ -1722,6 +1798,8 @@ function ClientHome({
         specialties,
         query: `${problemQuery}\n${description}`,
         clientCoords: coords,
+        mode,
+        scheduledAt,
     })[0] || null;
   const photoNames = photoFiles.map((file) => file.name);
   const selectedPaymentProfile = paymentProfiles.find((payment) => payment.type === paymentMethod);
@@ -1776,12 +1854,30 @@ function ClientHome({
       setError('Elegí un servicio.');
       return;
     }
+    if (!modeIsSupported) {
+      setError(unsupportedModeMessage(selectedService, mode));
+      return;
+    }
     if (!address.trim()) {
       setError('Escribí la dirección del servicio.');
       return;
     }
     if (!addressCity.trim()) {
       setError('Escribí la ciudad.');
+      return;
+    }
+    if (mode === 'scheduled') {
+      if (!scheduledAt) {
+        setError('Elegí día y horario para programar el servicio.');
+        return;
+      }
+      if (new Date(scheduledAt).getTime() <= new Date().getTime()) {
+        setError('Elegí una fecha futura para programar el servicio.');
+        return;
+      }
+    }
+    if (mode === 'quote' && description.trim().length < 20 && photoFiles.length === 0) {
+      setError('Para presupuestar, agregá más detalle o fotos para que el profesional pueda cotizar.');
       return;
     }
     setCreatingOrder(true);
@@ -1793,11 +1889,14 @@ function ClientHome({
           ? `Especialidad sugerida: ${recommendedSpecialties.map((match) => match.specialty.name).join(', ')}`
           : null,
         `Asignación: ${
-          effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate
+          mode === 'quote'
+            ? 'presupuesto abierto sin asignación inmediata'
+            : effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate
             ? `prefiero a ${publicProfessionalName(selectedProfessionalCandidate.professional)}`
             : 'automática MANITO'
         }`,
-        `Pago: ${paymentLabel(paymentMethod)}`,
+        mode === 'quote' ? 'Pago: se define cuando aceptes una propuesta' : `Pago: ${paymentLabel(paymentMethod)}`,
+        repeatService && mode === 'scheduled' ? `Recurrencia solicitada: ${recurrenceOptions.find((item) => item.id === recurrenceFrequency)?.label}` : null,
         photoNames.length ? `Fotos cargadas: ${photoNames.join(', ')}` : null,
         'Protección MANITO: servicio registrado con chat, evidencia y adicionales aprobados.',
       ]
@@ -1809,19 +1908,34 @@ function ClientHome({
         description: orderDescription,
         address: orderAddress,
         mode,
-        assignmentMode: effectiveAssignmentMode,
+        assignmentMode: mode === 'quote' ? 'auto' : effectiveAssignmentMode,
         preferredProfessionalId:
-          effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate
+          mode !== 'quote' && effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate
             ? selectedProfessionalCandidate.professional.profile.id
             : null,
-        paymentMethod,
+        paymentMethod: mode === 'quote' ? null : paymentMethod,
         guaranteeDays: 7,
-        etaMinutes: selectedProfessionalCandidate?.etaMinutes || null,
+        etaMinutes: mode === 'quote' ? null : selectedProfessionalCandidate?.etaMinutes || null,
         scheduledAt: mode === 'scheduled' && scheduledAt ? new Date(scheduledAt).toISOString() : null,
         price: estimatedPrice,
         lat: coords?.lat || null,
         lng: coords?.lng || null,
       });
+      let recurringPlanCreated = false;
+      if (mode === 'scheduled' && repeatService && canRepeatSelectedService) {
+        try {
+          await createV6RecurringServicePlan({
+            clientId: profile.id,
+            serviceId: selectedService.id,
+            sourceOrderId: createdOrder.id,
+            frequency: recurrenceFrequency,
+            nextScheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+          });
+          recurringPlanCreated = true;
+        } catch {
+          recurringPlanCreated = false;
+        }
+      }
       let photoUploadFailed = false;
       if (photoFiles.length) {
         try {
@@ -1849,7 +1963,13 @@ function ClientHome({
       setNotice(
         photoUploadFailed
           ? 'Pedido publicado. Algunas fotos no se pudieron subir; podés compartirlas por chat.'
-          : 'Pedido publicado. Ya puede verlo un profesional disponible.',
+          : mode === 'quote'
+            ? 'Solicitud de presupuesto publicada. Los profesionales compatibles pueden enviarte propuestas.'
+            : mode === 'scheduled'
+              ? recurringPlanCreated
+                ? 'Solicitud programada enviada y plan recurrente creado.'
+                : 'Solicitud programada enviada. El profesional debe aceptar para confirmarla.'
+              : 'Pedido inmediato publicado. Un profesional disponible debe aceptarlo para confirmarlo.',
       );
       setPhotoFiles([]);
       onNavigate('orders');
@@ -1942,17 +2062,25 @@ function ClientHome({
       specialties,
       query: `${nextProblem}\n${description}`,
       clientCoords: coords,
+      mode,
+      scheduledAt,
     })[0] || null;
+    const nextMode = serviceSupportsMode(service, mode) ? mode : firstSupportedMode(service);
     const label = serviceDisplayName(service);
     setSelectedService(service);
+    if (nextMode !== mode) setMode(nextMode);
     setProblemQuery(nextProblem);
     setDescription(nextProblem.trim() || `Necesito ayuda con ${label}.`);
-    setAssignmentMode(candidate ? 'manual' : 'auto');
-    setSelectedProfessionalId(candidate?.professional.profile.id || '');
+    setAssignmentMode(nextMode !== 'quote' && candidate ? 'manual' : 'auto');
+    setSelectedProfessionalId(nextMode !== 'quote' ? candidate?.professional.profile.id || '' : '');
     setNotice(
-      candidate
+      nextMode !== mode
+        ? `${label} no soporta esa modalidad. Te pasé a ${contractModeOptions.find((item) => item.id === nextMode)?.title}.`
+        : candidate && nextMode !== 'quote'
         ? `${label} seleccionado. Te muestro profesionales compatibles reales.`
-        : `${label} seleccionado. Publicalo en automático hasta que haya profesionales disponibles.`,
+        : nextMode === 'quote'
+          ? `${label} seleccionado. Publicá una solicitud para comparar propuestas.`
+          : `${label} seleccionado. Publicalo en automático hasta que haya profesionales disponibles.`,
     );
     scrollToRequestForm();
   }
@@ -1972,7 +2100,9 @@ function ClientHome({
   }
 
   function chooseService(service: V6Service) {
+    const nextMode = serviceSupportsMode(service, mode) ? mode : firstSupportedMode(service);
     setSelectedService(service);
+    if (nextMode !== mode) setMode(nextMode);
     if (!problemQuery.trim()) {
       setProblemQuery(serviceDisplayName(service));
     }
@@ -1981,7 +2111,11 @@ function ClientHome({
         ? current
         : `Necesito ayuda con ${serviceDisplayName(service)}.`,
     );
-    setNotice(`${serviceDisplayName(service)} seleccionado. Completá el pedido.`);
+    setNotice(
+      nextMode !== mode
+        ? `${serviceDisplayName(service)} no soporta esa modalidad. Te pasé a ${contractModeOptions.find((item) => item.id === nextMode)?.title}.`
+        : `${serviceDisplayName(service)} seleccionado. Completá el pedido.`,
+    );
     scrollToRequestForm();
   }
 
@@ -2135,23 +2269,29 @@ function ClientHome({
           <span>elegí modalidad</span>
         </div>
         <div className="v6-mode-grid">
-          {([
-            { id: 'immediate', title: 'Ahora', body: 'Lo antes posible', icon: <PlugZap size={20} aria-hidden="true" /> },
-            { id: 'scheduled', title: 'Programar', body: 'Día y horario', icon: <Clock size={20} aria-hidden="true" /> },
-            { id: 'quote', title: 'Presupuestar', body: 'Comparar precios', icon: <MessageCircle size={20} aria-hidden="true" /> },
-          ] as Array<{ id: V6Mode; title: string; body: string; icon: ReactNode }>).map((item) => (
-            <button
-              className="v6-mode-card"
-              type="button"
-              aria-pressed={mode === item.id}
-              key={item.id}
-              onClick={() => setMode(item.id)}
-            >
-              {item.icon}
-              <strong>{item.title}</strong>
-              <small>{item.body}</small>
-            </button>
-          ))}
+          {contractModeOptions.map((item) => {
+            const supported = serviceSupportsMode(selectedService, item.id);
+            return (
+              <button
+                className="v6-mode-card"
+                type="button"
+                aria-pressed={mode === item.id}
+                aria-disabled={!supported}
+                key={item.id}
+                onClick={() => {
+                  if (!supported && selectedService) {
+                    setNotice(unsupportedModeMessage(selectedService, item.id));
+                    return;
+                  }
+                  setMode(item.id);
+                }}
+              >
+                {item.icon}
+                <strong>{item.title}</strong>
+                <small>{supported ? item.body : 'No disponible'}</small>
+              </button>
+            );
+          })}
         </div>
       </section>
 
@@ -2194,10 +2334,20 @@ function ClientHome({
 
       {selectedService && (
         <section className="v6-card" ref={requestFormRef}>
-          <h2>{serviceDisplayName(selectedService)}</h2>
+          <div className="v6-section-head compact">
+            <h2>{serviceDisplayName(selectedService)}</h2>
+            <span>{contractModeOptions.find((item) => item.id === mode)?.title}</span>
+          </div>
+          <p className="v6-note">
+            {mode === 'immediate'
+              ? 'Buscamos profesionales disponibles ahora. El pedido se confirma recién cuando uno acepta.'
+              : mode === 'scheduled'
+                ? 'Enviamos una solicitud para el día y horario que elijas. El profesional debe aceptarla para confirmarla.'
+                : 'Publicás una solicitud de presupuesto. No se asigna profesional ni se cobra hasta que elijas una propuesta.'}
+          </p>
           <form className="v6-stack" onSubmit={createOrder}>
             <label className="v6-field">
-              <span>Que necesitas?</span>
+              <span>{mode === 'quote' ? 'Describí el alcance del trabajo' : 'Qué necesitás'}</span>
               <textarea value={description} onChange={(event) => setDescription(event.target.value)} required />
             </label>
             {selectedServiceSpecialties.length > 0 && (
@@ -2273,10 +2423,43 @@ function ClientHome({
               </button>
             </div>
             {mode === 'scheduled' && (
-              <label className="v6-field">
-                <span>Fecha y hora</span>
-                <input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} />
-              </label>
+              <>
+                <label className="v6-field">
+                  <span>Fecha y hora</span>
+                  <input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} required />
+                </label>
+                {canRepeatSelectedService && (
+                  <div className="v6-recurring-box">
+                    <label className="v6-toggle-row">
+                      <span>
+                        <strong>Repetir este servicio</strong>
+                        <small>Ideal para limpieza, jardinería, piletas y mantenimiento habitual.</small>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={repeatService}
+                        onChange={(event) => setRepeatService(event.target.checked)}
+                      />
+                    </label>
+                    {repeatService && (
+                      <div className="v6-choice-grid three">
+                        {recurrenceOptions.map((option) => (
+                          <button
+                            className="v6-choice"
+                            type="button"
+                            aria-pressed={recurrenceFrequency === option.id}
+                            key={option.id}
+                            onClick={() => setRecurrenceFrequency(option.id)}
+                          >
+                            <Clock size={17} aria-hidden="true" />
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
 
             <label className="v6-field">
@@ -2293,33 +2476,37 @@ function ClientHome({
               </div>
             )}
 
-            <div className="v6-section-head compact">
-              <h2>Asignación</h2>
-              <span>{effectiveAssignmentMode === 'manual' ? 'Elegís vos' : 'MANITO asigna'}</span>
-            </div>
-            <div className="v6-choice-grid">
-              <button
-                type="button"
-                className="v6-choice"
-                aria-pressed={effectiveAssignmentMode === 'auto'}
-                onClick={() => setAssignmentMode('auto')}
-              >
-                <Users size={18} aria-hidden="true" />
-                Automático
-              </button>
-              <button
-                type="button"
-                className="v6-choice"
-                aria-pressed={effectiveAssignmentMode === 'manual'}
-                disabled={!candidateProfessionals.length}
-                onClick={() => setAssignmentMode('manual')}
-              >
-                <Star size={18} aria-hidden="true" />
-                Elegir profesional
-              </button>
-            </div>
+            {mode !== 'quote' && (
+              <>
+                <div className="v6-section-head compact">
+                  <h2>{mode === 'immediate' ? 'Profesionales disponibles ahora' : 'Profesionales para ese horario'}</h2>
+                  <span>{effectiveAssignmentMode === 'manual' ? 'Elegís vos' : 'MANITO asigna'}</span>
+                </div>
+                <div className="v6-choice-grid">
+                  <button
+                    type="button"
+                    className="v6-choice"
+                    aria-pressed={effectiveAssignmentMode === 'auto'}
+                    onClick={() => setAssignmentMode('auto')}
+                  >
+                    <Users size={18} aria-hidden="true" />
+                    Automático
+                  </button>
+                  <button
+                    type="button"
+                    className="v6-choice"
+                    aria-pressed={effectiveAssignmentMode === 'manual'}
+                    disabled={!candidateProfessionals.length}
+                    onClick={() => setAssignmentMode('manual')}
+                  >
+                    <Star size={18} aria-hidden="true" />
+                    Elegir profesional
+                  </button>
+                </div>
+              </>
+            )}
 
-            {effectiveAssignmentMode === 'manual' && (
+            {mode !== 'quote' && effectiveAssignmentMode === 'manual' && (
               <div className="v6-pro-list">
                 {candidateProfessionals.map((candidate) => (
                   <button
@@ -2352,81 +2539,103 @@ function ClientHome({
                 ))}
               </div>
             )}
-            {!candidateProfessionals.length && selectedService && (
-              <p className="v6-muted">
-                Todavía no hay profesionales disponibles para elegir en {serviceDisplayName(selectedService)}. Publicalo en automático para que aparezca cuando haya uno conectado.
-              </p>
-            )}
-
-            <div className="v6-section-head compact">
-              <h2>Pago</h2>
-              <span>Método preferido</span>
-            </div>
-            <div className="v6-choice-grid three">
-              {paymentOptions.map((option) => (
-                <button
-                  type="button"
-                  className="v6-choice"
-                  aria-pressed={paymentMethod === option.id}
-                  key={option.id}
-                  onClick={() => setPaymentMethod(option.id)}
-                >
-                  {option.icon}
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            {selectedPaymentProfile && (
-              <div className="v6-file-list">
-                <span className="active">
-                  {paymentProfileIcon(selectedPaymentProfile)} {paymentProfileDisplay(selectedPaymentProfile)}
-                  <b>Se usará en este pedido</b>
-                </span>
-              </div>
-            )}
-            {!selectedPaymentProfile && (
-              <p className="v6-muted">Este método se usará solo para este pedido. Podés guardarlo desde Cuenta.</p>
-            )}
-            {paymentMethod === 'wallet' && (
-              <p className="v6-note">
-                Para pruebas, MANITO registra Cuenta DNI/billetera como método preferido. El cobro real se coordina por QR o link hasta integrar un proveedor de pagos.
-              </p>
-            )}
-
-            {mode === 'quote' && selectedService && (
-              <div className="v6-quote-list">
-                {candidateProfessionals.slice(0, 3).map((candidate) => (
-                  <article className="v6-quote-card" key={candidate.professional.profile.id}>
-                    <strong>{publicProfessionalName(candidate.professional)}</strong>
-                    <span>
-                      {candidate.professional.professional_profile?.rating_avg || 4.8} estrellas - {' '}
-                      {candidate.etaMinutes ? `${candidate.etaMinutes} min` : 'horario a coordinar'} - visita {money(6500)}
-                    </span>
-                    <p>
-                      Mano de obra {money(candidate.priceFrom || selectedBasePrice)}
-                      {' '}+ fee MANITO {money(2500)}
-                    </p>
-                  </article>
-                ))}
-                {!candidateProfessionals.length && (
-                  <article className="v6-quote-card">
-                    <strong>Presupuesto abierto</strong>
-                    <span>Se publicará para profesionales disponibles del rubro.</span>
-                    <p>Cuando un prestador real responda, vas a poder comparar su propuesta.</p>
-                  </article>
+            {mode !== 'quote' && !candidateProfessionals.length && selectedService && (
+              <div className="v6-mode-fallback">
+                <p className="v6-muted">
+                  {mode === 'immediate'
+                    ? `No hay profesionales disponibles ahora en ${serviceDisplayName(selectedService)}. Podés publicar en automático, cambiar a Programar o pedir presupuesto.`
+                    : `No encontré profesionales para esa fecha/franja. Podés cambiar horario o publicar en automático para que respondan.`}
+                </p>
+                {mode === 'immediate' && (
+                  <div className="v6-actions-row">
+                    <button
+                      className="v6-secondary"
+                      type="button"
+                      disabled={!serviceSupportsMode(selectedService, 'scheduled')}
+                      onClick={() => setMode('scheduled')}
+                    >
+                      Programar
+                    </button>
+                    <button
+                      className="v6-secondary"
+                      type="button"
+                      disabled={!serviceSupportsMode(selectedService, 'quote')}
+                      onClick={() => setMode('quote')}
+                    >
+                      Presupuestar
+                    </button>
+                  </div>
                 )}
               </div>
+            )}
+            {mode === 'quote' && (
+              <div className="v6-quote-list">
+                <article className="v6-quote-card">
+                  <strong>Solicitud de presupuesto</strong>
+                  <span>Los profesionales compatibles reciben el pedido y te envían propuestas separadas.</span>
+                  <p>Vas a comparar visita, mano de obra, materiales, disponibilidad, duración y comentarios antes de elegir.</p>
+                </article>
+              </div>
+            )}
+
+            {mode !== 'quote' && (
+              <>
+                <div className="v6-section-head compact">
+                  <h2>Pago</h2>
+                  <span>Método preferido</span>
+                </div>
+                <div className="v6-choice-grid three">
+                  {paymentOptions.map((option) => (
+                    <button
+                      type="button"
+                      className="v6-choice"
+                      aria-pressed={paymentMethod === option.id}
+                      key={option.id}
+                      onClick={() => setPaymentMethod(option.id)}
+                    >
+                      {option.icon}
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                {selectedPaymentProfile && (
+                  <div className="v6-file-list">
+                    <span className="active">
+                      {paymentProfileIcon(selectedPaymentProfile)} {paymentProfileDisplay(selectedPaymentProfile)}
+                      <b>Se usará en este pedido</b>
+                    </span>
+                  </div>
+                )}
+                {!selectedPaymentProfile && (
+                  <p className="v6-muted">Este método se usará solo para este pedido. Podés guardarlo desde Cuenta.</p>
+                )}
+                {paymentMethod === 'wallet' && (
+                  <p className="v6-note">
+                    Para pruebas, MANITO registra Cuenta DNI/billetera como método preferido. El cobro real se coordina por QR o link hasta integrar un proveedor de pagos.
+                  </p>
+                )}
+              </>
             )}
 
             <div className="v6-summary">
               <span>
                 <ShieldCheck size={17} aria-hidden="true" /> Protección MANITO incluida
               </span>
-              <strong>{money(estimatedPrice)}</strong>
-              <small>ETA {etaText} - {paymentLabel(paymentMethod)} - todo queda registrado en la app</small>
+              <strong>{mode === 'quote' ? 'A cotizar' : money(estimatedPrice)}</strong>
+              <small>
+                {mode === 'quote'
+                  ? 'Publicás sin elegir profesional. Comparás propuestas antes de contratar.'
+                  : `ETA ${etaText} - ${paymentLabel(paymentMethod)} - todo queda registrado en la app`}
+              </small>
             </div>
             <button className="v6-primary" type="submit" disabled={creatingOrder}>
-              {creatingOrder ? 'Publicando...' : 'Publicar pedido'}
+              {creatingOrder
+                ? 'Publicando...'
+                : mode === 'quote'
+                  ? 'Publicar solicitud'
+                  : mode === 'scheduled'
+                    ? 'Enviar solicitud programada'
+                    : 'Buscar profesional ahora'}
             </button>
           </form>
         </section>
@@ -2926,8 +3135,7 @@ function ProfessionalHome({
           <h2>Pedidos disponibles</h2>
           <span>{compatibleMatches.length} compatibles</span>
         </div>
-        {profile.is_available &&
-          compatibleMatches.map((match) =>
+        {compatibleMatches.map((match) =>
             match.order.mode === 'quote' ? (
               <div className="v6-match-card" key={match.order.id}>
                 <MatchSummary match={match} />
@@ -2961,8 +3169,12 @@ function ProfessionalHome({
               </article>
             ),
           )}
-        {!profile.is_available && <Empty title="Estás desconectado" body="Activá Disponible para ver pedidos abiertos." />}
-        {profile.is_available && !compatibleMatches.length && <Empty title="No hay pedidos compatibles" body="Cuando un cliente publique un servicio dentro de tu zona y horario aparecerá acá." />}
+        {!compatibleMatches.length && (
+          <Empty
+            title={profile.is_available ? 'No hay pedidos compatibles' : 'Sin solicitudes programadas o presupuestos'}
+            body={profile.is_available ? 'Cuando un cliente publique un servicio dentro de tu zona y horario aparecerá acá.' : 'Activá Disponible para ver pedidos inmediatos. Los presupuestos y programados aparecen aunque no estés disponible ahora.'}
+          />
+        )}
       </section>
 
       <section className="v6-section">
@@ -3294,7 +3506,7 @@ function OrderCard({
           <strong>{serviceDisplayName(order.service)}</strong>
           <p>{order.address} · {shortDate(order.created_at)}</p>
           {other && <small>{profile.role === 'client' ? 'Profesional' : 'Cliente'}: {other.full_name || 'Usuario'}</small>}
-          <Status status={order.status} />
+          <span className={`v6-status ${order.status}`}>{orderStatusText(order, proposals.length)}</span>
           {order.professional_id ? (
             <small className="v6-order-hint">
               <MessageCircle size={13} aria-hidden="true" />
@@ -3403,8 +3615,14 @@ function OrderCard({
         <div className="v6-quote-list">
           {proposals.map((proposal) => (
             <article className="v6-quote-card" key={proposal.id}>
-              <strong>{proposal.professional?.full_name || 'Profesional MANITO'}</strong>
-              <span>{proposal.availability_label || 'A coordinar'} - {proposal.estimated_minutes || 90} min</span>
+              <strong>
+                {proposal.professional?.full_name || 'Profesional MANITO'}
+                {proposals[0]?.id === proposal.id && <b> Última propuesta</b>}
+              </strong>
+              <span>
+                Total {money(proposal.visit_price + proposal.labor_price + proposal.materials_price + proposal.manito_fee)}
+                {' '}· {proposal.availability_label || 'A coordinar'} · {proposal.estimated_minutes || 90} min
+              </span>
               <p>
                 Visita {money(proposal.visit_price)} + mano de obra {money(proposal.labor_price)}
                 {' '}+ materiales {money(proposal.materials_price)} + fee {money(proposal.manito_fee)}
@@ -4929,10 +5147,6 @@ function ChatSheet({
       </section>
     </div>
   );
-}
-
-function Status({ status }: { status: V6OrderStatus }) {
-  return <span className={`v6-status ${status}`}>{V6_STATUS_LABEL[status]}</span>;
 }
 
 function StatusSteps({ status }: { status: V6OrderStatus }) {

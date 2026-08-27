@@ -1033,6 +1033,26 @@ a {
   overflow-wrap: anywhere;
 }
 
+.v6-mode-card[aria-disabled='true'] {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.v6-mode-card[aria-disabled='true'] svg {
+  background: #f3f0ea;
+  color: var(--muted);
+}
+
+.v6-mode-fallback,
+.v6-recurring-box {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(255 253 250 / 72%);
+  padding: 10px;
+}
+
 .v6-field {
   display: grid;
   gap: 7px;

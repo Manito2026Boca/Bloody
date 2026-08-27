@@ -33,6 +33,10 @@ export type V6Service = {
   emoji: string;
   base_price: number | null;
   active: boolean;
+  allow_immediate?: boolean;
+  allow_scheduled?: boolean;
+  allow_quote?: boolean;
+  supports_recurring?: boolean;
 };
 
 export type V6ProfessionalService = {
@@ -102,6 +106,18 @@ export type V6ClientAddress = {
   lat: number | null;
   lng: number | null;
   is_default: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type V6RecurringServicePlan = {
+  id: string;
+  client_id: string;
+  service_id: number;
+  source_order_id: string | null;
+  frequency: 'weekly' | 'biweekly' | 'monthly';
+  status: 'active' | 'paused' | 'cancelled';
+  next_scheduled_at: string | null;
   created_at: string;
   updated_at: string;
 };

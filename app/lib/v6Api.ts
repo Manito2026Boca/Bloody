@@ -24,6 +24,7 @@ import type {
   V6ProfessionalService,
   V6ProfessionalSpecialty,
   V6PublicProfessional,
+  V6RecurringServicePlan,
   V6Role,
   V6Service,
   V6Specialty,
@@ -357,7 +358,7 @@ export async function listV6Orders() {
   const { data, error } = await getV6Supabase()
     .from('orders')
     .select(
-      '*,service:services(id,slug,name,emoji,base_price,active),client:profiles!orders_client_id_fkey(id,full_name,phone,city),professional:profiles!orders_professional_id_fkey(id,full_name,phone,city)',
+      '*,service:services(id,slug,name,emoji,base_price,active,allow_immediate,allow_scheduled,allow_quote,supports_recurring),client:profiles!orders_client_id_fkey(id,full_name,phone,city),professional:profiles!orders_professional_id_fkey(id,full_name,phone,city)',
     )
     .order('created_at', { ascending: false })
     .limit(100);
@@ -424,6 +425,29 @@ export async function createV6Order(input: {
     .single();
   fail(legacyError);
   return legacyData as V6Order;
+}
+
+export async function createV6RecurringServicePlan(input: {
+  clientId: string;
+  serviceId: number;
+  sourceOrderId: string;
+  frequency: V6RecurringServicePlan['frequency'];
+  nextScheduledAt: string | null;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('recurring_service_plans')
+    .insert({
+      client_id: input.clientId,
+      service_id: input.serviceId,
+      source_order_id: input.sourceOrderId,
+      frequency: input.frequency,
+      next_scheduled_at: input.nextScheduledAt,
+    })
+    .select('*')
+    .single();
+  if (isMissingV5Table(error)) return null;
+  fail(error);
+  return data as V6RecurringServicePlan;
 }
 
 export async function listV6OrderProposals(orderId: string) {
