@@ -867,6 +867,42 @@ function friendlySessionError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function requestPhonePosition() {
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      reject(new Error('geolocation-unavailable'));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      maximumAge: 60000,
+      timeout: 12000,
+    });
+  });
+}
+
+function phoneLocationErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message === 'geolocation-unavailable') {
+    return 'Este navegador no permite usar GPS. Cargá la ciudad manualmente.';
+  }
+
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? Number((error as { code?: unknown }).code)
+    : 0;
+
+  if (code === 1) {
+    return 'Permiso de ubicación rechazado. Activá permisos de ubicación o cargá la ciudad manualmente.';
+  }
+  if (code === 2) {
+    return 'No pude obtener el GPS. Activá la ubicación del teléfono o cargá la ciudad manualmente.';
+  }
+  if (code === 3) {
+    return 'El GPS tardó demasiado. Probá de nuevo o cargá la ciudad manualmente.';
+  }
+  return 'No se pudo obtener GPS. Cargá la ciudad manualmente.';
+}
+
 export default function ManitoV6App() {
   const [configured, setConfigured] = useState(() => isV6SupabaseConfigured());
   const [session, setSession] = useState<Session | null>(null);
@@ -886,6 +922,7 @@ export default function ManitoV6App() {
   const [chatOrder, setChatOrder] = useState<V6Order | null>(null);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(() => isInstalledDisplayMode());
+  const [savingPhoneLocation, setSavingPhoneLocation] = useState(false);
   const [clientSelectedService, setClientSelectedService] = useState<V6Service | null>(null);
   const [clientProblemQuery, setClientProblemQuery] = useState('');
   const lastRealtimeNoticeAt = useRef(0);
@@ -1081,6 +1118,41 @@ export default function ManitoV6App() {
     setProfile(nextProfile);
   }
 
+  async function usePhoneLocation() {
+    if (!profile || savingPhoneLocation) return;
+
+    setSavingPhoneLocation(true);
+    setNotice('Permití el acceso a la ubicación del teléfono.');
+    try {
+      const position = await requestPhonePosition();
+      const displayedCity = headerLocation(profile);
+      const hasUsefulCity =
+        displayedCity !== 'Agregar ciudad' &&
+        displayedCity !== 'Configurar ciudad' &&
+        displayedCity !== 'Ubicación actual';
+      const updated = await updateV6Profile(profile.id, {
+        full_name: profile.full_name,
+        phone: profile.phone,
+        city: hasUsefulCity ? profile.city : 'Ubicación actual',
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      });
+
+      setProfile(updated);
+      if (hasUsefulCity) {
+        setNotice('GPS actualizado. Vamos a usar tu ubicación actual para ordenar profesionales cercanos.');
+      } else {
+        setTab('account');
+        setNotice('GPS guardado. Agregá tu ciudad para mostrarla correctamente en la app.');
+      }
+    } catch (caught) {
+      setTab('account');
+      setNotice(phoneLocationErrorMessage(caught));
+    } finally {
+      setSavingPhoneLocation(false);
+    }
+  }
+
   if (!configured) {
     return <SetupScreen onConnected={() => setConfigured(true)} />;
   }
@@ -1139,12 +1211,10 @@ export default function ManitoV6App() {
           <button
             className="v6-location"
             type="button"
-            onClick={() => {
-              setTab('account');
-              setNotice('Completá tu ciudad en Ubicación principal.');
-            }}
+            disabled={savingPhoneLocation}
+            onClick={usePhoneLocation}
           >
-            <MapPin size={13} aria-hidden="true" /> {currentLocation}
+            <MapPin size={13} aria-hidden="true" /> {savingPhoneLocation ? 'Ubicando...' : currentLocation}
           </button>
           <div className="v6-mode-switch" aria-label="Modo de uso">
             <button
@@ -1280,11 +1350,14 @@ export default function ManitoV6App() {
 
         {tab === 'account' && (
           <AccountPanel
+            key={`${profile.id}:${profile.city || ''}:${profile.phone || ''}`}
             profile={profile}
             canInstall={Boolean(installPrompt) && !isStandalone}
             onInstall={installApp}
+            onUsePhoneLocation={usePhoneLocation}
             onProfileChange={setProfile}
             onOpenProfile={() => setTab('profile')}
+            savingPhoneLocation={savingPhoneLocation}
             setNotice={setNotice}
           />
         )}
@@ -4245,15 +4318,19 @@ function AccountPanel({
   profile,
   canInstall,
   onInstall,
+  onUsePhoneLocation,
   onProfileChange,
   onOpenProfile,
+  savingPhoneLocation,
   setNotice,
 }: {
   profile: V6Profile;
   canInstall: boolean;
   onInstall: () => void;
+  onUsePhoneLocation: () => void;
   onProfileChange: (profile: V6Profile) => void;
   onOpenProfile: () => void;
+  savingPhoneLocation: boolean;
   setNotice: (message: string) => void;
 }) {
   const [locationCity, setLocationCity] = useState(profile.city || '');
@@ -4387,8 +4464,11 @@ function AccountPanel({
       <section className="v6-card">
         <h2>Ubicación principal</h2>
         <p className="v6-muted">
-          MANITO usa esta ciudad para mostrar la ubicación arriba y ordenar profesionales cercanos.
+          MANITO usa la ciudad para mostrarla arriba y el GPS para ordenar profesionales cercanos.
         </p>
+        {profile.lat != null && profile.lng != null && (
+          <p className="v6-muted">GPS guardado para esta cuenta.</p>
+        )}
         <form className="v6-stack" onSubmit={saveLocation}>
           <label className="v6-field">
             <span>Ciudad</span>
@@ -4407,9 +4487,19 @@ function AccountPanel({
               placeholder="Opcional"
             />
           </label>
-          <button className="v6-secondary" type="submit" disabled={savingLocation}>
-            {savingLocation ? 'Guardando...' : 'Guardar ubicación'}
-          </button>
+          <div className="v6-actions-row">
+            <button
+              className="v6-secondary"
+              type="button"
+              disabled={savingPhoneLocation}
+              onClick={onUsePhoneLocation}
+            >
+              <LocateFixed size={16} aria-hidden="true" /> {savingPhoneLocation ? 'Buscando...' : 'Usar GPS'}
+            </button>
+            <button className="v6-secondary" type="submit" disabled={savingLocation}>
+              {savingLocation ? 'Guardando...' : 'Guardar ciudad'}
+            </button>
+          </div>
         </form>
       </section>
       <section className="v6-card">

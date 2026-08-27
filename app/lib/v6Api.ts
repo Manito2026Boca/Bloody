@@ -80,7 +80,8 @@ export async function completeV6Profile(input: {
 
 export async function updateV6Profile(
   userId: string,
-  patch: Pick<V6Profile, 'full_name' | 'phone' | 'city'>,
+  patch: Pick<V6Profile, 'full_name'> &
+    Partial<Pick<V6Profile, 'phone' | 'city' | 'lat' | 'lng'>>,
 ) {
   const { data, error } = await getV6Supabase()
     .from('profiles')
