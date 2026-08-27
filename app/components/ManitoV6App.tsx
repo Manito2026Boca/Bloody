@@ -52,6 +52,7 @@ import {
   getV6Profile,
   getV6MediaSignedUrl,
   getV6ProfessionalOnboarding,
+  getV6ProfessionalPaymentAccount,
   getV6ProfessionalPayoutDetails,
   getV6ProfessionalProfile,
   listV6Complaints,
@@ -62,6 +63,7 @@ import {
   listV6OrderPhotos,
   listV6OrderProposals,
   listV6Orders,
+  listV6PaymentsForOrder,
   listV6PaymentProfiles,
   listV6Portfolio,
   listV6PublicProfessionals,
@@ -101,12 +103,15 @@ import type {
   V6OrderExtra,
   V6OrderPhoto,
   V6OrderProposal,
+  V6Payment,
   V6PaymentProfile,
+  V6PaymentStatus,
   V6PortfolioItem,
   V6OrderStatus,
   V6Profile,
   V6ProfessionalDocument,
   V6ProfessionalOnboarding,
+  V6ProfessionalPaymentAccount,
   V6ProfessionalProfile,
   V6ProfessionalService,
   V6ProfessionalSpecialty,
@@ -212,6 +217,33 @@ function supportsRecurringService(service: V6Service | null) {
 function paymentLabel(method?: string | null) {
   if (method === 'transfer') return 'Transferencia';
   return paymentOptions.find((option) => option.id === method)?.label || 'A coordinar';
+}
+
+function paymentStatusLabel(status?: V6PaymentStatus | null) {
+  if (status === 'paid') return 'Pago confirmado';
+  if (status === 'pending' || status === 'authorized') return 'Pago pendiente';
+  if (status === 'rejected') return 'Pago rechazado';
+  if (status === 'refunded') return 'Reembolsado';
+  if (status === 'partially_refunded') return 'Reembolso parcial';
+  if (status === 'not_required') return 'Sin pago online';
+  return 'Aún no pagado';
+}
+
+function paymentProviderLabel(provider?: string | null) {
+  if (provider === 'mercado_pago') return 'Mercado Pago';
+  if (provider === 'wallet') return 'Cuenta DNI / billetera';
+  if (provider === 'cash') return 'Efectivo';
+  return 'MANITO';
+}
+
+function paymentAccountStatusLabel(account: V6ProfessionalPaymentAccount | null) {
+  if (!account) return 'No conectada';
+  if (account.status === 'connected' && account.can_receive_online_payments) return 'Lista para pagos online';
+  if (account.status === 'connected') return 'Conectada, falta habilitación';
+  if (account.status === 'pending_oauth') return 'Vinculación pendiente';
+  if (account.status === 'restricted') return 'Cuenta restringida';
+  if (account.status === 'disconnected') return 'Desconectada';
+  return 'No conectada';
 }
 
 function isRequestPaymentMethod(method: string): method is PaymentMethod {
@@ -3264,6 +3296,7 @@ function OrderCard({
   const [proposals, setProposals] = useState<V6OrderProposal[]>([]);
   const [extras, setExtras] = useState<V6OrderExtra[]>([]);
   const [complaints, setComplaints] = useState<V6Complaint[]>([]);
+  const [payments, setPayments] = useState<V6Payment[]>([]);
   const [photos, setPhotos] = useState<Array<V6OrderPhoto & { signedUrl: string | null }>>([]);
   const [evidenceStage, setEvidenceStage] = useState<V6OrderPhoto['stage']>('during');
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
@@ -3280,14 +3313,16 @@ function OrderCard({
   const [complaintDetail, setComplaintDetail] = useState('');
 
   const refreshCommercialData = useCallback(async () => {
-    const [nextProposals, nextExtras, nextComplaints] = await Promise.all([
+    const [nextProposals, nextExtras, nextComplaints, nextPayments] = await Promise.all([
       listV6OrderProposals(order.id),
       listV6OrderExtras(order.id),
       listV6Complaints(order.id),
+      listV6PaymentsForOrder(order.id),
     ]);
     setProposals(nextProposals);
     setExtras(nextExtras);
     setComplaints(nextComplaints);
+    setPayments(nextPayments);
   }, [order.id]);
 
   const refreshPhotos = useCallback(async () => {
@@ -3307,12 +3342,14 @@ function OrderCard({
       listV6OrderProposals(order.id),
       listV6OrderExtras(order.id),
       listV6Complaints(order.id),
+      listV6PaymentsForOrder(order.id),
     ])
-      .then(async ([nextProposals, nextExtras, nextComplaints]) => {
+      .then(async ([nextProposals, nextExtras, nextComplaints, nextPayments]) => {
         if (!alive) return;
         setProposals(nextProposals);
         setExtras(nextExtras);
         setComplaints(nextComplaints);
+        setPayments(nextPayments);
         if (alive) await refreshPhotos();
       })
       .catch(() => undefined);
@@ -3482,6 +3519,10 @@ function OrderCard({
   const beforePhotos = photos.filter((photo) => photo.stage === 'before').length;
   const afterPhotos = photos.filter((photo) => photo.stage === 'after').length;
   const protectionReference = order.completed_at || order.updated_at || order.created_at;
+  const latestPayment = payments[0] || null;
+  const approvedPaymentTotal = payments
+    .filter((payment) => payment.status === 'approved')
+    .reduce((total, payment) => total + Number(payment.amount || 0), 0);
 
   async function shareOrderTracking() {
     const text = orderTrackingText(order);
@@ -3528,10 +3569,39 @@ function OrderCard({
       <StatusSteps status={order.status} />
       <div className="v6-meta-row">
         <span><ShieldCheck size={14} aria-hidden="true" /> Protección MANITO</span>
+        <span>{paymentStatusLabel(order.payment_status)}</span>
         {order.payment_method && <span>Pago {paymentLabel(order.payment_method)}</span>}
         {order.eta_minutes && <span>ETA {order.eta_minutes} min</span>}
         {order.status === 'accepted' && <span>PIN inicio {order.start_pin || 'pendiente'}</span>}
       </div>
+      <section className="v6-payment-box">
+        <div>
+          <strong>
+            <CreditCard size={16} aria-hidden="true" /> Pago y comisión
+          </strong>
+          <span>{paymentStatusLabel(order.payment_status)}</span>
+        </div>
+        {latestPayment ? (
+          <p>
+            {paymentProviderLabel(latestPayment.provider)} registró {money(Number(latestPayment.amount))}
+            {' '}· comisión MANITO {money(Number(latestPayment.manito_fee))}
+            {' '}· para profesional {money(Number(latestPayment.professional_amount))}
+            {approvedPaymentTotal > 0 ? ` · aprobado ${money(approvedPaymentTotal)}` : ''}
+          </p>
+        ) : order.payment_method === 'card' ? (
+          <p>
+            Preparado para Mercado Pago marketplace: cuando conectemos OAuth y webhooks, el cliente pagará online y MANITO separará comisión y saldo del profesional.
+          </p>
+        ) : order.payment_method === 'wallet' ? (
+          <p>
+            Billetera registrada como preferencia. Hasta activar proveedor online, el QR o link se coordina por chat y queda como evidencia del pedido.
+          </p>
+        ) : (
+          <p>
+            Pago registrado como coordinación manual. Para máxima Protección MANITO, el próximo paso será cobrar online antes de iniciar el trabajo.
+          </p>
+        )}
+      </section>
       {!['completed', 'cancelled'].includes(order.status) && (
         <p className="v6-note">
           Coordiná por el chat y aprobá adicionales desde MANITO para que el servicio quede registrado.
@@ -3811,6 +3881,7 @@ function ProfilePanel({
   const [documentNumber, setDocumentNumber] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [professionalProfile, setProfessionalProfile] = useState<V6ProfessionalProfile | null>(null);
+  const [paymentAccount, setPaymentAccount] = useState<V6ProfessionalPaymentAccount | null>(null);
   const [onboarding, setOnboarding] = useState<V6ProfessionalOnboarding | null>(null);
   const [documents, setDocuments] = useState<V6ProfessionalDocument[]>([]);
   const [portfolio, setPortfolio] = useState<V6PortfolioItem[]>([]);
@@ -3842,6 +3913,7 @@ function ProfilePanel({
     let alive = true;
     Promise.all([
       getV6ProfessionalProfile(profile.id),
+      getV6ProfessionalPaymentAccount(profile.id),
       getV6ProfessionalPayoutDetails(profile.id),
       getV6ProfessionalOnboarding(profile.id),
       listV6ProfessionalDocuments(profile.id),
@@ -3849,6 +3921,7 @@ function ProfilePanel({
     ])
       .then(([
         nextProfessionalProfile,
+        nextPaymentAccount,
         nextPayoutDetails,
         nextOnboarding,
         nextDocuments,
@@ -3856,6 +3929,7 @@ function ProfilePanel({
       ]) => {
         if (!alive) return;
         setProfessionalProfile(nextProfessionalProfile);
+        setPaymentAccount(nextPaymentAccount);
         setOnboarding(nextOnboarding);
         setDocuments(nextDocuments);
         setPortfolio(nextPortfolio);
@@ -4616,6 +4690,17 @@ function ProfilePanel({
             <p className="v6-note">
               Estos datos sirven para coordinar cobros con billetera o transferencia. MANITO todavía no captura pagos automáticamente.
             </p>
+            <div className="v6-payment-box">
+              <div>
+                <strong>
+                  <CreditCard size={16} aria-hidden="true" /> Mercado Pago marketplace
+                </strong>
+                <span>{paymentAccountStatusLabel(paymentAccount)}</span>
+              </div>
+              <p>
+                La base ya está preparada para vincular cada profesional por OAuth, crear pagos con comisión MANITO y confirmar cobros por webhook. Falta conectar las credenciales reales de Mercado Pago Developers.
+              </p>
+            </div>
             {proServices.length > 0 && (
               <div className="v6-rate-list">
                 {proServices.map((item) => {
@@ -4680,6 +4765,7 @@ function ProfilePanel({
               <span className={portfolio.length ? 'done' : ''}>Portfolio</span>
               <span className={workZone && workDays.length ? 'done' : ''}>Zona y horarios</span>
               <span className={payoutAlias || payoutCbu || walletPaymentLink ? 'done' : ''}>Datos de cobro</span>
+              <span className={paymentAccount?.can_receive_online_payments ? 'done' : ''}>Mercado Pago preparado</span>
             </div>
             <button
               className="v6-primary"

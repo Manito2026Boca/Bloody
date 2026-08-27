@@ -13,12 +13,14 @@ import type {
   V6OrderExtra,
   V6OrderPhoto,
   V6OrderProposal,
+  V6Payment,
   V6PaymentMethod,
   V6PaymentProfile,
   V6PortfolioItem,
   V6Profile,
   V6ProfessionalDocument,
   V6ProfessionalOnboarding,
+  V6ProfessionalPaymentAccount,
   V6ProfessionalPayoutDetails,
   V6ProfessionalProfile,
   V6ProfessionalService,
@@ -323,6 +325,18 @@ export async function addV6PaymentProfile(input: {
   return data as V6PaymentProfile;
 }
 
+export async function getV6ProfessionalPaymentAccount(userId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_payment_accounts')
+    .select('*')
+    .eq('professional_id', userId)
+    .eq('provider', 'mercado_pago')
+    .maybeSingle();
+  if (isMissingV5Table(error)) return null;
+  fail(error);
+  return data as V6ProfessionalPaymentAccount | null;
+}
+
 export async function saveV6ProfessionalServices(
   userId: string,
   serviceIds: number[],
@@ -459,6 +473,17 @@ export async function listV6OrderProposals(orderId: string) {
   if (isMissingV5Table(error)) return [];
   fail(error);
   return (data || []) as V6OrderProposal[];
+}
+
+export async function listV6PaymentsForOrder(orderId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('payments')
+    .select('*')
+    .eq('order_id', orderId)
+    .order('created_at', { ascending: false });
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6Payment[];
 }
 
 export async function sendV6OrderProposal(input: {

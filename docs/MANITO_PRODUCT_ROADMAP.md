@@ -46,10 +46,11 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 
 - Lenguaje local: billetera, transferencia, efectivo y tarjeta.
 - Metodos de pago guardados por usuario.
+- Base marketplace para pagos: tabla `payments`, cuenta de cobro por profesional, credenciales privadas para OAuth, eventos de proveedor y estados de pago por pedido.
 - Presupuesto y precio final separado en visita, mano de obra, materiales, adicional y fee MANITO.
 - Flujo de adicionales aceptados por cliente antes de sumarse al precio.
 - Recibos/comprobantes y conciliacion interna.
-- Cuenta DNI/billetera como preferencia de pago coordinada por QR/link; integracion real futura con Banco Provincia, Mercado Pago u otro proveedor local.
+- Cuenta DNI/billetera como preferencia de pago coordinada por QR/link; integracion real futura recomendada con Mercado Pago Checkout Pro marketplace, OAuth por profesional, split de comision y webhooks.
 
 ## 6. Notificaciones y comunicacion
 
@@ -94,7 +95,7 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 5. Cita pendiente y notificaciones in-app persistentes. Estado: implementado aviso in-app en Inicio y Pedidos; falta push/PWA.
 6. Chat y contacto del prestador con reglas claras de privacidad. Estado: chat operativo para pedidos aceptados y preferencia de telefono protegida; falta enforcement backend fino.
 7. Admin de altas profesionales y documentos.
-8. Pagos/adicionales mas robustos. Estado: metodos deduplicados, Cuenta DNI/billetera agregada como preferencia y datos de cobro profesional privados; falta pasarela real.
+8. Pagos/adicionales mas robustos. Estado: metodos deduplicados, Cuenta DNI/billetera agregada como preferencia, datos de cobro profesional privados y base marketplace preparada; falta implementar OAuth Mercado Pago, crear preferencias Checkout Pro, webhook y flujo de reembolso.
 9. PWA completa con iconos y manifest final. Estado: base instalada; falta iconografia final de marca.
 10. QA de permisos y pruebas moviles antes de invitar testers mas amplios.
 11. Categorias y subrubros. Estado: implementado grupo Automotor con subrubros mecanica, gomeria y chapa/pintura; falta admin editable.

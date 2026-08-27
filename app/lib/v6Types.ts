@@ -3,6 +3,16 @@ export type V6Role = 'client' | 'professional' | 'admin';
 export type V6Mode = 'immediate' | 'scheduled' | 'quote';
 export type V6AssignmentMode = 'auto' | 'manual';
 export type V6PaymentMethod = 'card' | 'wallet' | 'cash' | 'transfer';
+export type V6PaymentStatus =
+  | 'unpaid'
+  | 'not_required'
+  | 'pending'
+  | 'authorized'
+  | 'paid'
+  | 'rejected'
+  | 'refunded'
+  | 'partially_refunded';
+export type V6PaymentProvider = 'mercado_pago' | 'manual' | 'cash' | 'wallet';
 
 export type V6OrderStatus =
   | 'open'
@@ -82,6 +92,10 @@ export type V6Order = {
   assignment_mode?: V6AssignmentMode | null;
   preferred_professional_id?: string | null;
   payment_method?: V6PaymentMethod | null;
+  payment_status?: V6PaymentStatus;
+  online_payment_required?: boolean;
+  payment_required_at?: string | null;
+  paid_at?: string | null;
   guarantee_days?: number | null;
   eta_minutes?: number | null;
   start_pin?: string | null;
@@ -130,6 +144,56 @@ export type V6PaymentProfile = {
   last4: string | null;
   is_default: boolean;
   created_at: string;
+};
+
+export type V6ProfessionalPaymentAccount = {
+  id: string;
+  professional_id: string;
+  provider: 'mercado_pago';
+  status: 'not_connected' | 'pending_oauth' | 'connected' | 'restricted' | 'disconnected';
+  external_account_id: string | null;
+  nickname: string | null;
+  country: string;
+  currency: string;
+  can_receive_online_payments: boolean;
+  connected_at: string | null;
+  disconnected_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type V6Payment = {
+  id: string;
+  order_id: string;
+  client_id: string;
+  professional_id: string | null;
+  source_type: 'original' | 'additional' | 'protection_adjustment' | 'refund';
+  extra_id: string | null;
+  proposal_id: string | null;
+  provider: V6PaymentProvider;
+  provider_account_id: string | null;
+  external_preference_id: string | null;
+  external_payment_id: string | null;
+  checkout_url: string | null;
+  amount: number;
+  manito_fee: number;
+  professional_amount: number;
+  currency: string;
+  status:
+    | 'pending'
+    | 'awaiting_client_action'
+    | 'approved'
+    | 'rejected'
+    | 'cancelled'
+    | 'refunded'
+    | 'partially_refunded'
+    | 'expired';
+  payment_method: string | null;
+  failure_reason: string | null;
+  created_at: string;
+  approved_at: string | null;
+  refunded_at: string | null;
+  updated_at: string;
 };
 
 export type V6ProfessionalProfile = {

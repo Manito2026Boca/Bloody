@@ -1702,6 +1702,47 @@ a.v6-evidence-link {
   background: var(--mist);
 }
 
+.v6-payment-box {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #b8d9cb;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f1faf6, #fffdfa);
+  color: var(--green-900);
+  padding: 10px;
+}
+
+.v6-payment-box > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.v6-payment-box strong,
+.v6-payment-box span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.v6-payment-box span {
+  border-radius: 999px;
+  background: #fff;
+  color: var(--green-800);
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.v6-payment-box p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .v6-summary span {
   display: inline-flex;
   align-items: center;
