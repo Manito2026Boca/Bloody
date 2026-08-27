@@ -903,6 +903,60 @@ function phoneLocationErrorMessage(error: unknown) {
   return 'No se pudo obtener GPS. Cargá la ciudad manualmente.';
 }
 
+type ReverseGeocodeResult = {
+  city: string | null;
+  label: string | null;
+};
+
+type ReverseGeocodeResponse = {
+  display_name?: string;
+  address?: Record<string, string | undefined>;
+};
+
+function coordinateFallback(lat: number, lng: number) {
+  return `GPS ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+}
+
+function readableReverseLocation(data: ReverseGeocodeResponse): ReverseGeocodeResult {
+  const address = data.address || {};
+  const city =
+    address.city ||
+    address.town ||
+    address.village ||
+    address.municipality ||
+    address.county ||
+    address.state_district ||
+    address.state ||
+    null;
+  const road =
+    address.road ||
+    address.pedestrian ||
+    address.neighbourhood ||
+    address.suburb ||
+    null;
+  const street = road
+    ? `${road}${address.house_number ? ` ${address.house_number}` : ''}`
+    : null;
+  const label = city && street ? `${street}, ${city}` : city || data.display_name || null;
+  return { city, label };
+}
+
+async function reverseGeocodePhoneLocation(lat: number, lng: number): Promise<ReverseGeocodeResult | null> {
+  const url = new URL('https://nominatim.openstreetmap.org/reverse');
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('addressdetails', '1');
+  url.searchParams.set('zoom', '16');
+  url.searchParams.set('lat', String(lat));
+  url.searchParams.set('lon', String(lng));
+  url.searchParams.set('accept-language', 'es-AR,es');
+
+  const response = await fetch(url.toString(), {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) return null;
+  return readableReverseLocation((await response.json()) as ReverseGeocodeResponse);
+}
+
 export default function ManitoV6App() {
   const [configured, setConfigured] = useState(() => isV6SupabaseConfigured());
   const [session, setSession] = useState<Session | null>(null);
@@ -1125,26 +1179,27 @@ export default function ManitoV6App() {
     setNotice('Permití el acceso a la ubicación del teléfono.');
     try {
       const position = await requestPhonePosition();
-      const displayedCity = headerLocation(profile);
-      const hasUsefulCity =
-        displayedCity !== 'Agregar ciudad' &&
-        displayedCity !== 'Configurar ciudad' &&
-        displayedCity !== 'Ubicación actual';
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      const reverseLocation = await reverseGeocodePhoneLocation(lat, lng).catch(() => null);
+      const nextCity =
+        reverseLocation?.city ||
+        reverseLocation?.label ||
+        (profile.city && profile.city !== 'Ubicación actual' ? profile.city : coordinateFallback(lat, lng));
       const updated = await updateV6Profile(profile.id, {
         full_name: profile.full_name,
         phone: profile.phone,
-        city: hasUsefulCity ? profile.city : 'Ubicación actual',
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
+        city: nextCity,
+        lat,
+        lng,
       });
 
       setProfile(updated);
-      if (hasUsefulCity) {
-        setNotice('GPS actualizado. Vamos a usar tu ubicación actual para ordenar profesionales cercanos.');
-      } else {
-        setTab('account');
-        setNotice('GPS guardado. Agregá tu ciudad para mostrarla correctamente en la app.');
-      }
+      setNotice(
+        reverseLocation?.label
+          ? `Ubicación actualizada: ${reverseLocation.label}.`
+          : 'GPS actualizado. No pude leer la ciudad exacta, pero guardé las coordenadas.',
+      );
     } catch (caught) {
       setTab('account');
       setNotice(phoneLocationErrorMessage(caught));

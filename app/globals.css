@@ -22,13 +22,18 @@
 }
 
 html {
+  width: 100%;
   min-height: 100%;
+  overflow-x: hidden;
   background: var(--paper);
 }
 
 body {
+  width: 100%;
+  max-width: 100%;
   min-height: 100vh;
   margin: 0;
+  overflow-x: hidden;
   background: #d6d2ca;
   color: var(--ink);
   font-family:
@@ -632,10 +637,12 @@ a {
 }
 
 .v6-app {
-  width: min(100%, 552px);
+  width: 100%;
+  max-width: 552px;
   min-height: 100vh;
   margin: 0 auto;
   padding: 0 18px 96px;
+  overflow-x: clip;
   background: var(--sand);
   color: var(--ink);
   position: relative;
@@ -747,6 +754,7 @@ a {
 .v6-stack {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .v6-card,
@@ -759,6 +767,8 @@ a {
   border-radius: 22px;
   background: rgb(255 255 255 / 92%);
   box-shadow: 0 16px 42px rgb(23 33 31 / 8%);
+  max-width: 100%;
+  min-width: 0;
 }
 
 .v6-card,
@@ -781,6 +791,8 @@ a {
 .v6-hero {
   display: grid;
   gap: 12px;
+  max-width: 100%;
+  min-width: 0;
   margin-top: 2px;
   padding: 28px 24px;
   border-radius: 28px;
@@ -795,6 +807,7 @@ a {
   margin: 0;
   font-size: 2.08rem;
   line-height: 1.03;
+  overflow-wrap: anywhere;
 }
 
 .v6-hero p {
@@ -1281,7 +1294,8 @@ a {
   z-index: 20;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  width: min(100%, 552px);
+  width: 100%;
+  max-width: 552px;
   margin: 0 auto;
   padding: 10px 12px 12px;
   border: 0;
