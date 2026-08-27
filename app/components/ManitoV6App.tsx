@@ -3393,7 +3393,7 @@ function ProfilePanel({
                 <BadgeCheck size={17} aria-hidden="true" /> Checklist de alta
               </span>
               <small>
-                {proServices.length} servicios · {completedDocuments}/{requiredDocuments.length} documentos · paso interno {onboarding?.current_step || 1}/16
+                {proServices.length} rubros · {proSpecialties.length} especialidades · {completedDocuments}/{requiredDocuments.length} documentos · paso interno {onboarding?.current_step || 1}/16
               </small>
             </div>
             <div className="v6-wizard-actions">
