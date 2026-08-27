@@ -62,6 +62,7 @@ import {
   listV6Orders,
   listV6PaymentProfiles,
   listV6Portfolio,
+  listV6PublicProfessionals,
   listV6ProfessionalDocuments,
   listV6ProfessionalServices,
   listV6ProfessionalSpecialties,
@@ -106,6 +107,7 @@ import type {
   V6ProfessionalProfile,
   V6ProfessionalService,
   V6ProfessionalSpecialty,
+  V6PublicProfessional,
   V6Role,
   V6Service,
   V6Specialty,
@@ -136,18 +138,14 @@ type SavedAddress = {
   lat: number | null;
   lng: number | null;
 };
-type FeaturedProfessional = {
-  id: string;
-  name: string;
-  trade: string;
-  rating: number;
-  jobs: number;
-  distance: string;
-  etaMinutes: number;
-  specialties: string[];
-  verified: boolean;
-  pro: boolean;
-  priceDelta: number;
+type ProfessionalCandidate = {
+  professional: V6PublicProfessional;
+  score: number;
+  reasons: string[];
+  specialtyNames: string[];
+  priceFrom: number | null;
+  etaMinutes: number | null;
+  distanceKm: number | null;
 };
 type ServiceGroupId = 'all' | 'home' | 'automotive';
 type ServiceGroup = {
@@ -203,47 +201,6 @@ function timeInputValue(value?: string | null, fallback = '08:00') {
   return value.slice(0, 5);
 }
 
-const featuredProfessionals: FeaturedProfessional[] = [
-  {
-    id: 'pro-martin',
-    name: 'Martin Ledesma',
-    trade: 'Plomeria y gas',
-    rating: 4.9,
-    jobs: 186,
-    distance: '1,8 km',
-    etaMinutes: 28,
-    specialties: ['Urgencias', 'Pérdidas', 'Termotanques'],
-    verified: true,
-    pro: true,
-    priceDelta: 2500,
-  },
-  {
-    id: 'pro-sofia',
-    name: 'Sofia Pereira',
-    trade: 'Electricidad',
-    rating: 4.8,
-    jobs: 143,
-    distance: '2,4 km',
-    etaMinutes: 35,
-    specialties: ['Tableros', 'Cortos', 'Instalaciones'],
-    verified: true,
-    pro: false,
-    priceDelta: 0,
-  },
-  {
-    id: 'pro-diego',
-    name: 'Diego Mena',
-    trade: 'Mantenimiento',
-    rating: 4.7,
-    jobs: 98,
-    distance: '3,1 km',
-    etaMinutes: 42,
-    specialties: ['Cerrajeria', 'Hogar', 'Reparaciones'],
-    verified: true,
-    pro: false,
-    priceDelta: -1000,
-  },
-];
 const requiredDocuments = [
   { kind: 'dni_front', label: 'DNI frente' },
   { kind: 'dni_back', label: 'DNI dorso' },
@@ -459,6 +416,88 @@ function detectSpecialtiesForService(
     .slice(0, 3);
 }
 
+function publicProfessionalName(professional: V6PublicProfessional) {
+  return professional.profile.full_name || 'Profesional MANITO';
+}
+
+function publicProfessionalTrade(
+  professional: V6PublicProfessional,
+  services: V6Service[],
+) {
+  const names = professional.services
+    .map((item) => services.find((service) => service.id === item.service_id))
+    .filter((service): service is V6Service => Boolean(service))
+    .slice(0, 2)
+    .map(serviceDisplayName);
+  return names.length ? names.join(' + ') : 'Servicios MANITO';
+}
+
+function professionalCandidatesForService({
+  service,
+  professionals,
+  specialties,
+  query,
+  clientCoords,
+}: {
+  service: V6Service | null;
+  professionals: V6PublicProfessional[];
+  specialties: V6Specialty[];
+  query: string;
+  clientCoords: { lat: number; lng: number } | null;
+}) {
+  if (!service) return [];
+  const detectedSpecialties = detectSpecialtiesForService(service, specialties, query);
+  const detectedIds = new Set(detectedSpecialties.map((match) => match.specialty.id));
+
+  return professionals
+    .map((professional) => {
+      const proService = professional.services.find((item) => item.service_id === service.id);
+      if (!proService) return null;
+      const distance = clientCoords
+        ? distanceKm(
+            professional.profile.lat,
+            professional.profile.lng,
+            clientCoords.lat,
+            clientCoords.lng,
+          )
+        : null;
+      const radius = professional.professional_profile?.service_radius_km || 8;
+      if (distance != null && distance > radius) return null;
+
+      const matchedSpecialties = professional.specialties
+        .filter((item) => item.service_id === service.id && detectedIds.has(item.specialty_id))
+        .map((item) => specialties.find((specialty) => specialty.id === item.specialty_id))
+        .filter((item): item is V6Specialty => Boolean(item));
+      const specialtyNames = matchedSpecialties.map((item) => item.name);
+      const reasons = [
+        'Disponible',
+        professional.professional_profile?.verified ? 'Verificado' : 'Verificación pendiente',
+        distance != null
+          ? `${distance < 1 ? 'Menos de 1' : distance.toFixed(1)} km`
+          : professional.professional_profile?.work_city || professional.profile.city || null,
+        specialtyNames[0] ? `Especialidad: ${specialtyNames.slice(0, 2).join(', ')}` : null,
+      ].filter(Boolean) as string[];
+      const score =
+        62 +
+        (professional.professional_profile?.verified ? 12 : 0) +
+        Math.min(12, professional.professional_profile?.jobs_completed || 0) +
+        (matchedSpecialties.length ? 14 : detectedSpecialties.length ? 2 : 0) +
+        (distance != null ? Math.max(0, 10 - Math.round(distance)) : 3);
+
+      return {
+        professional,
+        score: Math.min(98, score),
+        reasons,
+        specialtyNames,
+        priceFrom: proService.price_from,
+        etaMinutes: professional.professional_profile?.response_minutes || null,
+        distanceKm: distance,
+      };
+    })
+    .filter((candidate): candidate is ProfessionalCandidate => Boolean(candidate))
+    .sort((left, right) => right.score - left.score);
+}
+
 function filterServicesByGroup(services: V6Service[], groupId: ServiceGroupId) {
   const group = serviceGroups.find((item) => item.id === groupId);
   if (!group || group.id === 'all') return services;
@@ -653,16 +692,6 @@ function evaluateProfessionalOrderMatch(
   };
 }
 
-function professionalForService(service: V6Service | null) {
-  const slug = service?.slug || '';
-  if (slug === 'electricidad') return featuredProfessionals[1];
-  if (slug === 'plomeria' || slug === 'gas') return featuredProfessionals[0];
-  if (['mecanica_automotor', 'gomeria', 'chapa_pintura_auto'].includes(slug)) {
-    return featuredProfessionals[2];
-  }
-  return featuredProfessionals[2];
-}
-
 function pendingProfileKey(email: string) {
   return `manito_v6_pending_profile:${email.toLowerCase()}`;
 }
@@ -730,6 +759,7 @@ export default function ManitoV6App() {
   const [specialties, setSpecialties] = useState<V6Specialty[]>([]);
   const [proServices, setProServices] = useState<V6ProfessionalService[]>([]);
   const [proSpecialties, setProSpecialties] = useState<V6ProfessionalSpecialty[]>([]);
+  const [publicProfessionals, setPublicProfessionals] = useState<V6PublicProfessional[]>([]);
   const [orders, setOrders] = useState<V6Order[]>([]);
   const [tab, setTab] = useState<Tab>('home');
   const [appMode, setAppMode] = useState<AppMode>('client');
@@ -747,13 +777,22 @@ export default function ManitoV6App() {
   const loadData = useCallback(async (userId: string) => {
     setProfileLoading(true);
     try {
-      const [nextProfile, nextServices, nextSpecialties, nextOrders, nextProServices, nextProSpecialties] = await Promise.all([
+      const [
+        nextProfile,
+        nextServices,
+        nextSpecialties,
+        nextOrders,
+        nextProServices,
+        nextProSpecialties,
+        nextPublicProfessionals,
+      ] = await Promise.all([
         getV6Profile(userId),
         listV6Services(),
         listV6Specialties(),
         listV6Orders(),
         listV6ProfessionalServices(userId),
         listV6ProfessionalSpecialties(userId),
+        listV6PublicProfessionals(),
       ]);
       setError(null);
       setProfile(nextProfile);
@@ -762,6 +801,7 @@ export default function ManitoV6App() {
       setOrders(nextOrders);
       setProServices(nextProServices);
       setProSpecialties(nextProSpecialties);
+      setPublicProfessionals(nextPublicProfessionals);
     } finally {
       setProfileLoading(false);
     }
@@ -778,6 +818,7 @@ export default function ManitoV6App() {
     setOrders([]);
     setProServices([]);
     setProSpecialties([]);
+    setPublicProfessionals([]);
     setError(null);
     setNotice('Listo. Activá fecha y hora automática si vuelve a pasar, y entrá de nuevo.');
   }, []);
@@ -826,6 +867,7 @@ export default function ManitoV6App() {
           setOrders([]);
           setProServices([]);
           setProSpecialties([]);
+          setPublicProfessionals([]);
         }
       },
     );
@@ -1051,6 +1093,7 @@ export default function ManitoV6App() {
               profile={viewProfile}
               services={services}
               specialties={specialties}
+              publicProfessionals={publicProfessionals}
               clientOrders={clientOrders}
               selectedService={clientSelectedService}
               setSelectedService={setClientSelectedService}
@@ -1107,13 +1150,13 @@ export default function ManitoV6App() {
 
         {tab === 'favorites' && (
           <FavoritesPanel
+            professionals={publicProfessionals}
+            services={services}
+            specialties={specialties}
             onPickProfessional={(professional) => {
-              setClientSelectedService(
-                services.find((service) =>
-                  professional.trade.toLowerCase().includes(service.name.toLowerCase()),
-                ) || services[0] || null,
-              );
-              setClientProblemQuery(professional.trade);
+              const service = services.find((item) => item.id === professional.services[0]?.service_id) || null;
+              setClientSelectedService(service);
+              setClientProblemQuery(publicProfessionalTrade(professional, services));
               setTab('home');
             }}
           />
@@ -1321,6 +1364,7 @@ function ClientHome({
   profile,
   services,
   specialties,
+  publicProfessionals,
   clientOrders,
   selectedService,
   setSelectedService,
@@ -1335,6 +1379,7 @@ function ClientHome({
   profile: V6Profile;
   services: V6Service[];
   specialties: V6Specialty[];
+  publicProfessionals: V6PublicProfessional[];
   clientOrders: V6Order[];
   selectedService: V6Service | null;
   setSelectedService: (service: V6Service | null) => void;
@@ -1357,27 +1402,41 @@ function ClientHome({
   );
   const [addressLabel, setAddressLabel] = useState('Casa');
   const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>('auto');
-  const [selectedProfessionalId, setSelectedProfessionalId] = useState(featuredProfessionals[0].id);
+  const [selectedProfessionalId, setSelectedProfessionalId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('card');
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
   const [serviceGroup, setServiceGroup] = useState<ServiceGroupId>('all');
   const [creatingOrder, setCreatingOrder] = useState(false);
   const requestFormRef = useRef<HTMLElement | null>(null);
-  const selectedProfessional = featuredProfessionals.find(
-    (professional) => professional.id === selectedProfessionalId,
-  );
   const selectedBasePrice = selectedService?.base_price ?? 0;
+  const candidateProfessionals = useMemo(
+    () =>
+      professionalCandidatesForService({
+        service: selectedService,
+        professionals: publicProfessionals,
+        specialties,
+        query: `${problemQuery}\n${description}`,
+        clientCoords: coords,
+      }),
+    [coords, description, problemQuery, publicProfessionals, selectedService, specialties],
+  );
+  const selectedProfessionalCandidate =
+    candidateProfessionals.find((candidate) => candidate.professional.profile.id === selectedProfessionalId) ||
+    candidateProfessionals[0] ||
+    null;
+  const effectiveAssignmentMode =
+    assignmentMode === 'manual' && candidateProfessionals.length ? 'manual' : 'auto';
   const estimatedPrice = selectedService
-    ? selectedBasePrice +
-      (mode === 'scheduled' ? 2000 : 0) +
-      (assignmentMode === 'manual' ? selectedProfessional?.priceDelta || 0 : 0)
+    ? (effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate?.priceFrom
+        ? selectedProfessionalCandidate.priceFrom
+        : selectedBasePrice) + (mode === 'scheduled' ? 2000 : 0)
     : null;
   const etaText =
     mode === 'scheduled'
       ? 'Horario reservado'
-      : selectedProfessional
-        ? `${selectedProfessional.etaMinutes} min`
+      : selectedProfessionalCandidate?.etaMinutes
+        ? `${selectedProfessionalCandidate.etaMinutes} min`
         : '30-45 min';
   const scoredServices = useMemo(
     () =>
@@ -1410,7 +1469,14 @@ function ClientHome({
           normalizeText(`${service.name} ${service.slug}`).includes(query),
         );
   const filteredServices = filterServicesByGroup(queryFilteredServices, activeServiceGroup);
-  const recommendedProfessional = professionalForService(recommendedService);
+  const recommendedProfessional =
+      professionalCandidatesForService({
+        service: recommendedService,
+        professionals: publicProfessionals,
+        specialties,
+        query: `${problemQuery}\n${description}`,
+        clientCoords: coords,
+    })[0] || null;
   const photoNames = photoFiles.map((file) => file.name);
   const selectedPaymentProfile = paymentProfiles.find((payment) => payment.type === paymentMethod);
 
@@ -1481,8 +1547,8 @@ function ClientHome({
           ? `Especialidad sugerida: ${recommendedSpecialties.map((match) => match.specialty.name).join(', ')}`
           : null,
         `Asignación: ${
-          assignmentMode === 'manual' && selectedProfessional
-            ? `prefiero a ${selectedProfessional.name}`
+          effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate
+            ? `prefiero a ${publicProfessionalName(selectedProfessionalCandidate.professional)}`
             : 'automática MANITO'
         }`,
         `Pago: ${paymentLabel(paymentMethod)}`,
@@ -1497,11 +1563,14 @@ function ClientHome({
         description: orderDescription,
         address: orderAddress,
         mode,
-        assignmentMode,
-        preferredProfessionalId: null,
+        assignmentMode: effectiveAssignmentMode,
+        preferredProfessionalId:
+          effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate
+            ? selectedProfessionalCandidate.professional.profile.id
+            : null,
         paymentMethod,
         guaranteeDays: 7,
-        etaMinutes: selectedProfessional?.etaMinutes || null,
+        etaMinutes: selectedProfessionalCandidate?.etaMinutes || null,
         scheduledAt: mode === 'scheduled' && scheduledAt ? new Date(scheduledAt).toISOString() : null,
         price: estimatedPrice,
         lat: coords?.lat || null,
@@ -1621,14 +1690,24 @@ function ClientHome({
   }
 
   function applyRecommendation(service: V6Service, nextProblem = problemQuery) {
-    const professional = professionalForService(service);
+    const candidate = professionalCandidatesForService({
+      service,
+      professionals: publicProfessionals,
+      specialties,
+      query: `${nextProblem}\n${description}`,
+      clientCoords: coords,
+    })[0] || null;
     const label = serviceDisplayName(service);
     setSelectedService(service);
     setProblemQuery(nextProblem);
     setDescription(nextProblem.trim() || `Necesito ayuda con ${label}.`);
-    setAssignmentMode('manual');
-    setSelectedProfessionalId(professional.id);
-    setNotice(`${label} seleccionado. Completá los datos y publicá el pedido.`);
+    setAssignmentMode(candidate ? 'manual' : 'auto');
+    setSelectedProfessionalId(candidate?.professional.profile.id || '');
+    setNotice(
+      candidate
+        ? `${label} seleccionado. Te muestro profesionales compatibles reales.`
+        : `${label} seleccionado. Publicalo en automático hasta que haya profesionales disponibles.`,
+    );
     scrollToRequestForm();
   }
 
@@ -1781,9 +1860,15 @@ function ClientHome({
                 <Sparkles size={15} aria-hidden="true" /> MANITO recomienda
               </p>
               <strong>{serviceDisplayName(recommendedService)}</strong>
-              <small>
-                {recommendedProfessional.name} - {recommendedProfessional.rating} estrellas - {recommendedProfessional.etaMinutes} min
-              </small>
+              {recommendedProfessional ? (
+                <small>
+                  {publicProfessionalName(recommendedProfessional.professional)} - {' '}
+                  {recommendedProfessional.professional.professional_profile?.rating_avg || 4.8} estrellas - {' '}
+                  {recommendedProfessional.etaMinutes || recommendedProfessional.professional.professional_profile?.response_minutes || 35} min
+                </small>
+              ) : (
+                <small>Sin profesionales disponibles para elegir ahora. Podés publicarlo en automático.</small>
+              )}
               {recommendedSpecialties[0] && (
                 <small>Especialidad sugerida: {recommendedSpecialties[0].specialty.name}</small>
               )}
@@ -1964,13 +2049,13 @@ function ClientHome({
 
             <div className="v6-section-head compact">
               <h2>Asignación</h2>
-              <span>{assignmentMode === 'manual' ? 'Elegís vos' : 'MANITO asigna'}</span>
+              <span>{effectiveAssignmentMode === 'manual' ? 'Elegís vos' : 'MANITO asigna'}</span>
             </div>
             <div className="v6-choice-grid">
               <button
                 type="button"
                 className="v6-choice"
-                aria-pressed={assignmentMode === 'auto'}
+                aria-pressed={effectiveAssignmentMode === 'auto'}
                 onClick={() => setAssignmentMode('auto')}
               >
                 <Users size={18} aria-hidden="true" />
@@ -1979,7 +2064,8 @@ function ClientHome({
               <button
                 type="button"
                 className="v6-choice"
-                aria-pressed={assignmentMode === 'manual'}
+                aria-pressed={effectiveAssignmentMode === 'manual'}
+                disabled={!candidateProfessionals.length}
                 onClick={() => setAssignmentMode('manual')}
               >
                 <Star size={18} aria-hidden="true" />
@@ -1987,33 +2073,43 @@ function ClientHome({
               </button>
             </div>
 
-            {assignmentMode === 'manual' && (
+            {effectiveAssignmentMode === 'manual' && (
               <div className="v6-pro-list">
-                {featuredProfessionals.map((professional) => (
+                {candidateProfessionals.map((candidate) => (
                   <button
                     className="v6-pro-card"
                     type="button"
-                    aria-pressed={selectedProfessionalId === professional.id}
-                    key={professional.id}
-                    onClick={() => setSelectedProfessionalId(professional.id)}
+                    aria-pressed={selectedProfessionalCandidate?.professional.profile.id === candidate.professional.profile.id}
+                    key={candidate.professional.profile.id}
+                    onClick={() => setSelectedProfessionalId(candidate.professional.profile.id)}
                   >
-                    <span className="v6-pro-avatar">{professional.name.slice(0, 1)}</span>
+                    <span className="v6-pro-avatar">{publicProfessionalName(candidate.professional).slice(0, 1)}</span>
                     <span>
-                      <strong>{professional.name}</strong>
-                      <small>{professional.trade}</small>
+                      <strong>{publicProfessionalName(candidate.professional)}</strong>
+                      <small>{publicProfessionalTrade(candidate.professional, services)}</small>
                       <small>
-                        {professional.rating} estrellas - {professional.jobs} trabajos - {professional.distance} - {professional.etaMinutes} min
+                        {candidate.professional.professional_profile?.rating_avg || 4.8} estrellas - {' '}
+                        {candidate.professional.professional_profile?.jobs_completed || 0} trabajos - {' '}
+                        {candidate.distanceKm != null
+                          ? `${candidate.distanceKm < 1 ? 'menos de 1' : candidate.distanceKm.toFixed(1)} km`
+                          : candidate.professional.professional_profile?.work_city || candidate.professional.profile.city || 'zona a confirmar'} - {' '}
+                        {candidate.etaMinutes || candidate.professional.professional_profile?.response_minutes || 35} min
                       </small>
-                      <em>{professional.specialties.join(' - ')}</em>
+                      <em>{candidate.reasons.join(' - ')}</em>
                     </span>
                     <span className="v6-badges">
-                      {professional.verified && <BadgeCheck size={17} aria-label="Verificado" />}
-                      {professional.pro && <b>PRO</b>}
+                      {candidate.professional.professional_profile?.verified && <BadgeCheck size={17} aria-label="Verificado" />}
+                      {candidate.professional.professional_profile?.manito_pro && <b>PRO</b>}
                       <Heart size={17} aria-label="Favorito" />
                     </span>
                   </button>
                 ))}
               </div>
+            )}
+            {!candidateProfessionals.length && selectedService && (
+              <p className="v6-muted">
+                Todavía no hay profesionales disponibles para elegir en {serviceDisplayName(selectedService)}. Publicalo en automático para que aparezca cuando haya uno conectado.
+              </p>
             )}
 
             <div className="v6-section-head compact">
@@ -2053,16 +2149,26 @@ function ClientHome({
 
             {mode === 'quote' && selectedService && (
               <div className="v6-quote-list">
-                {featuredProfessionals.map((professional) => (
-                  <article className="v6-quote-card" key={professional.id}>
-                    <strong>{professional.name}</strong>
-                    <span>{professional.rating} estrellas - disponible hoy - visita {money(6500)}</span>
+                {candidateProfessionals.slice(0, 3).map((candidate) => (
+                  <article className="v6-quote-card" key={candidate.professional.profile.id}>
+                    <strong>{publicProfessionalName(candidate.professional)}</strong>
+                    <span>
+                      {candidate.professional.professional_profile?.rating_avg || 4.8} estrellas - {' '}
+                      {candidate.etaMinutes ? `${candidate.etaMinutes} min` : 'horario a coordinar'} - visita {money(6500)}
+                    </span>
                     <p>
-                      Mano de obra {money(Math.max(0, selectedBasePrice + professional.priceDelta))}
+                      Mano de obra {money(candidate.priceFrom || selectedBasePrice)}
                       {' '}+ fee MANITO {money(2500)}
                     </p>
                   </article>
                 ))}
+                {!candidateProfessionals.length && (
+                  <article className="v6-quote-card">
+                    <strong>Presupuesto abierto</strong>
+                    <span>Se publicará para profesionales disponibles del rubro.</span>
+                    <p>Cuando un prestador real responda, vas a poder comparar su propuesta.</p>
+                  </article>
+                )}
               </div>
             )}
 
@@ -2229,7 +2335,7 @@ function SearchPanel({
               <div>
                 <strong>{serviceDisplayName(service)}</strong>
                 <p>{serviceDescription(service.slug)}</p>
-                <small>Desde {money(service.base_price)} - {professionalForService(service).etaMinutes} min</small>
+                <small>Desde {money(service.base_price)} - ETA según disponibilidad</small>
               </div>
               <button
                 className={selectedService?.id === service.id ? 'v6-orange-button' : 'v6-primary'}
@@ -2315,9 +2421,15 @@ function AppointmentNotice({
 }
 
 function FavoritesPanel({
+  professionals,
+  services,
+  specialties,
   onPickProfessional,
 }: {
-  onPickProfessional: (professional: FeaturedProfessional) => void;
+  professionals: V6PublicProfessional[];
+  services: V6Service[];
+  specialties: V6Specialty[];
+  onPickProfessional: (professional: V6PublicProfessional) => void;
 }) {
   return (
     <>
@@ -2327,25 +2439,40 @@ function FavoritesPanel({
       </section>
       <section className="v6-section v6-flat-section">
         <div className="v6-section-head">
-          <h2>Profesionales recomendados</h2>
-          <span>Ver todos</span>
+          <h2>Profesionales disponibles</h2>
+          <span>{professionals.length}</span>
         </div>
         <div className="v6-pro-list">
-          {featuredProfessionals.map((professional) => (
-            <button className="v6-pro-card v6-public-pro" type="button" key={professional.id} onClick={() => onPickProfessional(professional)}>
-              <span className="v6-pro-avatar">{professional.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span>
+          {professionals.map((professional) => {
+            const specialtyNames = professional.specialties
+              .map((item) => specialties.find((specialty) => specialty.id === item.specialty_id)?.name)
+              .filter((name): name is string => Boolean(name))
+              .slice(0, 4);
+            return (
+            <button className="v6-pro-card v6-public-pro" type="button" key={professional.profile.id} onClick={() => onPickProfessional(professional)}>
+              <span className="v6-pro-avatar">
+                {publicProfessionalName(professional).split(' ').map((part) => part[0]).join('').slice(0, 2)}
+              </span>
               <span>
-                <strong>{professional.name}</strong>
-                <small>{professional.rating} estrellas - {professional.jobs} trabajos - {professional.trade}</small>
-                <em>{professional.specialties.join(' - ')}</em>
+                <strong>{publicProfessionalName(professional)}</strong>
+                <small>
+                  {professional.professional_profile?.rating_avg || 4.8} estrellas - {' '}
+                  {professional.professional_profile?.jobs_completed || 0} trabajos - {' '}
+                  {publicProfessionalTrade(professional, services)}
+                </small>
+                <em>{specialtyNames.length ? specialtyNames.join(' - ') : 'Especialidades a confirmar'}</em>
               </span>
               <span className="v6-badges">
-                {professional.pro && <b>PRO</b>}
+                {professional.professional_profile?.manito_pro && <b>PRO</b>}
                 <Heart size={17} aria-label="Favorito" />
               </span>
             </button>
-          ))}
+            );
+          })}
         </div>
+        {!professionals.length && (
+          <Empty title="Sin profesionales disponibles" body="Cuando haya cuentas de prueba con rubros activos van a aparecer acá." />
+        )}
       </section>
     </>
   );

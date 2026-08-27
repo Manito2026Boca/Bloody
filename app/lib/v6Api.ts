@@ -23,6 +23,7 @@ import type {
   V6ProfessionalProfile,
   V6ProfessionalService,
   V6ProfessionalSpecialty,
+  V6PublicProfessional,
   V6Role,
   V6Service,
   V6Specialty,
@@ -142,6 +143,57 @@ export async function listV6ProfessionalSpecialties(userId: string) {
   if (isMissingV5Table(error)) return [];
   fail(error);
   return (data || []) as V6ProfessionalSpecialty[];
+}
+
+export async function listV6PublicProfessionals() {
+  const supabase = getV6Supabase();
+  const { data: profiles, error: profilesError } = await supabase
+    .from('profiles')
+    .select('id,full_name,city,is_available,lat,lng')
+    .eq('role', 'professional')
+    .eq('is_available', true)
+    .order('full_name');
+  fail(profilesError);
+
+  const professionalIds = ((profiles || []) as V6PublicProfessional['profile'][]).map((profile) => profile.id);
+  if (!professionalIds.length) return [];
+
+  const [professionalProfilesResult, servicesResult, specialtiesResult] = await Promise.all([
+    supabase
+      .from('professional_profiles')
+      .select('*')
+      .in('professional_id', professionalIds),
+    supabase
+      .from('professional_services')
+      .select('*')
+      .in('professional_id', professionalIds),
+    supabase
+      .from('professional_specialties')
+      .select('*')
+      .in('professional_id', professionalIds),
+  ]);
+
+  if (isMissingV5Table(professionalProfilesResult.error)) return [];
+  if (isMissingV5Table(servicesResult.error)) return [];
+  if (isMissingV5Table(specialtiesResult.error)) return [];
+  fail(professionalProfilesResult.error);
+  fail(servicesResult.error);
+  fail(specialtiesResult.error);
+
+  const publicProfiles = (profiles || []) as V6PublicProfessional['profile'][];
+  const professionalProfiles = (professionalProfilesResult.data || []) as V6ProfessionalProfile[];
+  const professionalServices = (servicesResult.data || []) as V6ProfessionalService[];
+  const professionalSpecialties = (specialtiesResult.data || []) as V6ProfessionalSpecialty[];
+
+  return publicProfiles
+    .map((profile) => ({
+      profile,
+      professional_profile:
+        professionalProfiles.find((item) => item.professional_id === profile.id) || null,
+      services: professionalServices.filter((item) => item.professional_id === profile.id),
+      specialties: professionalSpecialties.filter((item) => item.professional_id === profile.id),
+    }))
+    .filter((professional) => professional.services.length > 0) as V6PublicProfessional[];
 }
 
 export async function saveV6ProfessionalSpecialties(

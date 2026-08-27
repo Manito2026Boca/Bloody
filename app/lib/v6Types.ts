@@ -57,6 +57,13 @@ export type V6ProfessionalSpecialty = {
   created_at: string;
 };
 
+export type V6PublicProfessional = {
+  profile: Pick<V6Profile, 'id' | 'full_name' | 'city' | 'is_available' | 'lat' | 'lng'>;
+  professional_profile: V6ProfessionalProfile | null;
+  services: V6ProfessionalService[];
+  specialties: V6ProfessionalSpecialty[];
+};
+
 export type V6Order = {
   id: string;
   client_id: string;
