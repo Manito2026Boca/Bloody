@@ -1990,14 +1990,12 @@ function ClientHome({
                 </button>
               ))}
             </div>
-            {paymentProfiles.length > 0 && (
+            {selectedPaymentProfile && (
               <div className="v6-file-list">
-                {paymentProfiles.map((payment) => (
-                  <span className={payment.type === paymentMethod ? 'active' : ''} key={payment.id}>
-                    {paymentProfileIcon(payment)} {paymentProfileDisplay(payment)}
-                    {payment.type === paymentMethod && <b>Guardado</b>}
-                  </span>
-                ))}
+                <span className="active">
+                  {paymentProfileIcon(selectedPaymentProfile)} {paymentProfileDisplay(selectedPaymentProfile)}
+                  <b>Se usará en este pedido</b>
+                </span>
               </div>
             )}
             {!selectedPaymentProfile && (
