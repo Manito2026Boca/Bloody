@@ -53,6 +53,7 @@ import {
   getV6ProfessionalOnboarding,
   getV6ProfessionalPayoutDetails,
   getV6ProfessionalProfile,
+  listV6Complaints,
   listV6AdminSettings,
   listV6ClientAddresses,
   listV6Messages,
@@ -92,6 +93,7 @@ import {
 } from '../lib/v6Supabase';
 import type {
   V6AdminSetting,
+  V6Complaint,
   V6Message,
   V6Mode,
   V6Order,
@@ -1797,7 +1799,7 @@ function ClientHome({
         }`,
         `Pago: ${paymentLabel(paymentMethod)}`,
         photoNames.length ? `Fotos cargadas: ${photoNames.join(', ')}` : null,
-        'Garantía MANITO: 7 días',
+        'Protección MANITO: servicio registrado con chat, evidencia y adicionales aprobados.',
       ]
         .filter(Boolean)
         .join('\n');
@@ -2418,10 +2420,10 @@ function ClientHome({
 
             <div className="v6-summary">
               <span>
-                <ShieldCheck size={17} aria-hidden="true" /> Garantía MANITO 7 días
+                <ShieldCheck size={17} aria-hidden="true" /> Protección MANITO incluida
               </span>
               <strong>{money(estimatedPrice)}</strong>
-              <small>ETA {etaText} - {paymentLabel(paymentMethod)}</small>
+              <small>ETA {etaText} - {paymentLabel(paymentMethod)} - todo queda registrado en la app</small>
             </div>
             <button className="v6-primary" type="submit" disabled={creatingOrder}>
               {creatingOrder ? 'Publicando...' : 'Publicar pedido'}
@@ -3049,6 +3051,7 @@ function OrderCard({
         : 'Finalizar trabajo';
   const [proposals, setProposals] = useState<V6OrderProposal[]>([]);
   const [extras, setExtras] = useState<V6OrderExtra[]>([]);
+  const [complaints, setComplaints] = useState<V6Complaint[]>([]);
   const [photos, setPhotos] = useState<Array<V6OrderPhoto & { signedUrl: string | null }>>([]);
   const [evidenceStage, setEvidenceStage] = useState<V6OrderPhoto['stage']>('during');
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
@@ -3061,15 +3064,18 @@ function OrderCard({
   const [extraAmount, setExtraAmount] = useState('4500');
   const [ratingStars, setRatingStars] = useState(5);
   const [ratingComment, setRatingComment] = useState('');
+  const [complaintReason, setComplaintReason] = useState('El problema reapareció');
   const [complaintDetail, setComplaintDetail] = useState('');
 
   const refreshCommercialData = useCallback(async () => {
-    const [nextProposals, nextExtras] = await Promise.all([
+    const [nextProposals, nextExtras, nextComplaints] = await Promise.all([
       listV6OrderProposals(order.id),
       listV6OrderExtras(order.id),
+      listV6Complaints(order.id),
     ]);
     setProposals(nextProposals);
     setExtras(nextExtras);
+    setComplaints(nextComplaints);
   }, [order.id]);
 
   const refreshPhotos = useCallback(async () => {
@@ -3088,11 +3094,13 @@ function OrderCard({
     Promise.all([
       listV6OrderProposals(order.id),
       listV6OrderExtras(order.id),
+      listV6Complaints(order.id),
     ])
-      .then(async ([nextProposals, nextExtras]) => {
+      .then(async ([nextProposals, nextExtras, nextComplaints]) => {
         if (!alive) return;
         setProposals(nextProposals);
         setExtras(nextExtras);
+        setComplaints(nextComplaints);
         if (alive) await refreshPhotos();
       })
       .catch(() => undefined);
@@ -3203,17 +3211,22 @@ function OrderCard({
 
   async function submitComplaint(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!complaintDetail.trim()) {
+      setError('Contanos qué pasó para abrir la revisión.');
+      return;
+    }
     try {
       await addV6Complaint({
         orderId: order.id,
         openedBy: profile.id,
-        reason: 'Garantía MANITO',
+        reason: complaintReason,
         detail: complaintDetail,
       });
-      setNotice('Reclamo abierto. MANITO revisa la garantía.');
+      await refreshCommercialData();
+      setNotice('Revisión abierta. MANITO revisa el caso con el historial del pedido.');
       setComplaintDetail('');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'No se pudo abrir reclamo.');
+      setError(caught instanceof Error ? caught.message : 'No se pudo abrir la revisión.');
     }
   }
 
@@ -3253,6 +3266,10 @@ function OrderCard({
     ['accepted', 'en_camino', 'en_sitio'].includes(order.status);
   const canChat = Boolean(order.professional_id);
   const canShareTracking = !['completed', 'cancelled'].includes(order.status);
+  const approvedExtras = extras.filter((extra) => extra.status === 'approved');
+  const beforePhotos = photos.filter((photo) => photo.stage === 'before').length;
+  const afterPhotos = photos.filter((photo) => photo.stage === 'after').length;
+  const protectionReference = order.completed_at || order.updated_at || order.created_at;
 
   async function shareOrderTracking() {
     const text = orderTrackingText(order);
@@ -3298,11 +3315,16 @@ function OrderCard({
       </div>
       <StatusSteps status={order.status} />
       <div className="v6-meta-row">
-        <span><ShieldCheck size={14} aria-hidden="true" /> Garantía {order.guarantee_days || 7} días</span>
+        <span><ShieldCheck size={14} aria-hidden="true" /> Protección MANITO</span>
         {order.payment_method && <span>Pago {paymentLabel(order.payment_method)}</span>}
         {order.eta_minutes && <span>ETA {order.eta_minutes} min</span>}
         {order.status === 'accepted' && <span>PIN inicio {order.start_pin || 'pendiente'}</span>}
       </div>
+      {!['completed', 'cancelled'].includes(order.status) && (
+        <p className="v6-note">
+          Coordiná por el chat y aprobá adicionales desde MANITO para que el servicio quede registrado.
+        </p>
+      )}
       {order.payment_method === 'wallet' && !['completed', 'cancelled'].includes(order.status) && (
         <p className="v6-note">
           {profile.role === 'client'
@@ -3429,6 +3451,65 @@ function OrderCard({
           <button className="v6-secondary" type="submit">Pedir adicional</button>
         </form>
       )}
+      {order.status === 'completed' && (
+        <section className="v6-protection">
+          <div className="v6-section-head compact">
+            <div>
+              <h2>Constancia MANITO</h2>
+              <span>Servicio registrado</span>
+            </div>
+            <ShieldCheck size={18} aria-hidden="true" />
+          </div>
+          <p>
+            Este pedido conserva chat, presupuesto, adicionales y evidencia para revisar cualquier inconveniente relacionado con el trabajo.
+          </p>
+          <div className="v6-proof-grid">
+            <span>
+              <b>Pedido</b>
+              #{order.id.slice(0, 8).toUpperCase()}
+            </span>
+            <span>
+              <b>Finalizado</b>
+              {shortDate(protectionReference)}
+            </span>
+            <span>
+              <b>Servicio</b>
+              {serviceDisplayName(order.service)}
+            </span>
+            <span>
+              <b>{profile.role === 'client' ? 'Profesional' : 'Cliente'}</b>
+              {other?.full_name || 'Usuario MANITO'}
+            </span>
+            <span>
+              <b>Precio final</b>
+              {money(order.price || order.service?.base_price)}
+            </span>
+            <span>
+              <b>Evidencia</b>
+              {beforePhotos} antes · {afterPhotos} después
+            </span>
+            <span>
+              <b>Adicionales</b>
+              {approvedExtras.length ? `${approvedExtras.length} aprobados` : 'Sin adicionales'}
+            </span>
+            <span>
+              <b>PIN final</b>
+              {order.end_pin || 'Registrado'}
+            </span>
+          </div>
+          {complaints.length > 0 && (
+            <div className="v6-complaint-list">
+              {complaints.map((complaint) => (
+                <article key={complaint.id}>
+                  <strong>{complaint.reason}</strong>
+                  <span>{complaint.status.replace('_', ' ')} · {shortDate(complaint.created_at)}</span>
+                  {complaint.detail && <p>{complaint.detail}</p>}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
       {profile.role === 'client' && order.status === 'completed' && order.professional_id && (
         <div className="v6-aftercare">
           <form className="v6-inline-form" onSubmit={submitRating}>
@@ -3441,8 +3522,28 @@ function OrderCard({
             <button className="v6-secondary" type="submit">Calificar</button>
           </form>
           <form className="v6-inline-form" onSubmit={submitComplaint}>
-            <input value={complaintDetail} onChange={(event) => setComplaintDetail(event.target.value)} placeholder="Reclamo o garantía" />
-            <button className="v6-danger" type="submit">Usar garantía</button>
+            <div className="v6-section-head compact">
+              <h2>¿Tuviste un problema con este trabajo?</h2>
+              <span>Protección</span>
+            </div>
+            <select
+              value={complaintReason}
+              onChange={(event) => setComplaintReason(event.target.value)}
+              aria-label="Motivo de revisión"
+            >
+              <option>El problema reapareció</option>
+              <option>Trabajo incompleto</option>
+              <option>Daño relacionado con el trabajo</option>
+              <option>Cobro o adicional no acordado</option>
+              <option>Conducta del profesional</option>
+              <option>Otro problema</option>
+            </select>
+            <textarea
+              value={complaintDetail}
+              onChange={(event) => setComplaintDetail(event.target.value)}
+              placeholder="Describí qué pasó. Si podés, agregá fotos al seguimiento para que MANITO revise con evidencia."
+            />
+            <button className="v6-secondary" type="submit">Solicitar revisión</button>
           </form>
         </div>
       )}
@@ -4807,6 +4908,9 @@ function ChatSheet({
             ×
           </button>
         </div>
+        <p className="v6-chat-protection">
+          Usá este chat para coordinar pagos, horarios y adicionales. Lo acordado acá queda registrado para Protección MANITO.
+        </p>
         <div className="v6-chat-list">
           {messages.map((message) => (
             <article className={message.sender_id === profile.id ? 'v6-bubble mine' : 'v6-bubble'} key={message.id}>

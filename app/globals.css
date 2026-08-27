@@ -1695,6 +1695,68 @@ a.v6-evidence-link {
   font-size: 1.4rem;
 }
 
+.v6-protection {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #b8d9cb;
+  border-radius: 12px;
+  background: var(--mist);
+  color: var(--green-900);
+  padding: 12px;
+}
+
+.v6-protection p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.v6-proof-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.v6-proof-grid span {
+  min-width: 0;
+  border: 1px solid rgb(15 75 63 / 14%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 72%);
+  color: var(--ink);
+  padding: 8px;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.v6-proof-grid b {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--green-900);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.v6-complaint-list {
+  display: grid;
+  gap: 8px;
+}
+
+.v6-complaint-list article {
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgb(244 116 42 / 28%);
+  border-radius: 8px;
+  background: #fff8f2;
+  padding: 9px;
+}
+
+.v6-complaint-list span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
 .v6-appointment {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2258,6 +2320,17 @@ a.v6-evidence-link {
   max-height: 46vh;
   overflow: auto;
   padding-right: 4px;
+}
+
+.v6-chat-protection {
+  margin: -4px 0 0;
+  border: 1px solid #b8d9cb;
+  border-radius: 8px;
+  background: var(--mist);
+  color: var(--green-900);
+  padding: 9px 10px;
+  font-size: 0.8rem;
+  line-height: 1.35;
 }
 
 .v6-bubble {

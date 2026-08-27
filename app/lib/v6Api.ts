@@ -626,6 +626,16 @@ export async function addV6Complaint(input: {
   return data as V6Complaint;
 }
 
+export async function listV6Complaints(orderId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('complaints')
+    .select('*')
+    .eq('order_id', orderId)
+    .order('created_at', { ascending: false });
+  fail(error);
+  return (data || []) as V6Complaint[];
+}
+
 export async function listV6Messages(orderId: string) {
   const { data, error } = await getV6Supabase()
     .from('messages')
