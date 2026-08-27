@@ -397,6 +397,68 @@ function serviceScore(service: V6Service, query: string) {
   }, 0);
 }
 
+const specialtyKeywordHints: Record<string, string[]> = {
+  'perdidas de agua': ['pierde agua', 'perdida', 'fuga', 'gotea', 'humedad', 'agua'],
+  destapaciones: ['destapar', 'tapado', 'cloaca', 'desagote', 'bacha', 'inodoro'],
+  griferias: ['canilla', 'grifo', 'monocomando', 'mezcladora'],
+  sanitarios: ['inodoro', 'bidet', 'bano', 'mochila'],
+  termotanques: ['termotanque', 'agua caliente'],
+  'bombas de agua': ['bomba', 'presion de agua', 'tanque'],
+  cortocircuitos: ['corto', 'salta', 'chispazo', 'disyuntor'],
+  'tableros y termicas': ['tablero', 'termica', 'disyuntor'],
+  'tomas y enchufes': ['toma', 'enchufe', 'ficha'],
+  iluminacion: ['luz', 'lampara', 'aplique', 'iluminacion'],
+  cableado: ['cable', 'cableado', 'instalacion electrica'],
+  calefones: ['calefon', 'agua caliente'],
+  cocinas: ['cocina', 'hornalla', 'horno'],
+  estufas: ['estufa', 'calefactor'],
+  'pruebas de hermeticidad': ['hermeticidad', 'matricula', 'metrogas'],
+  aperturas: ['abrir', 'quede afuera', 'perdi la llave'],
+  'cambio de cerraduras': ['cambiar cerradura', 'cerradura rota'],
+  llaves: ['llave', 'copia de llave'],
+  humedad: ['humedad', 'mancha', 'filtracion'],
+  'corte de cesped': ['cesped', 'pasto', 'cortar pasto'],
+  poda: ['poda', 'podar', 'rama'],
+  'instalacion de split': ['instalar aire', 'split', 'aire acondicionado'],
+  'carga de gas': ['carga de gas', 'no enfria', 'frio'],
+  heladeras: ['heladera', 'freezer', 'no enfria'],
+  lavarropas: ['lavarropas', 'centrifuga', 'desagota'],
+  'wi-fi y redes': ['wifi', 'internet', 'red'],
+  'pc y notebooks': ['pc', 'notebook', 'computadora'],
+  bombas: ['bomba', 'pileta'],
+  filtros: ['filtro', 'pileta'],
+};
+
+function specialtyScore(specialty: V6Specialty, query: string) {
+  const normalizedQuery = normalizeText(query);
+  if (!normalizedQuery.trim()) return 0;
+  const normalizedName = normalizeText(specialty.name);
+  const terms = [specialty.name, ...(specialtyKeywordHints[normalizedName] || [])]
+    .map(normalizeText)
+    .filter(Boolean);
+
+  return terms.reduce((score, term) => {
+    if (normalizedQuery.includes(term)) return score + (term.includes(' ') ? 6 : 4);
+    const termParts = term.split(' ').filter((part) => part.length > 3);
+    const partialHits = termParts.filter((part) => normalizedQuery.includes(part)).length;
+    return score + partialHits;
+  }, 0);
+}
+
+function detectSpecialtiesForService(
+  service: Pick<V6Service, 'id'> | null | undefined,
+  specialties: V6Specialty[],
+  query: string,
+) {
+  if (!service) return [];
+  return specialties
+    .filter((specialty) => specialty.service_id === service.id)
+    .map((specialty) => ({ specialty, score: specialtyScore(specialty, query) }))
+    .filter((match) => match.score > 1)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 3);
+}
+
 function filterServicesByGroup(services: V6Service[], groupId: ServiceGroupId) {
   const group = serviceGroups.find((item) => item.id === groupId);
   if (!group || group.id === 'all') return services;
@@ -510,6 +572,8 @@ function evaluateProfessionalOrderMatch(
   profile: V6Profile,
   professionalProfile: V6ProfessionalProfile | null,
   proServices: V6ProfessionalService[],
+  proSpecialties: V6ProfessionalSpecialty[],
+  specialties: V6Specialty[],
 ): ProfessionalOrderMatch | null {
   if (!profile.is_available || order.status !== 'open') return null;
   const service = proServices.find((item) => item.service_id === order.service_id);
@@ -557,6 +621,28 @@ function evaluateProfessionalOrderMatch(
   if (service.price_from) {
     reasons.push(`Tu tarifa desde ${money(service.price_from)}`);
     score += 4;
+  }
+
+  const orderSpecialties = detectSpecialtiesForService(
+    order.service,
+    specialties,
+    order.description,
+  );
+  if (orderSpecialties.length) {
+    const selectedSpecialtyIds = new Set(proSpecialties.map((item) => item.specialty_id));
+    const matchedSpecialties = orderSpecialties.filter((match) =>
+      selectedSpecialtyIds.has(match.specialty.id),
+    );
+    if (matchedSpecialties.length) {
+      const names = matchedSpecialties.map((match) => match.specialty.name).slice(0, 2);
+      reasons.push(`Especialidad: ${names.join(', ')}`);
+      score += Math.min(14, 8 + matchedSpecialties.length * 3);
+    } else if (proSpecialties.some((item) => item.service_id === order.service_id)) {
+      reasons.push('Especialidad no marcada');
+      score -= 6;
+    } else {
+      reasons.push('Especialidad a confirmar');
+    }
   }
 
   return {
@@ -641,7 +727,9 @@ export default function ManitoV6App() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<V6Profile | null>(null);
   const [services, setServices] = useState<V6Service[]>([]);
+  const [specialties, setSpecialties] = useState<V6Specialty[]>([]);
   const [proServices, setProServices] = useState<V6ProfessionalService[]>([]);
+  const [proSpecialties, setProSpecialties] = useState<V6ProfessionalSpecialty[]>([]);
   const [orders, setOrders] = useState<V6Order[]>([]);
   const [tab, setTab] = useState<Tab>('home');
   const [appMode, setAppMode] = useState<AppMode>('client');
@@ -659,16 +747,21 @@ export default function ManitoV6App() {
   const loadData = useCallback(async (userId: string) => {
     setProfileLoading(true);
     try {
-      const [nextProfile, nextServices, nextOrders] = await Promise.all([
+      const [nextProfile, nextServices, nextSpecialties, nextOrders, nextProServices, nextProSpecialties] = await Promise.all([
         getV6Profile(userId),
         listV6Services(),
+        listV6Specialties(),
         listV6Orders(),
+        listV6ProfessionalServices(userId),
+        listV6ProfessionalSpecialties(userId),
       ]);
       setError(null);
       setProfile(nextProfile);
       setServices(nextServices);
+      setSpecialties(nextSpecialties);
       setOrders(nextOrders);
-      setProServices(await listV6ProfessionalServices(userId));
+      setProServices(nextProServices);
+      setProSpecialties(nextProSpecialties);
     } finally {
       setProfileLoading(false);
     }
@@ -684,6 +777,7 @@ export default function ManitoV6App() {
     setProfile(null);
     setOrders([]);
     setProServices([]);
+    setProSpecialties([]);
     setError(null);
     setNotice('Listo. Activá fecha y hora automática si vuelve a pasar, y entrá de nuevo.');
   }, []);
@@ -731,6 +825,7 @@ export default function ManitoV6App() {
           setProfile(null);
           setOrders([]);
           setProServices([]);
+          setProSpecialties([]);
         }
       },
     );
@@ -938,11 +1033,14 @@ export default function ManitoV6App() {
             <ProfessionalHome
               profile={viewProfile}
               services={services}
+              specialties={specialties}
               proServices={proServices}
+              proSpecialties={proSpecialties}
               matchingOrders={matchingOrders}
               activeOrders={professionalOrders}
               setProfile={setProfile}
               setProServices={setProServices}
+              setProSpecialties={setProSpecialties}
               setOrders={setOrders}
               setChatOrder={setChatOrder}
               setError={setError}
@@ -952,6 +1050,7 @@ export default function ManitoV6App() {
             <ClientHome
               profile={viewProfile}
               services={services}
+              specialties={specialties}
               clientOrders={clientOrders}
               selectedService={clientSelectedService}
               setSelectedService={setClientSelectedService}
@@ -994,9 +1093,12 @@ export default function ManitoV6App() {
           <ProfilePanel
             profile={profile}
             services={services}
+            specialties={specialties}
             proServices={proServices}
+            proSpecialties={proSpecialties}
             setProfile={setProfile}
             setProServices={setProServices}
+            setProSpecialties={setProSpecialties}
             setNotice={setNotice}
             setError={setError}
             refreshProfile={refreshProfile}
@@ -1218,6 +1320,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
 function ClientHome({
   profile,
   services,
+  specialties,
   clientOrders,
   selectedService,
   setSelectedService,
@@ -1231,6 +1334,7 @@ function ClientHome({
 }: {
   profile: V6Profile;
   services: V6Service[];
+  specialties: V6Specialty[];
   clientOrders: V6Order[];
   selectedService: V6Service | null;
   setSelectedService: (service: V6Service | null) => void;
@@ -1283,6 +1387,9 @@ function ClientHome({
     [problemQuery, services],
   );
   const recommendedService = scoredServices.find((item) => item.score > 0)?.service || null;
+  const recommendedSpecialties = recommendedService
+    ? detectSpecialtiesForService(recommendedService, specialties, `${problemQuery}\n${description}`)
+    : [];
   const query = normalizeText(problemQuery);
   const scoreMatches = scoredServices
     .filter((item) => item.score > 0)
@@ -1364,6 +1471,9 @@ function ClientHome({
       const orderAddress = formatAddress(address, addressCity);
       const orderDescription = [
         description,
+        recommendedSpecialties.length
+          ? `Especialidad sugerida: ${recommendedSpecialties.map((match) => match.specialty.name).join(', ')}`
+          : null,
         `Asignación: ${
           assignmentMode === 'manual' && selectedProfessional
             ? `prefiero a ${selectedProfessional.name}`
@@ -1654,6 +1764,9 @@ function ClientHome({
               <small>
                 {recommendedProfessional.name} - {recommendedProfessional.rating} estrellas - {recommendedProfessional.etaMinutes} min
               </small>
+              {recommendedSpecialties[0] && (
+                <small>Especialidad sugerida: {recommendedSpecialties[0].specialty.name}</small>
+              )}
             </div>
             <button className="v6-primary" type="button" onClick={() => applyRecommendation(recommendedService)}>
               Pedir
@@ -2222,11 +2335,14 @@ function serviceDescription(slug: string) {
 function ProfessionalHome({
   profile,
   services,
+  specialties,
   proServices,
+  proSpecialties,
   matchingOrders,
   activeOrders,
   setProfile,
   setProServices,
+  setProSpecialties,
   setOrders,
   setChatOrder,
   setError,
@@ -2234,11 +2350,14 @@ function ProfessionalHome({
 }: {
   profile: V6Profile;
   services: V6Service[];
+  specialties: V6Specialty[];
   proServices: V6ProfessionalService[];
+  proSpecialties: V6ProfessionalSpecialty[];
   matchingOrders: V6Order[];
   activeOrders: V6Order[];
   setProfile: (profile: V6Profile) => void;
   setProServices: (services: V6ProfessionalService[]) => void;
+  setProSpecialties: (specialties: V6ProfessionalSpecialty[]) => void;
   setOrders: (orders: V6Order[]) => void;
   setChatOrder: (order: V6Order) => void;
   setError: (message: string) => void;
@@ -2263,10 +2382,19 @@ function ProfessionalHome({
   const compatibleMatches = useMemo(
     () =>
       matchingOrders
-        .map((order) => evaluateProfessionalOrderMatch(order, profile, professionalProfile, proServices))
+        .map((order) =>
+          evaluateProfessionalOrderMatch(
+            order,
+            profile,
+            professionalProfile,
+            proServices,
+            proSpecialties,
+            specialties,
+          ),
+        )
         .filter((match): match is ProfessionalOrderMatch => Boolean(match))
         .sort((a, b) => b.score - a.score),
-    [matchingOrders, proServices, professionalProfile, profile],
+    [matchingOrders, proServices, proSpecialties, professionalProfile, profile, specialties],
   );
 
   async function toggleAvailable() {
@@ -2282,8 +2410,13 @@ function ProfessionalHome({
     const current = new Set(proServices.map((item) => item.service_id));
     if (current.has(serviceId)) current.delete(serviceId);
     else current.add(serviceId);
+    const nextServiceIds = [...current];
+    const nextSpecialtyIds = proSpecialties
+      .filter((item) => current.has(item.service_id))
+      .map((item) => item.specialty_id);
     try {
-      setProServices(await saveV6ProfessionalServices(profile.id, [...current], services));
+      setProServices(await saveV6ProfessionalServices(profile.id, nextServiceIds, services));
+      setProSpecialties(await saveV6ProfessionalSpecialties(profile.id, nextSpecialtyIds, specialties));
       setNotice('Servicios guardados.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se guardaron servicios.');
@@ -2919,17 +3052,23 @@ function OrderCard({
 function ProfilePanel({
   profile,
   services,
+  specialties,
   proServices,
+  proSpecialties,
   setProfile,
   setProServices,
+  setProSpecialties,
   setNotice,
   setError,
 }: {
   profile: V6Profile;
   services: V6Service[];
+  specialties: V6Specialty[];
   proServices: V6ProfessionalService[];
+  proSpecialties: V6ProfessionalSpecialty[];
   setProfile: (profile: V6Profile) => void;
   setProServices: (services: V6ProfessionalService[]) => void;
+  setProSpecialties: (specialties: V6ProfessionalSpecialty[]) => void;
   setNotice: (message: string) => void;
   setError: (message: string) => void;
   refreshProfile: () => Promise<void>;
@@ -2943,8 +3082,6 @@ function ProfilePanel({
   const [onboarding, setOnboarding] = useState<V6ProfessionalOnboarding | null>(null);
   const [documents, setDocuments] = useState<V6ProfessionalDocument[]>([]);
   const [portfolio, setPortfolio] = useState<V6PortfolioItem[]>([]);
-  const [specialties, setSpecialties] = useState<V6Specialty[]>([]);
-  const [proSpecialties, setProSpecialties] = useState<V6ProfessionalSpecialty[]>([]);
   const [professionalStep, setProfessionalStep] = useState(1);
   const [headline, setHeadline] = useState('Tecnico verificado para urgencias del hogar');
   const [bio, setBio] = useState('Trabajo con turnos puntuales, presupuesto claro y garantía MANITO.');
@@ -2977,8 +3114,6 @@ function ProfilePanel({
       getV6ProfessionalOnboarding(profile.id),
       listV6ProfessionalDocuments(profile.id),
       listV6Portfolio(profile.id),
-      listV6Specialties(),
-      listV6ProfessionalSpecialties(profile.id),
     ])
       .then(([
         nextProfessionalProfile,
@@ -2986,16 +3121,12 @@ function ProfilePanel({
         nextOnboarding,
         nextDocuments,
         nextPortfolio,
-        nextSpecialties,
-        nextProSpecialties,
       ]) => {
         if (!alive) return;
         setProfessionalProfile(nextProfessionalProfile);
         setOnboarding(nextOnboarding);
         setDocuments(nextDocuments);
         setPortfolio(nextPortfolio);
-        setSpecialties(nextSpecialties);
-        setProSpecialties(nextProSpecialties);
         if (nextProfessionalProfile) {
           setHeadline((current) => nextProfessionalProfile.headline || current);
           setBio((current) => nextProfessionalProfile.bio || current);
