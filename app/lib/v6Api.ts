@@ -9,6 +9,7 @@ import type {
   V6Complaint,
   V6Message,
   V6Mode,
+  V6Notification,
   V6Order,
   V6OrderExtra,
   V6OrderPhoto,
@@ -380,6 +381,12 @@ export async function listV6Orders() {
   return (data || []) as V6Order[];
 }
 
+function initialOrderStatus(mode: V6Mode) {
+  if (mode === 'quote') return 'waiting_quotes';
+  if (mode === 'scheduled') return 'scheduled_open';
+  return 'open';
+}
+
 export async function createV6Order(input: {
   clientId: string;
   serviceId: number;
@@ -405,6 +412,7 @@ export async function createV6Order(input: {
       description: input.description,
       address: input.address,
       mode: input.mode,
+      status: initialOrderStatus(input.mode),
       assignment_mode: input.assignmentMode || 'auto',
       preferred_professional_id: input.preferredProfessionalId || null,
       payment_method: input.paymentMethod || null,
@@ -430,6 +438,7 @@ export async function createV6Order(input: {
       description: input.description,
       address: input.address,
       mode: input.mode,
+      status: initialOrderStatus(input.mode),
       scheduled_at: input.scheduledAt,
       price: input.price,
       client_lat: input.lat,
@@ -527,6 +536,14 @@ export async function acceptV6Proposal(proposalId: string) {
 
 export async function acceptV6Order(orderId: string) {
   const { data, error } = await getV6Supabase().rpc('accept_order', {
+    p_order_id: orderId,
+  });
+  fail(error);
+  return data as V6Order;
+}
+
+export async function confirmV6OrderPayment(orderId: string) {
+  const { data, error } = await getV6Supabase().rpc('confirm_order_payment', {
     p_order_id: orderId,
   });
   fail(error);
@@ -693,6 +710,28 @@ export async function listV6Messages(orderId: string) {
     .order('created_at');
   fail(error);
   return (data || []) as V6Message[];
+}
+
+export async function listV6Notifications(userId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('notifications')
+    .select('*')
+    .eq('recipient_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(30);
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6Notification[];
+}
+
+export async function markV6NotificationsRead(userId: string) {
+  const { error } = await getV6Supabase()
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('recipient_id', userId)
+    .is('read_at', null);
+  if (isMissingV5Table(error)) return;
+  fail(error);
 }
 
 export async function sendV6Message(orderId: string, senderId: string, body: string) {

@@ -16,6 +16,9 @@ export type V6PaymentProvider = 'mercado_pago' | 'manual' | 'cash' | 'wallet';
 
 export type V6OrderStatus =
   | 'open'
+  | 'scheduled_open'
+  | 'waiting_quotes'
+  | 'payment_pending'
   | 'accepted'
   | 'en_camino'
   | 'en_sitio'
@@ -330,8 +333,30 @@ export type V6Message = {
   created_at: string;
 };
 
+export type V6Notification = {
+  id: string;
+  recipient_id: string;
+  actor_id: string | null;
+  order_id: string | null;
+  kind:
+    | 'order_created'
+    | 'order_status'
+    | 'proposal_received'
+    | 'extra_requested'
+    | 'message_received'
+    | 'payment_status'
+    | 'appointment';
+  title: string;
+  body: string;
+  read_at: string | null;
+  created_at: string;
+};
+
 export const V6_STATUS_LABEL: Record<V6OrderStatus, string> = {
   open: 'Buscando',
+  scheduled_open: 'Programado',
+  waiting_quotes: 'Esperando presupuestos',
+  payment_pending: 'Pago pendiente',
   accepted: 'Confirmado',
   en_camino: 'En camino',
   en_sitio: 'En el lugar',

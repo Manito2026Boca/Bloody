@@ -46,6 +46,7 @@ import {
   advanceV6Order,
   cancelV6Order,
   completeV6Profile,
+  confirmV6OrderPayment,
   createV6RecurringServicePlan,
   createV6Order,
   decideV6OrderExtra,
@@ -59,6 +60,7 @@ import {
   listV6AdminSettings,
   listV6ClientAddresses,
   listV6Messages,
+  listV6Notifications,
   listV6OrderExtras,
   listV6OrderPhotos,
   listV6OrderProposals,
@@ -72,6 +74,7 @@ import {
   listV6ProfessionalSpecialties,
   listV6Services,
   listV6Specialties,
+  markV6NotificationsRead,
   removeV6Channel,
   sendV6OrderProposal,
   saveV6ProfessionalServices,
@@ -99,6 +102,7 @@ import type {
   V6Complaint,
   V6Message,
   V6Mode,
+  V6Notification,
   V6Order,
   V6OrderExtra,
   V6OrderPhoto,
@@ -171,6 +175,7 @@ type ServiceGroup = {
 };
 
 const statusFlow: V6OrderStatus[] = [
+  'payment_pending',
   'accepted',
   'en_camino',
   'en_sitio',
@@ -199,6 +204,10 @@ function serviceSupportsMode(service: V6Service | null, mode: V6Mode) {
   if (mode === 'immediate') return service.allow_immediate !== false;
   if (mode === 'scheduled') return service.allow_scheduled !== false;
   return service.allow_quote !== false;
+}
+
+function isOpenOpportunityStatus(status: V6OrderStatus) {
+  return status === 'open' || status === 'scheduled_open' || status === 'waiting_quotes';
 }
 
 function firstSupportedMode(service: V6Service): V6Mode {
@@ -401,10 +410,10 @@ function orderTrackingText(order: V6Order) {
 }
 
 function orderStatusText(order: V6Order, proposalsCount = 0) {
-  if (order.status === 'open' && order.mode === 'quote') {
+  if (order.status === 'waiting_quotes' || (order.status === 'open' && order.mode === 'quote')) {
     return proposalsCount > 0 ? 'Propuestas recibidas' : 'Esperando presupuestos';
   }
-  if (order.status === 'open' && order.mode === 'scheduled') return 'Esperando profesional';
+  if (order.status === 'scheduled_open' || (order.status === 'open' && order.mode === 'scheduled')) return 'Esperando profesional';
   if (order.status === 'open' && order.mode === 'immediate') return 'Buscando ahora';
   return V6_STATUS_LABEL[order.status];
 }
@@ -830,7 +839,7 @@ function evaluateProfessionalOrderMatch(
   proSpecialties: V6ProfessionalSpecialty[],
   specialties: V6Specialty[],
 ): ProfessionalOrderMatch | null {
-  if (order.status !== 'open') return null;
+  if (!isOpenOpportunityStatus(order.status)) return null;
   if (order.mode === 'immediate' && !profile.is_available) return null;
   const service = proServices.find((item) => item.service_id === order.service_id);
   if (!service) return null;
@@ -1072,6 +1081,8 @@ export default function ManitoV6App() {
   const [proSpecialties, setProSpecialties] = useState<V6ProfessionalSpecialty[]>([]);
   const [publicProfessionals, setPublicProfessionals] = useState<V6PublicProfessional[]>([]);
   const [orders, setOrders] = useState<V6Order[]>([]);
+  const [notifications, setNotifications] = useState<V6Notification[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('home');
   const [appMode, setAppMode] = useState<AppMode>('client');
   const [loading, setLoading] = useState(() => isV6SupabaseConfigured());
@@ -1094,6 +1105,7 @@ export default function ManitoV6App() {
         nextServices,
         nextSpecialties,
         nextOrders,
+        nextNotifications,
         nextProServices,
         nextProSpecialties,
         nextPublicProfessionals,
@@ -1102,6 +1114,7 @@ export default function ManitoV6App() {
         listV6Services(),
         listV6Specialties(),
         listV6Orders(),
+        listV6Notifications(userId),
         listV6ProfessionalServices(userId),
         listV6ProfessionalSpecialties(userId),
         listV6PublicProfessionals(),
@@ -1111,6 +1124,7 @@ export default function ManitoV6App() {
       setServices(nextServices);
       setSpecialties(nextSpecialties);
       setOrders(nextOrders);
+      setNotifications(nextNotifications);
       setProServices(nextProServices);
       setProSpecialties(nextProSpecialties);
       setPublicProfessionals(nextPublicProfessionals);
@@ -1128,6 +1142,7 @@ export default function ManitoV6App() {
     setSession(null);
     setProfile(null);
     setOrders([]);
+    setNotifications([]);
     setProServices([]);
     setProSpecialties([]);
     setPublicProfessionals([]);
@@ -1177,6 +1192,7 @@ export default function ManitoV6App() {
           setProfileLoading(false);
           setProfile(null);
           setOrders([]);
+          setNotifications([]);
           setProServices([]);
           setProSpecialties([]);
           setPublicProfessionals([]);
@@ -1199,6 +1215,26 @@ export default function ManitoV6App() {
         }
       });
     });
+    return () => removeV6Channel(channel);
+  }, [profile]);
+
+  useEffect(() => {
+    if (!profile) return undefined;
+    const channel = getV6Supabase()
+      .channel(`manito-v6-notifications-${profile.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `recipient_id=eq.${profile.id}`,
+        },
+        () => {
+          void listV6Notifications(profile.id).then(setNotifications);
+        },
+      )
+      .subscribe();
     return () => removeV6Channel(channel);
   }, [profile]);
 
@@ -1267,9 +1303,26 @@ export default function ManitoV6App() {
       proServices.map((service) => String(service.service_id)),
     );
     return orders.filter(
-      (order) => order.status === 'open' && serviceIds.has(String(order.service_id)),
+      (order) => isOpenOpportunityStatus(order.status) && serviceIds.has(String(order.service_id)),
     );
   }, [orders, proServices]);
+  const unreadNotifications = useMemo(
+    () => notifications.filter((item) => !item.read_at).length,
+    [notifications],
+  );
+
+  async function toggleNotifications() {
+    const nextOpen = !notificationsOpen;
+    setNotificationsOpen(nextOpen);
+    if (nextOpen && profile && unreadNotifications > 0) {
+      try {
+        await markV6NotificationsRead(profile.id);
+        setNotifications(await listV6Notifications(profile.id));
+      } catch {
+        // Notifications should never block the main app flow.
+      }
+    }
+  }
 
   async function refreshProfile() {
     if (!profile) return;
@@ -1399,12 +1452,35 @@ export default function ManitoV6App() {
             </button>
           </div>
         </div>
-        <button className="v6-icon-button" type="button" aria-label="Notificaciones">
+        <button
+          className="v6-icon-button v6-bell-button"
+          type="button"
+          aria-label="Notificaciones"
+          aria-expanded={notificationsOpen}
+          onClick={toggleNotifications}
+        >
           <Bell size={19} aria-hidden="true" />
+          {unreadNotifications > 0 && <span>{unreadNotifications}</span>}
         </button>
       </header>
 
       <div className="v6-content">
+        {notificationsOpen && (
+          <NotificationPanel
+            notifications={notifications}
+            onClose={() => setNotificationsOpen(false)}
+            onOpenOrder={(orderId) => {
+              const order = orders.find((item) => item.id === orderId);
+              if (order) {
+                setChatOrder(order);
+                setNotificationsOpen(false);
+              } else {
+                setTab('orders');
+                setNotificationsOpen(false);
+              }
+            }}
+          />
+        )}
         {notice && (
           <button className="v6-toast" type="button" onClick={() => setNotice(null)}>
             {notice}
@@ -2851,7 +2927,8 @@ function AppointmentNotice({
   const nextOrder = [...orders]
     .filter((order) =>
       ['accepted', 'en_camino', 'en_sitio'].includes(order.status) ||
-      (order.status === 'open' && Boolean(order.scheduled_at)),
+      (isOpenOpportunityStatus(order.status) && Boolean(order.scheduled_at)) ||
+      order.status === 'payment_pending',
     )
     .sort(
       (left, right) =>
@@ -2870,7 +2947,9 @@ function AppointmentNotice({
       ? 'Coordinación pendiente'
       : V6_STATUS_LABEL[nextOrder.status];
   const appointmentTitle =
-    nextOrder.status === 'open'
+    nextOrder.status === 'payment_pending'
+      ? 'Tenés un pago pendiente'
+      : isOpenOpportunityStatus(nextOrder.status)
       ? 'Pedido programado pendiente de prestador'
       : profile.role === 'client'
         ? 'Tenés una cita con un prestador'
@@ -3288,7 +3367,9 @@ function OrderCard({
 }) {
   const other = profile.role === 'client' ? order.professional : order.client;
   const nextLabel =
-    order.status === 'accepted'
+    order.status === 'payment_pending'
+      ? 'Esperando pago'
+      : order.status === 'accepted'
       ? 'Salir hacia domicilio'
       : order.status === 'en_camino'
         ? 'Marcar llegada'
@@ -3404,9 +3485,20 @@ function OrderCard({
       await acceptV6Proposal(proposalId);
       setOrders(await listV6Orders());
       await refreshCommercialData();
-      setNotice('Presupuesto aceptado.');
+      setNotice('Presupuesto aceptado. Si corresponde, confirmá el pago para habilitar el trabajo.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo aceptar presupuesto.');
+    }
+  }
+
+  async function confirmPayment() {
+    try {
+      await confirmV6OrderPayment(order.id);
+      setOrders(await listV6Orders());
+      await refreshCommercialData();
+      setNotice('Pago registrado. El trabajo quedó confirmado.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo registrar el pago.');
     }
   }
 
@@ -3602,6 +3694,22 @@ function OrderCard({
           </p>
         )}
       </section>
+      {order.status === 'payment_pending' && profile.role === 'client' && (
+        <section className="v6-payment-box action">
+          <div>
+            <strong>
+              <CreditCard size={16} aria-hidden="true" /> Confirmar pago
+            </strong>
+            <span>{money(order.price || order.service?.base_price)}</span>
+          </div>
+          <p>
+            Para esta etapa de pruebas, registrá el pago coordinado. Cuando integremos Mercado Pago, este paso se confirmará por webhook.
+          </p>
+          <button className="v6-primary" type="button" onClick={confirmPayment}>
+            Registrar pago coordinado
+          </button>
+        </section>
+      )}
       {!['completed', 'cancelled'].includes(order.status) && (
         <p className="v6-note">
           Coordiná por el chat y aprobá adicionales desde MANITO para que el servicio quede registrado.
@@ -3698,7 +3806,7 @@ function OrderCard({
                 {' '}+ materiales {money(proposal.materials_price)} + fee {money(proposal.manito_fee)}
               </p>
               {proposal.observation && <p>{proposal.observation}</p>}
-              {profile.role === 'client' && order.status === 'open' && proposal.status === 'sent' && (
+              {profile.role === 'client' && isOpenOpportunityStatus(order.status) && proposal.status === 'sent' && (
                 <button className="v6-primary" type="button" onClick={() => acceptProposal(proposal.id)}>
                   Aceptar presupuesto
                 </button>
@@ -3707,7 +3815,7 @@ function OrderCard({
           ))}
         </div>
       )}
-      {profile.role === 'professional' && order.mode === 'quote' && order.status === 'open' && (
+      {profile.role === 'professional' && order.mode === 'quote' && isOpenOpportunityStatus(order.status) && (
         <form className="v6-inline-form" onSubmit={sendProposal}>
           <input value={proposalLabor} onChange={(event) => setProposalLabor(event.target.value)} aria-label="Mano de obra" />
           <input value={proposalMaterials} onChange={(event) => setProposalMaterials(event.target.value)} aria-label="Materiales" />
@@ -3836,12 +3944,12 @@ function OrderCard({
         </div>
       )}
       <div className="v6-actions">
-        {profile.role === 'client' && ['open', 'accepted'].includes(order.status) && (
+        {profile.role === 'client' && ['open', 'scheduled_open', 'waiting_quotes', 'payment_pending', 'accepted'].includes(order.status) && (
           <button className="v6-danger" type="button" onClick={cancel}>Cancelar</button>
         )}
         {profile.role === 'professional' &&
           order.professional_id === profile.id &&
-          !['completed', 'cancelled'].includes(order.status) && (
+          !['completed', 'cancelled', 'payment_pending'].includes(order.status) && (
             <button className="v6-primary" type="button" onClick={advance}>
               {nextLabel}
             </button>
@@ -5235,8 +5343,49 @@ function ChatSheet({
   );
 }
 
+function NotificationPanel({
+  notifications,
+  onClose,
+  onOpenOrder,
+}: {
+  notifications: V6Notification[];
+  onClose: () => void;
+  onOpenOrder: (orderId: string) => void;
+}) {
+  return (
+    <section className="v6-notification-panel">
+      <div className="v6-section-head compact">
+        <div>
+          <h2>Notificaciones</h2>
+          <span>{notifications.length ? `${notifications.length} recientes` : 'sin avisos'}</span>
+        </div>
+        <button className="v6-icon-button" type="button" onClick={onClose} aria-label="Cerrar notificaciones">
+          ×
+        </button>
+      </div>
+      <div className="v6-notification-list">
+        {notifications.map((item) => (
+          <button
+            className={item.read_at ? 'read' : ''}
+            type="button"
+            key={item.id}
+            onClick={() => item.order_id && onOpenOrder(item.order_id)}
+          >
+            <strong>{item.title}</strong>
+            {item.body && <span>{item.body}</span>}
+            <small>{shortDate(item.created_at)}</small>
+          </button>
+        ))}
+        {!notifications.length && (
+          <Empty title="Todo tranquilo" body="Acá van a aparecer presupuestos, chats, pagos y cambios de estado." />
+        )}
+      </div>
+    </section>
+  );
+}
+
 function StatusSteps({ status }: { status: V6OrderStatus }) {
-  if (status === 'open' || status === 'cancelled') return null;
+  if (isOpenOpportunityStatus(status) || status === 'cancelled') return null;
   const activeIndex = statusFlow.indexOf(status);
   return (
     <div className="v6-steps">

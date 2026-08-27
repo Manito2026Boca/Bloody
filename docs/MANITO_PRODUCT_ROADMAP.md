@@ -16,8 +16,8 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 - Recomendacion automatica de categoria, modalidad y precio estimado.
 - Ficha de pedido completa: direccion, ciudad, GPS, descripcion, fotos/videos, urgencia, horario, metodo de pago y profesional preferido.
 - Seleccion manual de profesional con perfil publico, distancia, reputacion, precio y disponibilidad.
-- Pedido publicado con estado claro: buscando, aceptado, en camino, en sitio, finalizado, cancelado.
-- Avisos en la pantalla principal cuando hay una cita pendiente.
+- Pedido publicado con estado claro: buscando, programado, esperando presupuestos, pago pendiente, aceptado, en camino, en sitio, finalizado, cancelado.
+- Avisos en la pantalla principal cuando hay una cita pendiente o pago pendiente.
 - Seguimiento con chat, telefono protegido, PIN inicio/final y solicitud de adicionales.
 - Historial, repetir pedido, favoritos y pedidos recurrentes.
 - Reclamos, garantia MANITO y calificacion al finalizar.
@@ -55,7 +55,7 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 ## 6. Notificaciones y comunicacion
 
 - Email correcto para alta, confirmacion y recuperacion.
-- Avisos in-app para cita pendiente, pedido aceptado, profesional en camino, adicional solicitado y chat nuevo.
+- Avisos in-app persistentes para cita pendiente, pedido aceptado, profesional en camino, adicional solicitado, presupuesto recibido, pago actualizado y chat nuevo.
 - Push/PWA cuando se instale en el celular.
 - WhatsApp/SMS opcional para recordatorios criticos.
 - Mensajes claros cuando una accion queda pendiente de confirmacion.
@@ -92,7 +92,7 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 2. Evidencias reales del pedido: subir fotos antes/durante/despues y verlas en seguimiento. Estado: implementado para fotos iniciales del cliente.
 3. Wizard profesional por pasos reales, con guardado parcial y resumen final. Estado: implementado en UI; falta persistir DNI/fecha como datos sensibles separados.
 4. Matching por rubro/zona/disponibilidad usando datos del profesional. Estado: implementado en frontend; falta mover scoring a backend cuando haya mas volumen.
-5. Cita pendiente y notificaciones in-app persistentes. Estado: implementado aviso in-app en Inicio y Pedidos; falta push/PWA.
+5. Cita pendiente y notificaciones in-app persistentes. Estado: implementado aviso en Inicio/Pedidos y campana con notificaciones persistentes; falta push/PWA.
 6. Chat y contacto del prestador con reglas claras de privacidad. Estado: chat operativo para pedidos aceptados y preferencia de telefono protegida; falta enforcement backend fino.
 7. Admin de altas profesionales y documentos.
 8. Pagos/adicionales mas robustos. Estado: metodos deduplicados, Cuenta DNI/billetera agregada como preferencia, datos de cobro profesional privados y base marketplace preparada; falta implementar OAuth Mercado Pago, crear preferencias Checkout Pro, webhook y flujo de reembolso.
@@ -100,3 +100,4 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 10. QA de permisos y pruebas moviles antes de invitar testers mas amplios.
 11. Categorias y subrubros. Estado: implementado grupo Automotor con subrubros mecanica, gomeria y chapa/pintura; falta admin editable.
 12. Confirmacion de email. Estado: robustecida para Vercel y reloj desfasado/JWT futuro.
+13. Estados operativos del pedido. Estado: implementados `scheduled_open`, `waiting_quotes` y `payment_pending`; falta conectar `payment_pending` con Mercado Pago real por webhook.
