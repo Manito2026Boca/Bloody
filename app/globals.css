@@ -1409,6 +1409,17 @@ a {
   text-decoration: none;
 }
 
+.v6-text-button {
+  border: 0;
+  background: transparent;
+  color: var(--green);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+  padding: 6px 4px;
+  text-align: center;
+}
+
 .v6-confirm-card {
   text-align: center;
 }
@@ -1631,6 +1642,17 @@ a {
 .v6-choice[aria-pressed='true'] {
   border-color: var(--orange-600);
   background: var(--orange-100);
+}
+
+.v6-choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.v6-choice small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
 }
 
 .v6-section-head.compact {

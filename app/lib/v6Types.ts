@@ -22,6 +22,7 @@ export type V6OrderStatus =
   | 'accepted'
   | 'en_camino'
   | 'en_sitio'
+  | 'trabajando'
   | 'completed'
   | 'cancelled';
 
@@ -109,6 +110,9 @@ export type V6Order = {
   updated_at: string;
   accepted_at: string | null;
   completed_at: string | null;
+  match_score?: number | null;
+  match_reasons?: string[] | null;
+  distance_km?: number | null;
   service?: V6Service | null;
   client?: Pick<V6Profile, 'id' | 'full_name' | 'phone' | 'city'> | null;
   professional?: Pick<V6Profile, 'id' | 'full_name' | 'phone' | 'city'> | null;
@@ -370,6 +374,7 @@ export const V6_STATUS_LABEL: Record<V6OrderStatus, string> = {
   accepted: 'Confirmado',
   en_camino: 'En camino',
   en_sitio: 'En el lugar',
+  trabajando: 'Trabajando',
   completed: 'Finalizado',
   cancelled: 'Cancelado',
 };

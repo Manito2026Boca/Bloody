@@ -47,6 +47,7 @@ import {
   advanceV6Order,
   cancelV6Order,
   completeV6Profile,
+  completeTrackedV6Order,
   confirmV6OrderPayment,
   createV6RecurringServicePlan,
   createV6Order,
@@ -83,6 +84,7 @@ import {
   saveV6ProfessionalSpecialties,
   sendV6Message,
   setV6Availability,
+  startV6Order,
   subscribeV6Messages,
   subscribeV6Orders,
   updateV6Profile,
@@ -95,6 +97,12 @@ import {
   upsertV6UserSecurityPreferences,
 } from '../lib/v6Api';
 import { MIN_PASSWORD_LENGTH, passwordHelpText, passwordSecurityMessage } from '../lib/security';
+import {
+  canProfessionalAdvanceOrder,
+  nextProfessionalOrderAction,
+  orderStatusFlow,
+  visibleClientPin,
+} from '../lib/orderFlow';
 import {
   clearStoredConfig,
   getV6Supabase,
@@ -132,7 +140,7 @@ import type {
 import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 
 type Tab = 'home' | 'search' | 'orders' | 'favorites' | 'profile' | 'account';
-type AuthMode = 'login' | 'signup';
+type AuthMode = 'login' | 'signup' | 'reset';
 type AssignmentMode = 'auto' | 'manual';
 type PaymentMethod = 'card' | 'wallet' | 'cash';
 type AppMode = 'client' | 'professional';
@@ -179,15 +187,10 @@ type ServiceGroup = {
   slugs: string[];
 };
 
-const statusFlow: V6OrderStatus[] = [
-  'payment_pending',
-  'accepted',
-  'en_camino',
-  'en_sitio',
-  'completed',
-];
+const statusFlow = orderStatusFlow;
 const deployedAppUrl =
   'https://bloody-eta.vercel.app';
+const onlineCardEnabled = false;
 const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: ReactNode }> = [
   { id: 'card', label: 'Tarjeta', icon: <CreditCard size={17} aria-hidden="true" /> },
   { id: 'wallet', label: 'Cuenta DNI / billetera', icon: <Wallet size={17} aria-hidden="true" /> },
@@ -906,6 +909,14 @@ function evaluateProfessionalOrderMatch(
   specialties: V6Specialty[],
 ): ProfessionalOrderMatch | null {
   if (!isOpenOpportunityStatus(order.status)) return null;
+  if (order.match_score != null) {
+    return {
+      order,
+      score: Math.min(98, Math.max(0, Number(order.match_score))),
+      reasons: order.match_reasons?.length ? order.match_reasons : ['Compatible por MANITO'],
+      distanceKm: order.distance_km ?? null,
+    };
+  }
   if (order.mode === 'immediate' && !profile.is_available) return null;
   const service = proServices.find((item) => item.service_id === order.service_id);
   if (!service) return null;
@@ -1767,6 +1778,16 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
     try {
       const supabase = getV6Supabase();
       const cleanEmail = email.trim().toLowerCase();
+      if (mode === 'reset') {
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+          redirectTo: getAuthCallbackUrl(),
+        });
+        if (resetError) throw resetError;
+        setLocalNotice('Te mandamos un link para crear una contraseña nueva.');
+        setNotice('Revisá tu email para recuperar el acceso.');
+        return;
+      }
+
       if (mode === 'login') {
         const { error: loginError } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
@@ -1812,9 +1833,17 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         <p className="v6-logo">
           MANI<span>TO</span>
         </p>
-        <h1>{mode === 'login' ? 'Entra a MANITO.' : 'Crea tu cuenta MANITO.'}</h1>
+        <h1>
+          {mode === 'login'
+            ? 'Entra a MANITO.'
+            : mode === 'reset'
+              ? 'Recuperá el acceso.'
+              : 'Crea tu cuenta MANITO.'}
+        </h1>
         <p className="v6-muted">
-          Entrás como cliente. Después podés activar tu perfil profesional desde Cuenta.
+          {mode === 'reset'
+            ? 'Te mandamos un link para crear una contraseña nueva.'
+            : 'Entrás como cliente. Después podés activar tu perfil profesional desde Cuenta.'}
         </p>
         <div className="v6-tabs">
           <button type="button" aria-pressed={mode === 'login'} onClick={() => setMode('login')}>
@@ -1843,23 +1872,35 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
               required
             />
           </label>
-          <label className="v6-field">
-            <span>Contraseña</span>
-            <input
-              type="password"
-              minLength={MIN_PASSWORD_LENGTH}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              required
-            />
-            {mode === 'signup' && <small>{passwordHelpText()}</small>}
-          </label>
+          {mode !== 'reset' && (
+            <label className="v6-field">
+              <span>Contraseña</span>
+              <input
+                type="password"
+                minLength={MIN_PASSWORD_LENGTH}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                required
+              />
+              {mode === 'signup' && <small>{passwordHelpText()}</small>}
+            </label>
+          )}
           {error && <p className="v6-alert">{error}</p>}
           {localNotice && <p className="v6-note">{localNotice}</p>}
           <button className="v6-primary" type="submit">
-            {mode === 'login' ? 'Ingresar' : 'Crear cuenta'}
+            {mode === 'login' ? 'Ingresar' : mode === 'reset' ? 'Mandar link' : 'Crear cuenta'}
           </button>
+          {mode === 'login' && (
+            <button className="v6-text-button" type="button" onClick={() => setMode('reset')}>
+              ¿No te acordás la contraseña?
+            </button>
+          )}
+          {mode === 'reset' && (
+            <button className="v6-text-button" type="button" onClick={() => setMode('login')}>
+              Volver a ingresar
+            </button>
+          )}
         </form>
       </section>
     </main>
@@ -1911,7 +1952,7 @@ function ClientHome({
   const [addressLabel, setAddressLabel] = useState('Casa');
   const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>('auto');
   const [selectedProfessionalId, setSelectedProfessionalId] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('card');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('wallet');
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
   const [serviceGroup, setServiceGroup] = useState<ServiceGroupId>('all');
@@ -2345,7 +2386,7 @@ function ClientHome({
     setPaymentMethod(
       lastOrder.payment_method === 'wallet' || lastOrder.payment_method === 'cash'
         ? lastOrder.payment_method
-        : 'card',
+        : 'wallet',
     );
     setNotice('Copié tu último pedido. Revisalo y publicalo de nuevo.');
     scrollToRequestForm();
@@ -2803,11 +2844,19 @@ function ClientHome({
                       type="button"
                       className="v6-choice"
                       aria-pressed={paymentMethod === option.id}
+                      disabled={option.id === 'card' && !onlineCardEnabled}
                       key={option.id}
-                      onClick={() => setPaymentMethod(option.id)}
+                      onClick={() => {
+                        if (option.id === 'card' && !onlineCardEnabled) {
+                          setNotice('Tarjeta online se habilita cuando conectemos Mercado Pago.');
+                          return;
+                        }
+                        setPaymentMethod(option.id);
+                      }}
                     >
                       {option.icon}
                       {option.label}
+                      {option.id === 'card' && !onlineCardEnabled && <small>Próximamente</small>}
                     </button>
                   ))}
                 </div>
@@ -3492,14 +3541,8 @@ function OrderCard({
   setNotice: (message: string) => void;
 }) {
   const other = profile.role === 'client' ? order.professional : order.client;
-  const nextLabel =
-    order.status === 'payment_pending'
-      ? 'Esperando pago'
-      : order.status === 'accepted'
-      ? 'Salir hacia domicilio'
-      : order.status === 'en_camino'
-        ? 'Marcar llegada'
-        : 'Finalizar trabajo';
+  const nextAction = nextProfessionalOrderAction(order.status);
+  const clientPin = visibleClientPin(order, profile.role);
   const [proposals, setProposals] = useState<V6OrderProposal[]>([]);
   const [extras, setExtras] = useState<V6OrderExtra[]>([]);
   const [complaints, setComplaints] = useState<V6Complaint[]>([]);
@@ -3567,7 +3610,17 @@ function OrderCard({
 
   async function advance() {
     try {
-      await advanceV6Order(order.id);
+      if (nextAction.kind === 'start_with_pin') {
+        const pin = window.prompt(nextAction.prompt);
+        if (!pin) return;
+        await startV6Order(order.id, pin);
+      } else if (nextAction.kind === 'complete_with_pin') {
+        const pin = window.prompt(nextAction.prompt);
+        if (!pin) return;
+        await completeTrackedV6Order(order.id, pin);
+      } else {
+        await advanceV6Order(order.id);
+      }
       setOrders(await listV6Orders());
       setNotice('Estado actualizado.');
     } catch (caught) {
@@ -3730,7 +3783,7 @@ function OrderCard({
 
   const canUploadEvidence =
     order.professional_id === profile.id &&
-    ['accepted', 'en_camino', 'en_sitio'].includes(order.status);
+    ['accepted', 'en_camino', 'en_sitio', 'trabajando'].includes(order.status);
   const canChat = Boolean(order.professional_id);
   const canShareTracking = !['completed', 'cancelled'].includes(order.status);
   const approvedExtras = extras.filter((extra) => extra.status === 'approved');
@@ -3790,7 +3843,7 @@ function OrderCard({
         <span>{paymentStatusLabel(order.payment_status)}</span>
         {order.payment_method && <span>Pago {paymentLabel(order.payment_method)}</span>}
         {order.eta_minutes && <span>ETA {order.eta_minutes} min</span>}
-        {order.status === 'accepted' && <span>PIN inicio {order.start_pin || 'pendiente'}</span>}
+        {clientPin && <span>{clientPin.label} {clientPin.value}</span>}
       </div>
       <section className="v6-payment-box">
         <div>
@@ -3854,9 +3907,15 @@ function OrderCard({
           <p>
             Para esta etapa de pruebas, registrá el pago coordinado. Cuando integremos Mercado Pago, este paso se confirmará por webhook.
           </p>
-          <button className="v6-primary" type="button" onClick={confirmPayment}>
-            Registrar pago coordinado
-          </button>
+          {order.payment_method === 'card' ? (
+            <p className="v6-alert">
+              Tarjeta online se habilita cuando conectemos Mercado Pago. Para probar ahora, publicá con Cuenta DNI/billetera o efectivo.
+            </p>
+          ) : (
+            <button className="v6-primary" type="button" onClick={confirmPayment}>
+              Marcar pago manual como realizado
+            </button>
+          )}
         </section>
       )}
       {!['completed', 'cancelled'].includes(order.status) && (
@@ -3989,7 +4048,7 @@ function OrderCard({
           ))}
         </div>
       )}
-      {profile.role === 'professional' && order.professional_id === profile.id && order.status === 'en_sitio' && (
+      {profile.role === 'professional' && order.professional_id === profile.id && ['en_sitio', 'trabajando'].includes(order.status) && (
         <form className="v6-inline-form" onSubmit={createExtra}>
           <input value={extraTitle} onChange={(event) => setExtraTitle(event.target.value)} aria-label="Detalle adicional" />
           <input value={extraAmount} onChange={(event) => setExtraAmount(event.target.value)} aria-label="Monto adicional" />
@@ -4097,10 +4156,9 @@ function OrderCard({
           <button className="v6-danger" type="button" onClick={cancel}>Cancelar</button>
         )}
         {profile.role === 'professional' &&
-          order.professional_id === profile.id &&
-          !['completed', 'cancelled', 'payment_pending'].includes(order.status) && (
+          canProfessionalAdvanceOrder(order, profile.id) && (
             <button className="v6-primary" type="button" onClick={advance}>
-              {nextLabel}
+              {nextAction.label}
             </button>
           )}
       </div>

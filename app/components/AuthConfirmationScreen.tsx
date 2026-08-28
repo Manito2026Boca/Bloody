@@ -1,12 +1,14 @@
 'use client';
 
 import { CheckCircle2, Loader2, MailCheck, RotateCcw } from 'lucide-react';
+import type { FormEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { completeV6Profile } from '../lib/v6Api';
+import { MIN_PASSWORD_LENGTH, passwordHelpText, passwordSecurityMessage } from '../lib/security';
 import { getV6Supabase } from '../lib/v6Supabase';
 import type { V6Role } from '../lib/v6Types';
 
-type ConfirmationState = 'loading' | 'success' | 'ready' | 'error';
+type ConfirmationState = 'loading' | 'success' | 'ready' | 'password' | 'error';
 type PendingProfile = {
   fullName: string;
   role?: V6Role;
@@ -58,6 +60,8 @@ export default function AuthConfirmationScreen({
 }) {
   const [state, setState] = useState<ConfirmationState>('loading');
   const [message, setMessage] = useState('Estamos validando tu cuenta.');
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
 
   const appUrl = useMemo(() => {
     if (typeof window === 'undefined') return deployedAppUrl;
@@ -94,19 +98,38 @@ export default function AuthConfirmationScreen({
         let confirmedEmail: string | null = null;
 
         if (canVerifyToken && tokenHash) {
+          const otpType = type === 'recovery' ? 'recovery' : 'signup';
           const { data, error } = await supabase.auth.verifyOtp({
             token_hash: tokenHash,
-            type: type as 'signup',
+            type: otpType,
           });
           if (error) throw error;
           confirmedEmail = getConfirmedEmail(data);
+          if (type === 'recovery') {
+            if (!alive) return;
+            setState('password');
+            setMessage('Elegí una contraseña nueva para volver a entrar.');
+            return;
+          }
         } else if (code) {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
           confirmedEmail = getConfirmedEmail(data);
+          if (type === 'recovery') {
+            if (!alive) return;
+            setState('password');
+            setMessage('Elegí una contraseña nueva para volver a entrar.');
+            return;
+          }
         } else if (hash.get('access_token')) {
           const { data } = await supabase.auth.getSession();
           confirmedEmail = getConfirmedEmail(data);
+          if (hash.get('type') === 'recovery' || type === 'recovery') {
+            if (!alive) return;
+            setState('password');
+            setMessage('Elegí una contraseña nueva para volver a entrar.');
+            return;
+          }
         } else {
           const { data } = await supabase.auth.getSession();
           if (!data.session) {
@@ -173,6 +196,30 @@ export default function AuthConfirmationScreen({
     };
   }, [canVerifyToken]);
 
+  async function saveNewPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const passwordError = passwordSecurityMessage(newPassword);
+    if (passwordError) {
+      setMessage(passwordError);
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      const { error } = await getV6Supabase().auth.updateUser({
+        password: newPassword,
+      });
+      if (error) throw error;
+      setState('success');
+      setMessage('Contraseña actualizada. Ya podés entrar a MANITO.');
+      setNewPassword('');
+    } catch (caught) {
+      setState('password');
+      setMessage(caught instanceof Error ? caught.message : 'No se pudo actualizar la contraseña.');
+    } finally {
+      setPasswordSaving(false);
+    }
+  }
+
   return (
     <main className="v6-app v6-center">
       <section className="v6-card v6-confirm-card">
@@ -195,12 +242,34 @@ export default function AuthConfirmationScreen({
             ? 'Validando cuenta'
             : state === 'error'
               ? 'No se pudo validar'
+              : state === 'password'
+                ? 'Nueva contraseña'
               : 'Cuenta confirmada'}
         </h1>
         <p className={state === 'error' ? 'v6-alert' : 'v6-note'}>{message}</p>
-        <a className="v6-primary v6-link-button" href={appUrl}>
-          Entrar a MANITO
-        </a>
+        {state === 'password' ? (
+          <form className="v6-stack" onSubmit={saveNewPassword}>
+            <label className="v6-field">
+              <span>Contraseña nueva</span>
+              <input
+                type="password"
+                minLength={MIN_PASSWORD_LENGTH}
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                autoComplete="new-password"
+                required
+              />
+              <small>{passwordHelpText()}</small>
+            </label>
+            <button className="v6-primary" type="submit" disabled={passwordSaving}>
+              {passwordSaving ? 'Guardando...' : 'Guardar contraseña'}
+            </button>
+          </form>
+        ) : (
+          <a className="v6-primary v6-link-button" href={appUrl}>
+            Entrar a MANITO
+          </a>
+        )}
       </section>
     </main>
   );

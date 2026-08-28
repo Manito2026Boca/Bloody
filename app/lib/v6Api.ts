@@ -153,13 +153,21 @@ export async function listV6ProfessionalSpecialties(userId: string) {
 
 export async function listV6PublicProfessionals() {
   const supabase = getV6Supabase();
-  const { data: profiles, error: profilesError } = await supabase
-    .from('profiles')
-    .select('id,full_name,city,is_available,lat,lng')
-    .eq('role', 'professional')
-    .eq('is_available', true)
-    .order('full_name');
-  fail(profilesError);
+  const { data: rpcProfiles, error: rpcError } = await supabase.rpc('list_public_professionals');
+  if (rpcError && !isMissingV5Table(rpcError)) fail(rpcError);
+
+  let profiles = rpcProfiles as V6PublicProfessional['profile'][] | null;
+
+  if (isMissingV5Table(rpcError)) {
+    const { data: fallbackProfiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id,full_name,city,is_available,lat,lng')
+      .eq('role', 'professional')
+      .eq('is_available', true)
+      .order('full_name');
+    fail(profilesError);
+    profiles = fallbackProfiles as V6PublicProfessional['profile'][] | null;
+  }
 
   const professionalIds = ((profiles || []) as V6PublicProfessional['profile'][]).map((profile) => profile.id);
   if (!professionalIds.length) return [];
@@ -405,7 +413,8 @@ export async function saveV6ProfessionalServices(
 }
 
 export async function listV6Orders() {
-  const { data, error } = await getV6Supabase()
+  const supabase = getV6Supabase();
+  const { data, error } = await supabase
     .from('orders')
     .select(
       '*,service:services(id,slug,name,emoji,base_price,active,allow_immediate,allow_scheduled,allow_quote,supports_recurring),client:profiles!orders_client_id_fkey(id,full_name,phone,city),professional:profiles!orders_professional_id_fkey(id,full_name,phone,city)',
@@ -413,7 +422,38 @@ export async function listV6Orders() {
     .order('created_at', { ascending: false })
     .limit(100);
   fail(error);
-  return (data || []) as V6Order[];
+
+  const ownOrders = (data || []) as V6Order[];
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) return ownOrders;
+
+  const { data: profileData, error: profileError } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle();
+  if (profileError || profileData?.role !== 'professional') return ownOrders;
+
+  const { data: opportunityRows, error: opportunityError } = await supabase
+    .rpc('list_professional_opportunities');
+  if (isMissingV5Table(opportunityError)) return ownOrders;
+  fail(opportunityError);
+
+  const merged = new Map<string, V6Order>();
+  for (const order of ownOrders) merged.set(order.id, order);
+  for (const order of (opportunityRows || []) as V6Order[]) {
+    merged.set(order.id, {
+      ...order,
+      mode: order.mode as V6Mode,
+      status: order.status as V6Order['status'],
+      payment_method: order.payment_method as V6PaymentMethod | null,
+      payment_status: order.payment_status as V6Order['payment_status'],
+    } as V6Order);
+  }
+  return [...merged.values()].sort(
+    (left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime(),
+  );
 }
 
 function initialOrderStatus(mode: V6Mode) {
@@ -541,22 +581,17 @@ export async function sendV6OrderProposal(input: {
   availabilityLabel: string;
   observation: string;
 }) {
-  const { data, error } = await getV6Supabase()
-    .from('order_proposals')
-    .upsert({
-      order_id: input.orderId,
-      professional_id: input.professionalId,
-      labor_price: input.laborPrice,
-      materials_price: input.materialsPrice,
-      visit_price: input.visitPrice,
-      manito_fee: input.manitoFee,
-      estimated_minutes: input.estimatedMinutes,
-      availability_label: input.availabilityLabel,
-      observation: input.observation,
-      status: 'sent',
-    })
-    .select('*')
-    .single();
+  void input.professionalId;
+  const { data, error } = await getV6Supabase().rpc('send_order_proposal', {
+    p_order_id: input.orderId,
+    p_labor_price: input.laborPrice,
+    p_materials_price: input.materialsPrice,
+    p_visit_price: input.visitPrice,
+    p_manito_fee: input.manitoFee,
+    p_estimated_minutes: input.estimatedMinutes,
+    p_availability_label: input.availabilityLabel,
+    p_observation: input.observation,
+  });
   fail(error);
   return data as V6OrderProposal;
 }
@@ -593,6 +628,24 @@ export async function advanceV6Order(orderId: string) {
   return data as V6Order;
 }
 
+export async function startV6Order(orderId: string, pin: string) {
+  const { data, error } = await getV6Supabase().rpc('start_order', {
+    p_order_id: orderId,
+    p_pin: pin,
+  });
+  fail(error);
+  return data as V6Order;
+}
+
+export async function completeTrackedV6Order(orderId: string, pin: string) {
+  const { data, error } = await getV6Supabase().rpc('complete_order', {
+    p_order_id: orderId,
+    p_pin: pin,
+  });
+  fail(error);
+  return data as V6Order;
+}
+
 export async function cancelV6Order(orderId: string) {
   const { data, error } = await getV6Supabase().rpc('cancel_order', {
     p_order_id: orderId,
@@ -618,16 +671,12 @@ export async function addV6OrderExtra(input: {
   title: string;
   amount: number;
 }) {
-  const { data, error } = await getV6Supabase()
-    .from('order_extras')
-    .insert({
-      order_id: input.orderId,
-      professional_id: input.professionalId,
-      title: input.title,
-      amount: input.amount,
-    })
-    .select('*')
-    .single();
+  void input.professionalId;
+  const { data, error } = await getV6Supabase().rpc('propose_order_extra', {
+    p_order_id: input.orderId,
+    p_title: input.title,
+    p_amount: input.amount,
+  });
   fail(error);
   return data as V6OrderExtra;
 }
@@ -675,12 +724,10 @@ export async function getV6MediaSignedUrl(filePath: string) {
 }
 
 export async function decideV6OrderExtra(extraId: string, status: 'approved' | 'rejected') {
-  const { data, error } = await getV6Supabase()
-    .from('order_extras')
-    .update({ status, decided_at: new Date().toISOString() })
-    .eq('id', extraId)
-    .select('*')
-    .single();
+  const { data, error } = await getV6Supabase().rpc('decide_order_extra', {
+    p_extra_id: extraId,
+    p_status: status,
+  });
   fail(error);
   return data as V6OrderExtra;
 }
