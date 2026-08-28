@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  Ticket,
   Users,
   Wallet,
   Wrench,
@@ -276,6 +277,19 @@ function paymentProfileIcon(payment: V6PaymentProfile) {
   return <CreditCard size={15} aria-hidden="true" />;
 }
 
+function uniquePaymentProfiles(profiles: V6PaymentProfile[]) {
+  const preferred = [...profiles].sort((left, right) => {
+    if (left.is_default !== right.is_default) return left.is_default ? -1 : 1;
+    return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+  });
+  const seen = new Set<string>();
+  return preferred.filter((profile) => {
+    if (seen.has(profile.type)) return false;
+    seen.add(profile.type);
+    return true;
+  });
+}
+
 function photoStageLabel(stage: V6OrderPhoto['stage']) {
   if (stage === 'before') return 'Antes';
   if (stage === 'after') return 'Después';
@@ -397,6 +411,57 @@ function shortDate(value: string) {
   }).format(new Date(value));
 }
 
+function cityFromLocationLabel(value?: string | null) {
+  const clean = (value || '').trim();
+  if (!clean || clean.startsWith('GPS ')) return '';
+  const parts = clean.split(',').map((part) => part.trim()).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : clean;
+}
+
+function detailFromLocationLabel(value?: string | null) {
+  const clean = (value || '').trim();
+  if (!clean || clean.startsWith('GPS ')) return '';
+  const parts = clean.split(',').map((part) => part.trim()).filter(Boolean);
+  return parts.length > 1 ? parts.slice(0, -1).join(', ') : '';
+}
+
+function composeProfileLocation(city: string, detail: string) {
+  const cleanCity = city.trim();
+  const cleanDetail = detail.trim();
+  if (!cleanDetail) return cleanCity;
+  if (!cleanCity) return cleanDetail;
+  return normalizeText(cleanDetail).includes(normalizeText(cleanCity))
+    ? cleanDetail
+    : `${cleanDetail}, ${cleanCity}`;
+}
+
+function guaranteeUntilText(order: V6Order) {
+  const days = order.guarantee_days || 7;
+  const reference = new Date(order.completed_at || order.updated_at || order.created_at);
+  reference.setDate(reference.getDate() + days);
+  return new Intl.DateTimeFormat('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+  }).format(reference);
+}
+
+function paymentCoordinationHint(order: V6Order, role: V6Role) {
+  if (order.payment_method === 'wallet') {
+    return role === 'client'
+      ? 'Pedile al prestador el QR o link por el chat. La app deja registrado el acuerdo.'
+      : 'Mandá tu QR/link de Cuenta DNI o billetera por el chat antes de cerrar el trabajo.';
+  }
+  if (order.payment_method === 'cash') {
+    return role === 'client'
+      ? 'Pagá en efectivo al finalizar y dejá todo asentado en el seguimiento.'
+      : 'Confirmá el cobro en efectivo dentro del pedido para que quede constancia.';
+  }
+  if (order.payment_method === 'card') {
+    return 'El modelo queda preparado para Mercado Pago marketplace: cobro online, comisión MANITO y saldo al prestador.';
+  }
+  return 'El pago se coordina dentro del pedido para conservar chat, evidencia y garantía.';
+}
+
 function appointmentDate(order: V6Order) {
   return order.scheduled_at || order.accepted_at || order.created_at;
 }
@@ -408,7 +473,7 @@ function orderTrackingText(order: V6Order) {
     `Dirección: ${order.address}`,
     order.scheduled_at ? `Turno: ${shortDate(order.scheduled_at)}` : null,
     order.eta_minutes ? `ETA: ${order.eta_minutes} min` : null,
-    order.professional?.full_name ? `Prestador: ${order.professional.full_name}` : 'Prestador: pendiente de asignacion',
+    order.professional?.full_name ? `Prestador: ${order.professional.full_name}` : 'Prestador: pendiente de asignación',
   ].filter(Boolean);
   return lines.join('\n');
 }
@@ -776,12 +841,9 @@ function splitStoredAddress(value: string, fallbackCity?: string | null) {
 function headerLocation(profile: V6Profile) {
   const location = (profile.city || '').trim();
   if (!location) return 'Agregar ciudad';
-  const looksLikeStreetAddress =
-    /\d/.test(location) &&
-    /\b(av\.?|avenida|calle|boulevard|bulevar|pasaje|ruta|diag\.?|diagonal)\b/i.test(location);
   if (location.includes(',')) {
     const parts = location.split(',').map((part) => part.trim()).filter(Boolean);
-    return parts.slice(0, looksLikeStreetAddress ? 2 : 3).join(', ') || 'Agregar ciudad';
+    return parts.slice(0, 3).join(', ') || 'Agregar ciudad';
   }
   return location;
 }
@@ -1042,6 +1104,12 @@ function readableReverseLocation(data: ReverseGeocodeResponse): ReverseGeocodeRe
     address.state_district ||
     address.state ||
     null;
+  const neighbourhood =
+    address.neighbourhood ||
+    address.suburb ||
+    address.city_district ||
+    address.quarter ||
+    null;
   const road =
     address.road ||
     address.pedestrian ||
@@ -1049,13 +1117,12 @@ function readableReverseLocation(data: ReverseGeocodeResponse): ReverseGeocodeRe
     address.path ||
     address.cycleway ||
     address.residential ||
-    address.neighbourhood ||
-    address.suburb ||
     null;
   const street = road
     ? `${road}${address.house_number ? ` ${address.house_number}` : ''}`
     : null;
-  const label = city && street ? `${street}, ${city}` : city || data.display_name || null;
+  const labelParts = [street, neighbourhood, city].filter(Boolean);
+  const label = labelParts.length ? labelParts.join(', ') : data.display_name || null;
   return { city, label };
 }
 
@@ -1664,9 +1731,9 @@ function SetupScreen({ onConnected }: { onConnected: () => void }) {
         <p className="v6-live">
           <CircleDot size={14} aria-hidden="true" /> V6 backend real
         </p>
-        <h1>Conecta MANITO con Supabase.</h1>
+        <h1>Conectá MANITO con Supabase.</h1>
         <p className="v6-muted">
-          Usa la URL del proyecto y la publishable key. La seguridad queda en
+          Usá la URL del proyecto y la publishable key. La seguridad queda en
           RLS; nunca pegues service role en el navegador.
         </p>
         <label className="v6-field">
@@ -1777,7 +1844,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
             />
           </label>
           <label className="v6-field">
-            <span>Contrasena</span>
+            <span>Contraseña</span>
             <input
               type="password"
               minLength={MIN_PASSWORD_LENGTH}
@@ -1959,9 +2026,10 @@ function ClientHome({
             lng: item.lng,
           })));
         }
-        setPaymentProfiles(remotePaymentProfiles);
+        const nextPaymentProfiles = uniquePaymentProfiles(remotePaymentProfiles);
+        setPaymentProfiles(nextPaymentProfiles);
         const preferredPayment =
-          remotePaymentProfiles.find((payment) => payment.is_default) || remotePaymentProfiles[0];
+          nextPaymentProfiles.find((payment) => payment.is_default) || nextPaymentProfiles[0];
         if (preferredPayment && isRequestPaymentMethod(preferredPayment.type)) {
           setPaymentMethod(preferredPayment.type);
         }
@@ -2390,6 +2458,24 @@ function ClientHome({
         )}
       </section>
 
+      <section className="v6-card v6-flow-card">
+        <div className="v6-flow-step active">
+          <span>1</span>
+          <strong>Elegís</strong>
+          <small>servicio, modalidad y zona</small>
+        </div>
+        <div className="v6-flow-step">
+          <span>2</span>
+          <strong>Coordinás</strong>
+          <small>chat, horario y pago</small>
+        </div>
+        <div className="v6-flow-step">
+          <span>3</span>
+          <strong>Queda registrado</strong>
+          <small>fotos, adicionales y garantía</small>
+        </div>
+      </section>
+
       <section className="v6-section v6-flat-section">
         <div className="v6-section-head">
           <h2>¿Cómo lo necesitás?</h2>
@@ -2771,38 +2857,59 @@ function ClientHome({
       <section className="v6-card">
         <div className="v6-section-head">
           <h2>Atajos</h2>
-          <span>Cuenta y seguridad</span>
+          <span>acciones rápidas</span>
         </div>
-        <div className="v6-step-grid">
-          <button className="done" type="button" onClick={repeatLastOrder}>
-            Repetir pedido habitual
+        <div className="v6-benefit-grid">
+          <button type="button" onClick={repeatLastOrder}>
+            <Clock size={17} aria-hidden="true" />
+            <span>
+              <strong>Repetir pedido</strong>
+              <small>Usá datos del último servicio</small>
+            </span>
           </button>
-          <button className="done" type="button" onClick={() => onNavigate('favorites')}>
-            Profesionales favoritos
+          <button type="button" onClick={() => onNavigate('favorites')}>
+            <Heart size={17} aria-hidden="true" />
+            <span>
+              <strong>Favoritos</strong>
+              <small>Volvé a contratar</small>
+            </span>
           </button>
           <button
-            className="done"
             type="button"
             onClick={() => openAccountShortcut('En Cuenta tenés tu código de referido para compartir.')}
           >
-            Referir amigo con promo
+            <Ticket size={17} aria-hidden="true" />
+            <span>
+              <strong>Referidos</strong>
+              <small>Copiá tu código de promo</small>
+            </span>
           </button>
-          <button className="done" type="button" onClick={shareTracking}>
-            Compartir seguimiento
+          <button type="button" onClick={shareTracking}>
+            <SendHorizontal size={17} aria-hidden="true" />
+            <span>
+              <strong>Seguimiento</strong>
+              <small>Compartilo por WhatsApp</small>
+            </span>
           </button>
           <button
-            className="done"
             type="button"
             onClick={() => openAccountShortcut('En Cuenta podés configurar tu contacto de confianza.')}
           >
-            Contacto de confianza
+            <ShieldCheck size={17} aria-hidden="true" />
+            <span>
+              <strong>Contacto seguro</strong>
+              <small>Definilo en Cuenta</small>
+            </span>
           </button>
           <button
-            className="done"
             type="button"
             onClick={() => openAccountShortcut('En Cuenta dejamos visible la opción de privacidad del teléfono.')}
           >
-            Ocultar teléfono en chat
+            <MessageCircle size={17} aria-hidden="true" />
+            <span>
+              <strong>Privacidad</strong>
+              <small>Teléfono oculto en chat</small>
+            </span>
           </button>
         </div>
       </section>
@@ -3705,13 +3812,36 @@ function OrderCard({
           </p>
         ) : order.payment_method === 'wallet' ? (
           <p>
-            Billetera registrada como preferencia. Hasta activar proveedor online, el QR o link se coordina por chat y queda como evidencia del pedido.
+            Billetera registrada como preferencia. El QR o link se coordina por chat y queda como evidencia del pedido.
           </p>
         ) : (
           <p>
             Pago registrado como coordinación manual. Para máxima Protección MANITO, el próximo paso será cobrar online antes de iniciar el trabajo.
           </p>
         )}
+      </section>
+      <section className="v6-protection compact">
+        <div className="v6-section-head compact">
+          <div>
+            <h2>Garantía MANITO</h2>
+            <span>{order.guarantee_days || 7} días</span>
+          </div>
+          <ShieldCheck size={18} aria-hidden="true" />
+        </div>
+        <p>
+          Chat, fotos, presupuesto, pagos y adicionales quedan en este pedido. Si algo falla después del trabajo,
+          el cliente puede pedir revisión desde acá.
+        </p>
+        <div className="v6-proof-grid compact">
+          <span>
+            <b>Pago</b>
+            {paymentCoordinationHint(order, profile.role)}
+          </span>
+          <span>
+            <b>Vigencia</b>
+            {order.status === 'completed' ? `Hasta ${guaranteeUntilText(order)}` : 'Empieza al finalizar'}
+          </span>
+        </div>
       </section>
       {order.status === 'payment_pending' && profile.role === 'client' && (
         <section className="v6-payment-box action">
@@ -4035,6 +4165,7 @@ function ProfilePanel({
   const [savingDocumentKind, setSavingDocumentKind] = useState<string | null>(null);
   const [savingPortfolio, setSavingPortfolio] = useState(false);
   const [submittingOnboarding, setSubmittingOnboarding] = useState(false);
+  const [professionalServiceGroup, setProfessionalServiceGroup] = useState<ServiceGroupId>('home');
 
   useEffect(() => {
     let alive = true;
@@ -4096,6 +4227,10 @@ function ProfilePanel({
   const selectedServiceIds = useMemo(
     () => new Set(proServices.map((item) => item.service_id)),
     [proServices],
+  );
+  const visibleProfessionalServices = useMemo(
+    () => filterServicesByGroup(services, professionalServiceGroup),
+    [professionalServiceGroup, services],
   );
   const selectedSpecialtyIds = useMemo(
     () => new Set(proSpecialties.map((item) => item.specialty_id)),
@@ -4332,7 +4467,7 @@ function ProfilePanel({
     const file = fileInput instanceof File && fileInput.size > 0 ? fileInput : null;
     const link = (documentLinks[kind] || '').trim();
     if (!file && !link) {
-      setError(`Agrega una foto o un link para ${label}.`);
+      setError(`Agregá una foto o un link para ${label}.`);
       return;
     }
     setSavingDocumentKind(kind);
@@ -4392,7 +4527,7 @@ function ProfilePanel({
   async function savePortfolio(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!portfolioTitle.trim()) {
-      setError('Ponele un titulo al trabajo del portfolio.');
+      setError('Ponele un título al trabajo del portfolio.');
       return;
     }
     setSavingPortfolio(true);
@@ -4496,8 +4631,29 @@ function ProfilePanel({
             <p className="v6-help-text">
               Elegí los rubros donde querés recibir pedidos. Después vas a poder definir zona, horarios y tarifas.
             </p>
-            <div className="v6-check-grid">
-              {services.map((service) => (
+            <div className="v6-chip-row nowrap">
+              {serviceGroups.map((group) => {
+                const groupCount =
+                  group.id === 'all'
+                    ? proServices.length
+                    : proServices.filter((item) => {
+                        const service = services.find((candidate) => candidate.id === item.service_id);
+                        return service ? group.slugs.includes(service.slug) : false;
+                      }).length;
+                return (
+                  <button
+                    type="button"
+                    key={group.id}
+                    aria-pressed={professionalServiceGroup === group.id}
+                    onClick={() => setProfessionalServiceGroup(group.id)}
+                  >
+                    {group.label}{groupCount ? ` · ${groupCount}` : ''}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="v6-check-grid v6-service-selector">
+              {visibleProfessionalServices.map((service) => (
                 <button
                   className="v6-check-service"
                   type="button"
@@ -4505,15 +4661,20 @@ function ProfilePanel({
                   aria-pressed={selectedServiceIds.has(service.id)}
                   onClick={() => toggleService(service.id)}
                 >
-                  {serviceIcon(service.slug)} {serviceDisplayName(service)}
+                  <span>{serviceIcon(service.slug)}</span>
+                  <strong>{serviceDisplayName(service)}</strong>
+                  <small>Desde {money(visibleServiceRates[service.id] ? Number(visibleServiceRates[service.id]) : service.base_price)}</small>
                 </button>
               ))}
             </div>
+            {!visibleProfessionalServices.length && (
+              <p className="v6-muted">No hay rubros cargados para este grupo todavía.</p>
+            )}
             {proServices.length > 0 && (
               <div className="v6-specialty-panel">
                 <div className="v6-section-head compact">
                   <h2>Especialidades</h2>
-                  <span>opcional</span>
+                  <span>{selectedSpecialtyNames.length || 'opcional'}</span>
                 </div>
                 <p className="v6-help-text">
                   Marcá las tareas que mejor hacés. MANITO las usa para recomendarte pedidos más compatibles.
@@ -4600,7 +4761,7 @@ function ProfilePanel({
             <input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
           </label>
           <label className="v6-field">
-            <span>Telefono</span>
+            <span>Teléfono</span>
             <input value={phone} onChange={(event) => setPhone(event.target.value)} />
           </label>
           <label className="v6-field">
@@ -4761,7 +4922,7 @@ function ProfilePanel({
                 />
               </label>
             </div>
-            <div className="v6-work-days" aria-label="Dias de trabajo">
+            <div className="v6-work-days" aria-label="Días de trabajo">
               {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((day) => (
                 <button
                   type="button"
@@ -4853,7 +5014,7 @@ function ProfilePanel({
             )}
             {!proServices.length && (
               <p className="v6-alert">
-                Primero elegi al menos un servicio en el paso 1 para poder cargar tarifas.
+                Primero elegí al menos un servicio en el paso 1 para poder cargar tarifas.
               </p>
             )}
             <div className="v6-summary">
@@ -4931,7 +5092,8 @@ function AccountPanel({
   savingPhoneLocation: boolean;
   setNotice: (message: string) => void;
 }) {
-  const [locationCity, setLocationCity] = useState(profile.city || '');
+  const [locationCity, setLocationCity] = useState(cityFromLocationLabel(profile.city) || profile.city || '');
+  const [locationDetail, setLocationDetail] = useState(detailFromLocationLabel(profile.city));
   const [locationPhone, setLocationPhone] = useState(profile.phone || '');
   const [savingLocation, setSavingLocation] = useState(false);
   const [accountType, setAccountType] = useState<V6UserSecurityPreferences['account_type']>('particular');
@@ -4956,7 +5118,7 @@ function AccountPanel({
     ])
       .then(([nextPayments, nextSecurityPreferences, nextSettings]) => {
         if (!alive) return;
-        setPaymentProfiles(nextPayments);
+        setPaymentProfiles(uniquePaymentProfiles(nextPayments));
         if (nextSecurityPreferences) {
           setAccountType(nextSecurityPreferences.account_type);
           setTaxId(nextSecurityPreferences.tax_id || '');
@@ -5017,10 +5179,11 @@ function AccountPanel({
     }
     setSavingLocation(true);
     try {
+      const nextLocation = composeProfileLocation(locationCity, locationDetail);
       const updated = await updateV6Profile(profile.id, {
         full_name: profile.full_name,
         phone: locationPhone.trim() || null,
-        city: locationCity.trim(),
+        city: nextLocation,
       });
       onProfileChange(updated);
       setNotice('Ubicación principal actualizada.');
@@ -5092,7 +5255,7 @@ function AccountPanel({
         last4: type === 'card' ? '1234' : null,
         isDefault: true,
       });
-      setPaymentProfiles(await listV6PaymentProfiles(profile.id));
+      setPaymentProfiles(uniquePaymentProfiles(await listV6PaymentProfiles(profile.id)));
       setNotice(alreadySaved ? 'Medio de pago preferido actualizado.' : 'Medio de pago preferido guardado.');
     } catch {
       setNotice('Aplicá la migración V7 para guardar medios de pago.');
@@ -5120,7 +5283,9 @@ function AccountPanel({
           MANITO usa la ciudad para mostrarla arriba y el GPS para ordenar profesionales cercanos.
         </p>
         {profile.lat != null && profile.lng != null && (
-          <p className="v6-muted">GPS guardado para esta cuenta.</p>
+          <p className="v6-note">
+            GPS guardado. Arriba se muestra {profile.city || 'tu ubicación actual'}.
+          </p>
         )}
         <form className="v6-stack" onSubmit={saveLocation}>
           <label className="v6-field">
@@ -5130,6 +5295,14 @@ function AccountPanel({
               onChange={(event) => setLocationCity(event.target.value)}
               placeholder="Ej: Mar del Plata"
               required
+            />
+          </label>
+          <label className="v6-field">
+            <span>Barrio, zona o referencia</span>
+            <input
+              value={locationDetail}
+              onChange={(event) => setLocationDetail(event.target.value)}
+              placeholder="Ej: Güemes, Centro, Av. Independencia"
             />
           </label>
           <label className="v6-field">
@@ -5154,6 +5327,9 @@ function AccountPanel({
             </button>
           </div>
         </form>
+        <p className="v6-help-text">
+          Para una dirección exacta por pedido, cargá calle, número y ciudad cuando pedís el servicio.
+        </p>
       </section>
       <section className="v6-card">
         <h2>Datos de cuenta</h2>
@@ -5247,21 +5423,41 @@ function AccountPanel({
       </section>
       <section className="v6-card">
         <h2>Beneficios</h2>
-        <div className="v6-step-grid">
-          <button className="done" type="button" onClick={copyReferralCode}>
-            Referidos: invitá y ganá crédito
+        <div className="v6-benefit-grid">
+          <button type="button" onClick={copyReferralCode}>
+            <Ticket size={17} aria-hidden="true" />
+            <span>
+              <strong>Referidos</strong>
+              <small>Copiá {referralCode}</small>
+            </span>
           </button>
-          <button className="done" type="button" onClick={goToRecurringOrders}>
-            Recurrentes: repetir servicios habituales
+          <button type="button" onClick={goToRecurringOrders}>
+            <Clock size={17} aria-hidden="true" />
+            <span>
+              <strong>Recurrentes</strong>
+              <small>Repetí un servicio anterior</small>
+            </span>
           </button>
-          <button className="done" type="button" onClick={() => onNavigate('favorites')}>
-            Favoritos: volver a contratar profesionales
+          <button type="button" onClick={() => onNavigate('favorites')}>
+            <Heart size={17} aria-hidden="true" />
+            <span>
+              <strong>Favoritos</strong>
+              <small>Profesionales guardados</small>
+            </span>
           </button>
-          <button className="done" type="button" onClick={shareActiveTracking}>
-            Compartir seguimiento con contacto de confianza
+          <button type="button" onClick={shareActiveTracking}>
+            <SendHorizontal size={17} aria-hidden="true" />
+            <span>
+              <strong>Seguimiento</strong>
+              <small>Compartí el pedido activo</small>
+            </span>
           </button>
-          <button className="done" type="button" onClick={focusTrustedContact}>
-            Configurar contacto de confianza
+          <button type="button" onClick={focusTrustedContact}>
+            <ShieldCheck size={17} aria-hidden="true" />
+            <span>
+              <strong>Contacto seguro</strong>
+              <small>{trustedContact || 'Cargar contacto'}</small>
+            </span>
           </button>
         </div>
       </section>
@@ -5367,6 +5563,42 @@ function ChatSheet({
         <p className="v6-chat-protection">
           Usá este chat para coordinar pagos, horarios y adicionales. Lo acordado acá queda registrado para Protección MANITO.
         </p>
+        <div className="v6-chat-shortcuts" aria-label="Mensajes rápidos">
+          <button
+            type="button"
+            onClick={() =>
+              setBody(
+                profile.role === 'client'
+                  ? 'Hola, confirmo el pedido por acá. ¿Me pasás horario estimado y cómo coordinamos el pago?'
+                  : 'Hola, acepto coordinar este pedido por MANITO. Te confirmo horario estimado y próximos pasos por acá.',
+              )
+            }
+          >
+            Coordinar
+          </button>
+          {order.payment_method === 'wallet' && (
+            <button
+              type="button"
+              onClick={() =>
+                setBody(
+                  profile.role === 'client'
+                    ? 'Prefiero pagar con Cuenta DNI / billetera. ¿Me compartís el QR o link cuando corresponda?'
+                    : 'Te comparto mi QR o link de Cuenta DNI / billetera por este chat para que quede registrado.',
+                )
+              }
+            >
+              Pago billetera
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() =>
+              setBody('Cualquier adicional lo aprobamos desde el pedido antes de hacerlo, así queda cubierto por MANITO.')
+            }
+          >
+            Adicionales
+          </button>
+        </div>
         <div className="v6-chat-list">
           {messages.map((message) => (
             <article className={message.sender_id === profile.id ? 'v6-bubble mine' : 'v6-bubble'} key={message.id}>
@@ -5377,7 +5609,7 @@ function ChatSheet({
           {!messages.length && <Empty title="Sin mensajes" body="El chat se actualiza en tiempo real." />}
         </div>
         <form className="v6-chat-form" onSubmit={send}>
-          <input value={body} onChange={(event) => setBody(event.target.value)} placeholder="Escribi un mensaje" />
+          <input value={body} onChange={(event) => setBody(event.target.value)} placeholder="Escribí un mensaje" />
           <button type="submit" aria-label="Enviar mensaje">
             <SendHorizontal size={18} aria-hidden="true" />
           </button>

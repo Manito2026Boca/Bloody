@@ -41,7 +41,7 @@ export default function ProfessionalHome({ profile, userId }: Props) {
   const [assignedOrders, setAssignedOrders] = useState<Order[]>([]);
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [bio, setBio] = useState('Trabajo prolijo, puntual y con garantia.');
+  const [bio, setBio] = useState('Trabajo prolijo, puntual y con garantía.');
   const [city, setCity] = useState('Mar del Plata');
   const [radiusKm, setRadiusKm] = useState(12);
   const [yearsExperience, setYearsExperience] = useState(5);
@@ -278,7 +278,7 @@ export default function ProfessionalHome({ profile, userId }: Props) {
 
             <button className="secondary-button" type="submit" disabled={loading}>
               <ShieldAlert size={18} aria-hidden="true" />
-              {loading ? 'Enviando...' : 'Enviar a revision MANITO'}
+              {loading ? 'Enviando...' : 'Enviar a revisión MANITO'}
             </button>
           </form>
         </section>
@@ -287,7 +287,7 @@ export default function ProfessionalHome({ profile, userId }: Props) {
           <p className="pill orange">Documentacion</p>
           <h2>Validacion pendiente</h2>
           <p className="muted">
-            La migracion crea buckets privados para DNI, matriculas, seguros y
+            La migración crea buckets privados para DNI, matrículas, seguros y
             certificaciones. En este MVP, el admin aprueba desde el panel.
           </p>
         </section>
@@ -391,7 +391,7 @@ export default function ProfessionalHome({ profile, userId }: Props) {
           </div>
         </div>
         {assignedOrders.length === 0 && (
-          <div className="empty">Todavia no aceptaste trabajos.</div>
+          <div className="empty">Todavía no aceptaste trabajos.</div>
         )}
         {assignedOrders.map((order) => (
           <button

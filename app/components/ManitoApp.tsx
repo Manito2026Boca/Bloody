@@ -1,4 +1,3 @@
-// @ts-nocheck
 'use client';
 
 import type { Session } from '@supabase/supabase-js';
@@ -54,7 +53,7 @@ export default function ManitoApp() {
         }
       })
       .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : 'No se cargo sesion.'),
+        setError(caught instanceof Error ? caught.message : 'No se cargó sesión.'),
       )
       .finally(() => setLoading(false));
 
@@ -90,7 +89,7 @@ export default function ManitoApp() {
       <main className="app-shell auth-wrap">
         <section className="panel auth-panel">
           <p className="pill">MANITO</p>
-          <h1>Cargando sesion...</h1>
+          <h1>Cargando sesión...</h1>
         </section>
       </main>
     );
@@ -101,27 +100,27 @@ export default function ManitoApp() {
       <main className="app-shell auth-wrap">
         <section className="panel auth-panel">
           <p className="alert">
-            {error || 'No se encontro el perfil. Revisa la migracion de Auth.'}
+            {error || 'No se encontró el perfil. Revisá la migración de Auth.'}
           </p>
         </section>
       </main>
     );
   }
 
-  function renderWorkspace() {
+  function renderWorkspace(activeProfile: Profile, activeSession: Session) {
     if (tab === 'account') {
-      return <AccountPanel profile={profile} onProfileChange={setProfile} />;
+      return <AccountPanel profile={activeProfile} onProfileChange={setProfile} />;
     }
 
     if (role === 'professional') {
-      return <ProfessionalHome profile={profile} userId={session.user.id} />;
+      return <ProfessionalHome profile={activeProfile} userId={activeSession.user.id} />;
     }
 
     if (role === 'admin') {
-      return <AdminPanel profile={profile} />;
+      return <AdminPanel profile={activeProfile} />;
     }
 
-    return <ClientHome profile={profile} userId={session.user.id} />;
+    return <ClientHome profile={activeProfile} userId={activeSession.user.id} />;
   }
 
   return (
@@ -220,7 +219,7 @@ export default function ManitoApp() {
             </div>
           </nav>
 
-          {renderWorkspace()}
+          {renderWorkspace(profile, session)}
         </div>
       </div>
     </main>

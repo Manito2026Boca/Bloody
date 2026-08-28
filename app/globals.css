@@ -642,7 +642,7 @@ a {
   min-height: 100vh;
   margin: 0 auto;
   padding: 0 18px 96px;
-  overflow-x: clip;
+  overflow-x: hidden;
   background: var(--sand);
   color: var(--ink);
   position: relative;
@@ -777,6 +777,10 @@ a {
 .v6-stack {
   display: grid;
   gap: 14px;
+  min-width: 0;
+}
+
+.v6-content > * {
   min-width: 0;
 }
 
@@ -955,10 +959,39 @@ a {
 
 .v6-check-service {
   min-height: 54px;
-  grid-auto-flow: column;
   grid-template-columns: 20px minmax(0, 1fr);
   align-items: center;
   align-content: center;
+}
+
+.v6-service-selector .v6-check-service {
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 68px;
+  padding: 10px;
+  text-align: left;
+}
+
+.v6-service-selector .v6-check-service > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--mist);
+  color: var(--green-900);
+}
+
+.v6-service-selector .v6-check-service strong,
+.v6-service-selector .v6-check-service small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.v6-service-selector .v6-check-service small {
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 .v6-service span,
@@ -1123,6 +1156,57 @@ a {
   border-radius: 8px;
   background: rgb(255 253 250 / 72%);
   padding: 10px;
+}
+
+.v6-flow-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+
+.v6-flow-step {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  border-radius: 10px;
+  background: rgb(233 244 240 / 62%);
+  padding: 9px;
+}
+
+.v6-flow-step span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 8px;
+  background: white;
+  color: var(--green-900);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.v6-flow-step.active span {
+  background: var(--orange-600);
+  color: white;
+}
+
+.v6-flow-step strong,
+.v6-flow-step small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.v6-flow-step strong {
+  color: var(--green-900);
+  font-size: 0.78rem;
+  line-height: 1.15;
+}
+
+.v6-flow-step small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.2;
 }
 
 .v6-field {
@@ -1845,10 +1929,19 @@ a.v6-evidence-link {
   line-height: 1.4;
 }
 
+.v6-protection.compact {
+  gap: 8px;
+  padding: 10px;
+}
+
 .v6-proof-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.v6-proof-grid.compact {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .v6-proof-grid span {
@@ -2065,6 +2158,56 @@ a.v6-evidence-link {
   gap: 8px;
 }
 
+.v6-benefit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.v6-benefit-grid button {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 64px;
+  border: 1px solid #b8d9cb;
+  border-radius: 8px;
+  background: var(--mist);
+  color: var(--green-900);
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.v6-benefit-grid svg {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: white;
+  padding: 6px;
+  color: var(--green-800);
+}
+
+.v6-benefit-grid strong,
+.v6-benefit-grid small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+
+.v6-benefit-grid strong {
+  font-size: 0.82rem;
+}
+
+.v6-benefit-grid small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
 .v6-step-grid span,
 .v6-step-grid button,
 .v6-admin-grid article {
@@ -2182,7 +2325,15 @@ a.v6-evidence-link {
 }
 
 @media (max-width: 430px) {
+  html,
+  body {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
   .v6-app {
+    width: 100vw;
+    max-width: 100vw;
     padding-right: 12px;
     padding-left: 12px;
   }
@@ -2204,6 +2355,11 @@ a.v6-evidence-link {
 
   .v6-mode-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .v6-flow-card,
+  .v6-benefit-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .v6-list-service,
@@ -2471,6 +2627,26 @@ a.v6-evidence-link {
   padding: 9px 10px;
   font-size: 0.8rem;
   line-height: 1.35;
+}
+
+.v6-chat-shortcuts {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.v6-chat-shortcuts button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  border: 1px solid #b8d9cb;
+  border-radius: 8px;
+  background: var(--mist);
+  color: var(--green-900);
+  padding: 7px 10px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  cursor: pointer;
 }
 
 .v6-bubble {

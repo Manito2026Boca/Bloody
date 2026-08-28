@@ -104,3 +104,4 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 12. Confirmacion de email. Estado: robustecida para Vercel y reloj desfasado/JWT futuro.
 13. Estados operativos del pedido. Estado: implementados `scheduled_open`, `waiting_quotes` y `payment_pending`; falta conectar `payment_pending` con Mercado Pago real por webhook.
 14. Seguridad base. Estado: headers de seguridad, CSP, validacion de contraseña, RLS para preferencias sensibles y revocacion de funciones privadas aplicada; falta configurar politicas avanzadas de Auth/MFA/rate limits desde dashboard.
+15. Pulido de adopcion. Estado: beneficios y atajos convertidos en acciones, chat con mensajes rapidos, ubicacion principal con ciudad y referencia, alta profesional con filtros por grupo; falta QA visual en celulares reales.

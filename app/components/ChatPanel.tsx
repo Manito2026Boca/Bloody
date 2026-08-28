@@ -28,7 +28,7 @@ export default function ChatPanel({ orderId, userId }: Props) {
         if (!cancelled) setMessages(items);
       })
       .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : 'No se cargo el chat.'),
+        setError(caught instanceof Error ? caught.message : 'No se cargó el chat.'),
       );
 
     const channel = subscribeToMessages(orderId, (message) => {
@@ -79,7 +79,7 @@ export default function ChatPanel({ orderId, userId }: Props) {
 
       <div className="chat-list" aria-live="polite">
         {messages.length === 0 && (
-          <div className="empty">Todavia no hay mensajes.</div>
+          <div className="empty">Todavía no hay mensajes.</div>
         )}
         {messages.map((message) => (
           <article
@@ -105,7 +105,7 @@ export default function ChatPanel({ orderId, userId }: Props) {
           className="input"
           value={body}
           onChange={(event) => setBody(event.target.value)}
-          placeholder="Escribi un mensaje"
+          placeholder="Escribí un mensaje"
         />
         <button
           className="plain-icon-button"

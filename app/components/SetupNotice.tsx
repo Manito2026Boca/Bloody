@@ -11,11 +11,11 @@ export default function SetupNotice() {
           <Database size={14} aria-hidden="true" /> Supabase pendiente
         </p>
         <h1 id="setup-title" className="hero-greeting">
-          Conecta MANITO a Supabase
+          Conectá MANITO a Supabase
         </h1>
         <p className="muted">
           Esta entrega no trae datos falsos. Para activar Auth, pedidos y
-          realtime, completa las variables publicas y aplica la migracion.
+          realtime, completá las variables públicas y aplicá la migración.
         </p>
 
         <div className="surface" style={{ marginTop: 16 }}>

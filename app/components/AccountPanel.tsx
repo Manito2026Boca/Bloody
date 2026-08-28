@@ -73,7 +73,7 @@ export default function AccountPanel({ profile, onProfileChange }: Props) {
             />
           </label>
           <label className="field">
-            <span>Telefono</span>
+            <span>Teléfono</span>
             <input
               className="input"
               value={phone}
@@ -105,7 +105,7 @@ export default function AccountPanel({ profile, onProfileChange }: Props) {
         onClick={logout}
         style={{ marginTop: 12 }}
       >
-        <LogOut size={18} aria-hidden="true" /> Cerrar sesion
+        <LogOut size={18} aria-hidden="true" /> Cerrar sesión
       </button>
     </section>
   );

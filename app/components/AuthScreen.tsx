@@ -58,7 +58,7 @@ export default function AuthScreen() {
         });
         if (signupError) throw signupError;
         setMessage(
-          'Registro creado. Si tu proyecto exige verificacion, revisa tu email antes de ingresar.',
+          'Registro creado. Si tu proyecto exige verificación, revisá tu email antes de ingresar.',
         );
       }
 
@@ -141,7 +141,7 @@ export default function AuthScreen() {
                 />
               </label>
               <label className="field">
-                <span>Telefono</span>
+                <span>Teléfono</span>
                 <input
                   className="input"
                   value={phone}
@@ -166,7 +166,7 @@ export default function AuthScreen() {
 
           {mode !== 'reset' && (
             <label className="field">
-              <span>Contrasena</span>
+              <span>Contraseña</span>
               <input
                 className="input"
                 type="password"
