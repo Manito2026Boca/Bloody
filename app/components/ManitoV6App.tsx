@@ -56,6 +56,7 @@ import {
   getV6ProfessionalPaymentAccount,
   getV6ProfessionalPayoutDetails,
   getV6ProfessionalProfile,
+  getV6UserSecurityPreferences,
   listV6Complaints,
   listV6AdminSettings,
   listV6ClientAddresses,
@@ -90,7 +91,9 @@ import {
   upsertV6ProfessionalOnboarding,
   upsertV6ProfessionalPayoutDetails,
   upsertV6ProfessionalProfile,
+  upsertV6UserSecurityPreferences,
 } from '../lib/v6Api';
+import { MIN_PASSWORD_LENGTH, passwordHelpText, passwordSecurityMessage } from '../lib/security';
 import {
   clearStoredConfig,
   getV6Supabase,
@@ -123,6 +126,7 @@ import type {
   V6Role,
   V6Service,
   V6Specialty,
+  V6UserSecurityPreferences,
 } from '../lib/v6Types';
 import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 
@@ -1695,21 +1699,28 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
     setLocalNotice(null);
     try {
       const supabase = getV6Supabase();
+      const cleanEmail = email.trim().toLowerCase();
       if (mode === 'login') {
         const { error: loginError } = await supabase.auth.signInWithPassword({
-          email,
+          email: cleanEmail,
           password,
         });
         if (loginError) throw loginError;
         return;
       }
 
+      const passwordError = passwordSecurityMessage(password, cleanEmail);
+      if (passwordError) {
+        setError(passwordError);
+        return;
+      }
+
       window.localStorage.setItem(
-        pendingProfileKey(email),
+        pendingProfileKey(cleanEmail),
         JSON.stringify({ fullName, role: 'client' }),
       );
       const { data, error: signupError } = await supabase.auth.signUp({
-        email,
+        email: cleanEmail,
         password,
         options: {
           data: { full_name: fullName },
@@ -1757,17 +1768,25 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
           )}
           <label className="v6-field">
             <span>Email</span>
-            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="email"
+              required
+            />
           </label>
           <label className="v6-field">
             <span>Contrasena</span>
             <input
               type="password"
-              minLength={6}
+              minLength={MIN_PASSWORD_LENGTH}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               required
             />
+            {mode === 'signup' && <small>{passwordHelpText()}</small>}
           </label>
           {error && <p className="v6-alert">{error}</p>}
           {localNotice && <p className="v6-note">{localNotice}</p>}
@@ -4915,22 +4934,11 @@ function AccountPanel({
   const [locationCity, setLocationCity] = useState(profile.city || '');
   const [locationPhone, setLocationPhone] = useState(profile.phone || '');
   const [savingLocation, setSavingLocation] = useState(false);
-  const [accountType, setAccountType] = useState(() => {
-    if (typeof window === 'undefined') return 'particular';
-    return window.localStorage.getItem(`manito_v6_account_type:${profile.id}`) || 'particular';
-  });
-  const [taxId, setTaxId] = useState(() => {
-    if (typeof window === 'undefined') return '';
-    return window.localStorage.getItem(`manito_v6_tax_id:${profile.id}`) || '';
-  });
-  const [trustedContact, setTrustedContact] = useState(() => {
-    if (typeof window === 'undefined') return '';
-    return window.localStorage.getItem(`manito_v6_trusted:${profile.id}`) || '';
-  });
-  const [hidePhoneInChat, setHidePhoneInChat] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    return window.localStorage.getItem(`manito_v6_hide_phone:${profile.id}`) !== 'false';
-  });
+  const [accountType, setAccountType] = useState<V6UserSecurityPreferences['account_type']>('particular');
+  const [taxId, setTaxId] = useState('');
+  const [trustedContact, setTrustedContact] = useState('');
+  const [hidePhoneInChat, setHidePhoneInChat] = useState(true);
+  const [savingSecurityPreferences, setSavingSecurityPreferences] = useState(false);
   const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
   const [savingPaymentType, setSavingPaymentType] = useState<PaymentMethod | null>(null);
   const [adminSettings, setAdminSettings] = useState<V6AdminSetting[]>([]);
@@ -4943,11 +4951,18 @@ function AccountPanel({
     let alive = true;
     Promise.all([
       listV6PaymentProfiles(profile.id),
+      getV6UserSecurityPreferences(profile.id),
       profile.role === 'admin' ? listV6AdminSettings() : Promise.resolve([]),
     ])
-      .then(([nextPayments, nextSettings]) => {
+      .then(([nextPayments, nextSecurityPreferences, nextSettings]) => {
         if (!alive) return;
         setPaymentProfiles(nextPayments);
+        if (nextSecurityPreferences) {
+          setAccountType(nextSecurityPreferences.account_type);
+          setTaxId(nextSecurityPreferences.tax_id || '');
+          setTrustedContact(nextSecurityPreferences.trusted_contact || '');
+          setHidePhoneInChat(nextSecurityPreferences.hide_phone_in_chat);
+        }
         setAdminSettings(nextSettings);
       })
       .catch(() => undefined);
@@ -4966,12 +4981,31 @@ function AccountPanel({
     window.location.reload();
   }
 
-  function saveAccountPreferences() {
-    window.localStorage.setItem(`manito_v6_account_type:${profile.id}`, accountType);
-    window.localStorage.setItem(`manito_v6_tax_id:${profile.id}`, taxId);
-    window.localStorage.setItem(`manito_v6_trusted:${profile.id}`, trustedContact);
-    window.localStorage.setItem(`manito_v6_hide_phone:${profile.id}`, String(hidePhoneInChat));
-    setNotice('Cuenta actualizada.');
+  async function saveAccountPreferences() {
+    if (savingSecurityPreferences) return;
+    setSavingSecurityPreferences(true);
+    try {
+      await upsertV6UserSecurityPreferences({
+        profileId: profile.id,
+        accountType,
+        taxId: taxId.trim(),
+        trustedContact: trustedContact.trim(),
+        hidePhoneInChat,
+      });
+      for (const key of [
+        `manito_v6_account_type:${profile.id}`,
+        `manito_v6_tax_id:${profile.id}`,
+        `manito_v6_trusted:${profile.id}`,
+        `manito_v6_hide_phone:${profile.id}`,
+      ]) {
+        window.localStorage.removeItem(key);
+      }
+      setNotice('Cuenta actualizada con privacidad protegida.');
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : 'No se pudo guardar seguridad de cuenta.');
+    } finally {
+      setSavingSecurityPreferences(false);
+    }
   }
 
   async function saveLocation(event: FormEvent<HTMLFormElement>) {
@@ -5126,7 +5160,12 @@ function AccountPanel({
         <div className="v6-stack">
           <label className="v6-field">
             <span>Tipo</span>
-            <select value={accountType} onChange={(event) => setAccountType(event.target.value)}>
+            <select
+              value={accountType}
+              onChange={(event) =>
+                setAccountType(event.target.value as V6UserSecurityPreferences['account_type'])
+              }
+            >
               <option value="particular">Particular</option>
               <option value="empresa">Empresa</option>
               <option value="consorcio">Consorcio</option>
@@ -5155,8 +5194,13 @@ function AccountPanel({
               onChange={(event) => setHidePhoneInChat(event.target.checked)}
             />
           </label>
-          <button className="v6-secondary" type="button" onClick={saveAccountPreferences}>
-            Guardar cuenta
+          <button
+            className="v6-secondary"
+            type="button"
+            onClick={saveAccountPreferences}
+            disabled={savingSecurityPreferences}
+          >
+            {savingSecurityPreferences ? 'Guardando...' : 'Guardar cuenta'}
           </button>
         </div>
       </section>

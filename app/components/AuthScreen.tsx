@@ -2,6 +2,7 @@
 
 import { Eye, LogIn, Mail, UserPlus } from 'lucide-react';
 import { useState } from 'react';
+import { MIN_PASSWORD_LENGTH, passwordHelpText, passwordSecurityMessage } from '../lib/security';
 import { requireSupabase } from '../lib/supabaseClient';
 
 type AuthMode = 'login' | 'signup' | 'reset';
@@ -25,18 +26,25 @@ export default function AuthScreen() {
 
     try {
       const supabase = requireSupabase();
+      const cleanEmail = email.trim().toLowerCase();
 
       if (mode === 'login') {
         const { error: loginError } = await supabase.auth.signInWithPassword({
-          email,
+          email: cleanEmail,
           password,
         });
         if (loginError) throw loginError;
       }
 
       if (mode === 'signup') {
+        const passwordError = passwordSecurityMessage(password, cleanEmail);
+        if (passwordError) {
+          setError(passwordError);
+          return;
+        }
+
         const { error: signupError } = await supabase.auth.signUp({
-          email,
+          email: cleanEmail,
           password,
           options: {
             data: {
@@ -56,7 +64,7 @@ export default function AuthScreen() {
 
       if (mode === 'reset') {
         const { error: resetError } =
-          await supabase.auth.resetPasswordForEmail(email, {
+          await supabase.auth.resetPasswordForEmail(cleanEmail, {
             redirectTo:
               typeof window !== 'undefined' ? window.location.origin : '/',
           });
@@ -165,9 +173,10 @@ export default function AuthScreen() {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                minLength={8}
+                minLength={MIN_PASSWORD_LENGTH}
                 required
               />
+              {mode === 'signup' && <small>{passwordHelpText()}</small>}
             </label>
           )}
 

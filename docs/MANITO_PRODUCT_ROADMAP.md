@@ -76,6 +76,8 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 - Politicas de Storage con owner por carpeta.
 - Datos sensibles de profesionales con minimo necesario y acceso de admin.
 - Telefono protegido hasta que el pedido este aceptado o en etapa habilitada.
+- Headers de seguridad HTTP, CSP, HSTS, permisos del navegador y contraseña minima.
+- Preferencias sensibles de cuenta guardadas en Supabase con RLS, no en `localStorage`.
 
 ## 9. Calidad y eficiencia
 
@@ -101,3 +103,4 @@ Este documento ordena lo que falta para que MANITO pase de beta usable a app web
 11. Categorias y subrubros. Estado: implementado grupo Automotor con subrubros mecanica, gomeria y chapa/pintura; falta admin editable.
 12. Confirmacion de email. Estado: robustecida para Vercel y reloj desfasado/JWT futuro.
 13. Estados operativos del pedido. Estado: implementados `scheduled_open`, `waiting_quotes` y `payment_pending`; falta conectar `payment_pending` con Mercado Pago real por webhook.
+14. Seguridad base. Estado: headers de seguridad, CSP, validacion de contraseña, RLS para preferencias sensibles y revocacion de funciones privadas aplicada; falta configurar politicas avanzadas de Auth/MFA/rate limits desde dashboard.

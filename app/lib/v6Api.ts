@@ -31,6 +31,7 @@ import type {
   V6Role,
   V6Service,
   V6Specialty,
+  V6UserSecurityPreferences,
 } from './v6Types';
 
 function fail(error: { message: string } | null) {
@@ -324,6 +325,40 @@ export async function addV6PaymentProfile(input: {
     .single();
   fail(error);
   return data as V6PaymentProfile;
+}
+
+export async function getV6UserSecurityPreferences(userId: string) {
+  const { data, error } = await getV6Supabase()
+    .from('user_security_preferences')
+    .select('*')
+    .eq('profile_id', userId)
+    .maybeSingle();
+  if (isMissingV5Table(error)) return null;
+  fail(error);
+  return data as V6UserSecurityPreferences | null;
+}
+
+export async function upsertV6UserSecurityPreferences(input: {
+  profileId: string;
+  accountType: V6UserSecurityPreferences['account_type'];
+  taxId?: string | null;
+  trustedContact?: string | null;
+  hidePhoneInChat: boolean;
+}) {
+  const { data, error } = await getV6Supabase()
+    .from('user_security_preferences')
+    .upsert({
+      profile_id: input.profileId,
+      account_type: input.accountType,
+      tax_id: input.taxId || null,
+      trusted_contact: input.trustedContact || null,
+      hide_phone_in_chat: input.hidePhoneInChat,
+    }, { onConflict: 'profile_id' })
+    .select('*')
+    .single();
+  if (isMissingV5Table(error)) return null;
+  fail(error);
+  return data as V6UserSecurityPreferences;
 }
 
 export async function getV6ProfessionalPaymentAccount(userId: string) {

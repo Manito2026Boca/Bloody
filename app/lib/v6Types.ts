@@ -149,6 +149,16 @@ export type V6PaymentProfile = {
   created_at: string;
 };
 
+export type V6UserSecurityPreferences = {
+  profile_id: string;
+  account_type: 'particular' | 'empresa' | 'consorcio';
+  tax_id: string | null;
+  trusted_contact: string | null;
+  hide_phone_in_chat: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type V6ProfessionalPaymentAccount = {
   id: string;
   professional_id: string;

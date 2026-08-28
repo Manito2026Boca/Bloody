@@ -34,10 +34,16 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET' || requestUrl.origin !== self.location.origin) {
     return;
   }
+  if (requestUrl.pathname.startsWith('/auth/')) {
+    return;
+  }
 
   event.respondWith(
     fetch(event.request)
       .then((response) => {
+        if (!response.ok || response.type !== 'basic') {
+          return response;
+        }
         const clone = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         return response;

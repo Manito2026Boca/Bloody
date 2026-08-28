@@ -134,8 +134,8 @@ pnpm vercel-build
 Variables a cargar en Vercel, en Project Settings > Environment Variables:
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=https://taovmzxqvacrtjefgbsd.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_txzdjLhKue77cWaozTxlbA_Awq0H16s
+NEXT_PUBLIC_SUPABASE_URL=https://tu-project-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_tu_clave_publica
 NEXT_PUBLIC_APP_URL=https://tu-dominio-de-vercel.vercel.app
 ```
 
@@ -151,6 +151,14 @@ https://tu-dominio-de-vercel.vercel.app/**
 
 Nunca cargues la database password, `service_role` ni claves secretas como
 variables `NEXT_PUBLIC_*`.
+
+Recomendado en Supabase Auth antes de abrir pruebas amplias:
+
+- exigir contrasenas de 10+ caracteres;
+- activar proteccion contra contrasenas filtradas si esta disponible en el plan;
+- configurar limites/rate limits o CAPTCHA para signup/login;
+- mantener confirmacion por email obligatoria;
+- habilitar MFA para administradores y cuentas internas.
 
 ## Pendiente para produccion
 
