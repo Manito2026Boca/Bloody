@@ -339,6 +339,59 @@ export type V6AdminSetting = {
   updated_at: string;
 };
 
+export type V6AdminReviewStatus =
+  | 'in_review'
+  | 'approved'
+  | 'observed'
+  | 'rejected'
+  | 'suspended';
+
+export type V6AdminReviewService = {
+  service_id: number;
+  service_name: string;
+  service_slug: string;
+  price_from: number | null;
+  specialties: Array<{
+    specialty_id: number;
+    specialty_name: string;
+  }>;
+};
+
+export type V6AdminReviewDocument = Pick<
+  V6ProfessionalDocument,
+  'id' | 'kind' | 'label' | 'status' | 'file_path' | 'observation' | 'created_at' | 'updated_at'
+>;
+
+export type V6AdminProfessionalReview = {
+  professional_id: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  city: string | null;
+  is_available: boolean;
+  onboarding_status: V6ProfessionalOnboarding['status'];
+  current_step: number;
+  onboarding_notes: string | null;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  onboarding_updated_at: string | null;
+  headline: string | null;
+  bio: string | null;
+  years_experience: number | null;
+  work_city: string | null;
+  service_radius_km: number | null;
+  work_days: string[] | null;
+  work_starts_at: string | null;
+  work_ends_at: string | null;
+  insurance_label: string | null;
+  verified: boolean;
+  manito_pro: boolean;
+  rating_avg: number;
+  jobs_completed: number;
+  services: V6AdminReviewService[];
+  documents: V6AdminReviewDocument[];
+};
+
 export type V6Message = {
   id: number;
   order_id: string;

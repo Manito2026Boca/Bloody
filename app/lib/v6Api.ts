@@ -3,6 +3,8 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getV6Supabase } from './v6Supabase';
 import type {
+  V6AdminProfessionalReview,
+  V6AdminReviewStatus,
   V6AdminSetting,
   V6AssignmentMode,
   V6ClientAddress,
@@ -1037,6 +1039,45 @@ export async function listV6AdminSettings() {
   if (isMissingV5Table(error)) return [];
   fail(error);
   return (data || []) as V6AdminSetting[];
+}
+
+export async function listV6AdminProfessionalReviews() {
+  const { data, error } = await getV6Supabase().rpc('list_admin_professional_reviews');
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6AdminProfessionalReview[];
+}
+
+export async function reviewV6ProfessionalOnboarding(input: {
+  professionalId: string;
+  status: V6AdminReviewStatus;
+  notes?: string | null;
+  verified?: boolean | null;
+  manitoPro?: boolean | null;
+}) {
+  const { data, error } = await getV6Supabase().rpc('review_professional_onboarding', {
+    p_professional_id: input.professionalId,
+    p_status: input.status,
+    p_notes: input.notes || null,
+    p_verified: input.verified ?? null,
+    p_manito_pro: input.manitoPro ?? null,
+  });
+  fail(error);
+  return data as V6ProfessionalOnboarding;
+}
+
+export async function reviewV6ProfessionalDocument(input: {
+  documentId: string;
+  status: V6ProfessionalDocument['status'];
+  observation?: string | null;
+}) {
+  const { data, error } = await getV6Supabase().rpc('review_professional_document', {
+    p_document_id: input.documentId,
+    p_status: input.status,
+    p_observation: input.observation || null,
+  });
+  fail(error);
+  return data as V6ProfessionalDocument;
 }
 
 export function subscribeV6Orders(onChange: () => void) {

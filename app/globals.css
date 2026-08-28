@@ -1614,6 +1614,10 @@ a {
   gap: 8px;
 }
 
+.v6-actions-row.compact {
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+}
+
 .v6-choice-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2319,6 +2323,89 @@ a.v6-evidence-link {
   color: #edf7f3;
   padding: 10px;
   font-size: 0.75rem;
+}
+
+.v6-admin-workbench {
+  gap: 12px;
+}
+
+.v6-admin-review-list {
+  display: grid;
+  gap: 12px;
+}
+
+.v6-admin-review-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  padding: 12px;
+}
+
+.v6-admin-review-card h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.v6-admin-summary,
+.v6-admin-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.v6-admin-summary span,
+.v6-admin-chip-list span {
+  border: 1px solid #b8d9cb;
+  border-radius: 8px;
+  background: var(--mist);
+  color: var(--green-900);
+  padding: 6px 8px;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.v6-admin-block {
+  display: grid;
+  gap: 4px;
+  border-left: 3px solid var(--orange-600);
+  padding-left: 10px;
+}
+
+.v6-admin-block p,
+.v6-admin-block small {
+  margin: 0;
+  color: var(--muted);
+}
+
+.v6-admin-block small {
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.v6-admin-documents {
+  display: grid;
+  gap: 8px;
+}
+
+.v6-admin-documents > div {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--sand);
+  padding: 9px;
+}
+
+.v6-admin-documents > div > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
 }
 
 .v6-search-page {

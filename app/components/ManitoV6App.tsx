@@ -61,6 +61,7 @@ import {
   getV6UserSecurityPreferences,
   listV6Complaints,
   listV6AdminSettings,
+  listV6AdminProfessionalReviews,
   listV6ClientAddresses,
   listV6Messages,
   listV6Notifications,
@@ -79,6 +80,8 @@ import {
   listV6Specialties,
   markV6NotificationsRead,
   removeV6Channel,
+  reviewV6ProfessionalDocument,
+  reviewV6ProfessionalOnboarding,
   sendV6OrderProposal,
   saveV6ProfessionalServices,
   saveV6ProfessionalSpecialties,
@@ -110,6 +113,9 @@ import {
   saveStoredConfig,
 } from '../lib/v6Supabase';
 import type {
+  V6AdminProfessionalReview,
+  V6AdminReviewDocument,
+  V6AdminReviewStatus,
   V6AdminSetting,
   V6Complaint,
   V6Message,
@@ -5162,6 +5168,7 @@ function AccountPanel({
   const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
   const [savingPaymentType, setSavingPaymentType] = useState<PaymentMethod | null>(null);
   const [adminSettings, setAdminSettings] = useState<V6AdminSetting[]>([]);
+  const [adminReviews, setAdminReviews] = useState<V6AdminProfessionalReview[]>([]);
   const referralCode = `MANITO-${normalizeText(profile.full_name || profile.email || profile.id)
     .replace(/[^a-z0-9]+/g, '')
     .slice(0, 6)
@@ -5173,8 +5180,9 @@ function AccountPanel({
       listV6PaymentProfiles(profile.id),
       getV6UserSecurityPreferences(profile.id),
       profile.role === 'admin' ? listV6AdminSettings() : Promise.resolve([]),
+      profile.role === 'admin' ? listV6AdminProfessionalReviews() : Promise.resolve([]),
     ])
-      .then(([nextPayments, nextSecurityPreferences, nextSettings]) => {
+      .then(([nextPayments, nextSecurityPreferences, nextSettings, nextReviews]) => {
         if (!alive) return;
         setPaymentProfiles(uniquePaymentProfiles(nextPayments));
         if (nextSecurityPreferences) {
@@ -5184,6 +5192,7 @@ function AccountPanel({
           setHidePhoneInChat(nextSecurityPreferences.hide_phone_in_chat);
         }
         setAdminSettings(nextSettings);
+        setAdminReviews(nextReviews);
       })
       .catch(() => undefined);
     return () => {
@@ -5527,26 +5536,12 @@ function AccountPanel({
         </button>
       </section>
       {profile.role === 'admin' && (
-        <section className="v6-card">
-          <h2>Admin</h2>
-          <div className="v6-admin-grid">
-            <article>
-              <strong>Pedidos</strong>
-              <span>Operación realtime</span>
-            </article>
-            <article>
-              <strong>Profesionales</strong>
-              <span>Alta, documentos y suspensión</span>
-            </article>
-            <article>
-              <strong>Comercial</strong>
-              <span>{adminSettings.length ? 'Config desde Supabase' : 'Pendiente de migración V7'}</span>
-            </article>
-          </div>
-          {adminSettings.map((setting) => (
-            <pre className="v6-admin-setting" key={setting.key}>{setting.key}: {JSON.stringify(setting.value, null, 2)}</pre>
-          ))}
-        </section>
+        <AdminReviewWorkbench
+          reviews={adminReviews}
+          settings={adminSettings}
+          setReviews={setAdminReviews}
+          setNotice={setNotice}
+        />
       )}
       <section className="v6-menu">
         {canInstall && (
@@ -5563,6 +5558,292 @@ function AccountPanel({
       </section>
     </>
   );
+}
+
+function AdminReviewWorkbench({
+  reviews,
+  settings,
+  setReviews,
+  setNotice,
+}: {
+  reviews: V6AdminProfessionalReview[];
+  settings: V6AdminSetting[];
+  setReviews: (reviews: V6AdminProfessionalReview[]) => void;
+  setNotice: (message: string) => void;
+}) {
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+
+  const pendingCount = reviews.filter((review) =>
+    ['submitted', 'in_review', 'observed'].includes(review.onboarding_status),
+  ).length;
+  const approvedCount = reviews.filter((review) => review.onboarding_status === 'approved').length;
+
+  async function refreshReviews() {
+    setReviews(await listV6AdminProfessionalReviews());
+  }
+
+  async function reviewProfessional(review: V6AdminProfessionalReview, status: V6AdminReviewStatus) {
+    const key = `${review.professional_id}:${status}`;
+    setBusyKey(key);
+    try {
+      await reviewV6ProfessionalOnboarding({
+        professionalId: review.professional_id,
+        status,
+        notes: notes[review.professional_id] || null,
+        verified: status === 'approved' ? true : status === 'in_review' ? null : false,
+        manitoPro: status === 'approved' ? review.manito_pro : null,
+      });
+      await refreshReviews();
+      setNotice(adminReviewResultLabel(status));
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : 'No se pudo revisar el alta.');
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function reviewDocument(document: V6AdminReviewDocument, status: 'approved' | 'observed' | 'rejected') {
+    const key = `${document.id}:${status}`;
+    setBusyKey(key);
+    try {
+      await reviewV6ProfessionalDocument({
+        documentId: document.id,
+        status,
+        observation: document.observation,
+      });
+      await refreshReviews();
+      setNotice(adminDocumentResultLabel(status));
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : 'No se pudo revisar el documento.');
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function openDocument(document: V6AdminReviewDocument) {
+    if (!document.file_path) {
+      setNotice('Ese documento todavía no tiene archivo ni link.');
+      return;
+    }
+    if (document.file_path.startsWith('http')) {
+      window.open(document.file_path, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    const signedUrl = await getV6MediaSignedUrl(document.file_path);
+    if (!signedUrl) {
+      setNotice('No se pudo abrir el archivo privado. Revisá permisos de Storage.');
+      return;
+    }
+    window.open(signedUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  return (
+    <section className="v6-card v6-admin-workbench">
+      <div className="v6-section-head">
+        <h2>Admin MANITO</h2>
+        <button className="v6-text-button" type="button" onClick={() => void refreshReviews()}>
+          Actualizar
+        </button>
+      </div>
+      <div className="v6-admin-grid">
+        <article>
+          <strong>{reviews.length}</strong>
+          <span>altas profesionales</span>
+        </article>
+        <article>
+          <strong>{pendingCount}</strong>
+          <span>pendientes</span>
+        </article>
+        <article>
+          <strong>{approvedCount}</strong>
+          <span>aprobadas</span>
+        </article>
+      </div>
+
+      <div className="v6-admin-review-list">
+        {reviews.map((review) => (
+          <article className="v6-admin-review-card" key={review.professional_id}>
+            <div className="v6-section-head compact">
+              <h3>{review.full_name || 'Profesional sin nombre'}</h3>
+              <span>{adminOnboardingStatusLabel(review.onboarding_status)}</span>
+            </div>
+            <p className="v6-muted">
+              {review.email || 'Sin email'} · {review.phone || 'Sin teléfono'} · {review.city || review.work_city || 'Sin ciudad'}
+            </p>
+            <div className="v6-admin-summary">
+              <span>{review.current_step}/16 pasos</span>
+              <span>{review.verified ? 'Verificado' : 'No verificado'}</span>
+              <span>{review.manito_pro ? 'MANITO Pro' : 'Estándar'}</span>
+            </div>
+
+            {(review.headline || review.bio || review.insurance_label) && (
+              <div className="v6-admin-block">
+                <strong>{review.headline || 'Perfil público'}</strong>
+                {review.bio && <p>{review.bio}</p>}
+                <small>
+                  {review.years_experience || 0} años · {review.work_city || 'zona sin definir'} · {review.service_radius_km || 8} km · {review.insurance_label || 'sin matrícula/seguro'}
+                </small>
+              </div>
+            )}
+
+            <div className="v6-admin-chip-list">
+              {review.services.map((service) => (
+                <span key={service.service_id}>
+                  {service.service_name}
+                  {service.price_from ? ` · desde ${money(service.price_from)}` : ''}
+                  {service.specialties.length ? ` · ${service.specialties.map((item) => item.specialty_name).join(', ')}` : ''}
+                </span>
+              ))}
+              {!review.services.length && <span>Sin servicios declarados</span>}
+            </div>
+
+            <div className="v6-admin-documents">
+              {review.documents.map((document) => (
+                <div key={document.id}>
+                  <button
+                    className="v6-text-button"
+                    type="button"
+                    onClick={() => void openDocument(document)}
+                  >
+                    {document.label}
+                  </button>
+                  <span>{adminDocumentStatusLabel(document.status)}</span>
+                  <div className="v6-actions-row compact">
+                    <button
+                      className="v6-secondary"
+                      type="button"
+                      disabled={busyKey === `${document.id}:approved`}
+                      onClick={() => void reviewDocument(document, 'approved')}
+                    >
+                      Aprobar
+                    </button>
+                    <button
+                      className="v6-secondary"
+                      type="button"
+                      disabled={busyKey === `${document.id}:observed`}
+                      onClick={() => void reviewDocument(document, 'observed')}
+                    >
+                      Observar
+                    </button>
+                    <button
+                      className="v6-danger"
+                      type="button"
+                      disabled={busyKey === `${document.id}:rejected`}
+                      onClick={() => void reviewDocument(document, 'rejected')}
+                    >
+                      Rechazar
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {!review.documents.length && <p className="v6-muted">Todavía no cargó documentos.</p>}
+            </div>
+
+            <label className="v6-field">
+              <span>Nota interna / observación</span>
+              <textarea
+                value={notes[review.professional_id] || ''}
+                onChange={(event) =>
+                  setNotes((current) => ({ ...current, [review.professional_id]: event.target.value }))
+                }
+                placeholder="Ej: falta DNI dorso legible, pedir matrícula..."
+              />
+            </label>
+            <div className="v6-actions-row compact">
+              <button
+                className="v6-secondary"
+                type="button"
+                disabled={busyKey === `${review.professional_id}:in_review`}
+                onClick={() => void reviewProfessional(review, 'in_review')}
+              >
+                En revisión
+              </button>
+              <button
+                className="v6-primary"
+                type="button"
+                disabled={busyKey === `${review.professional_id}:approved`}
+                onClick={() => void reviewProfessional(review, 'approved')}
+              >
+                Aprobar alta
+              </button>
+              <button
+                className="v6-secondary"
+                type="button"
+                disabled={busyKey === `${review.professional_id}:observed`}
+                onClick={() => void reviewProfessional(review, 'observed')}
+              >
+                Observar
+              </button>
+              <button
+                className="v6-danger"
+                type="button"
+                disabled={busyKey === `${review.professional_id}:suspended`}
+                onClick={() => void reviewProfessional(review, 'suspended')}
+              >
+                Suspender
+              </button>
+            </div>
+          </article>
+        ))}
+        {!reviews.length && (
+          <div className="v6-empty">
+            <ShieldCheck size={24} aria-hidden="true" />
+            <strong>No hay altas para revisar</strong>
+            <p>Cuando un prestador envíe el alta, va a aparecer acá.</p>
+          </div>
+        )}
+      </div>
+
+      {settings.map((setting) => (
+        <pre className="v6-admin-setting" key={setting.key}>{setting.key}: {JSON.stringify(setting.value, null, 2)}</pre>
+      ))}
+    </section>
+  );
+}
+
+function adminOnboardingStatusLabel(status: V6ProfessionalOnboarding['status']) {
+  const labels: Record<V6ProfessionalOnboarding['status'], string> = {
+    draft: 'Borrador',
+    submitted: 'Enviada',
+    in_review: 'En revisión',
+    approved: 'Aprobada',
+    observed: 'Observada',
+    rejected: 'Rechazada',
+    suspended: 'Suspendida',
+  };
+  return labels[status] || status;
+}
+
+function adminDocumentStatusLabel(status: V6ProfessionalDocument['status']) {
+  const labels: Record<V6ProfessionalDocument['status'], string> = {
+    pending: 'Pendiente',
+    uploaded: 'Cargado',
+    approved: 'Aprobado',
+    observed: 'Observado',
+    rejected: 'Rechazado',
+  };
+  return labels[status] || status;
+}
+
+function adminReviewResultLabel(status: V6AdminReviewStatus) {
+  const labels: Record<V6AdminReviewStatus, string> = {
+    in_review: 'Alta marcada en revisión.',
+    approved: 'Alta aprobada. El prestador ya puede recibir pedidos.',
+    observed: 'Alta observada. El prestador debe corregirla.',
+    rejected: 'Alta rechazada.',
+    suspended: 'Prestador suspendido.',
+  };
+  return labels[status];
+}
+
+function adminDocumentResultLabel(status: 'approved' | 'observed' | 'rejected') {
+  const labels = {
+    approved: 'Documento aprobado.',
+    observed: 'Documento observado.',
+    rejected: 'Documento rechazado.',
+  };
+  return labels[status];
 }
 
 function ChatSheet({
