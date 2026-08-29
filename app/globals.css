@@ -1663,6 +1663,13 @@ a {
   margin: 4px 0 -2px;
 }
 
+.v6-section-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.98rem;
+  letter-spacing: 0;
+}
+
 .v6-file-list {
   display: grid;
   gap: 6px;

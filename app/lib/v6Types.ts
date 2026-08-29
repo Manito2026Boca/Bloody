@@ -329,8 +329,21 @@ export type V6Complaint = {
   reason: string;
   detail: string | null;
   status: 'open' | 'in_review' | 'resolved' | 'rejected';
+  resolution_note: string | null;
+  resolved_at: string | null;
+  reviewed_by: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type V6AdminComplaintReview = V6Complaint & {
+  service_name: string;
+  order_status: V6OrderStatus;
+  order_price: number | null;
+  client_name: string;
+  client_city: string | null;
+  professional_name: string | null;
+  professional_city: string | null;
 };
 
 export type V6AdminSetting = {

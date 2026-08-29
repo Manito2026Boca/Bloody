@@ -60,6 +60,7 @@ import {
   getV6ProfessionalProfile,
   getV6UserSecurityPreferences,
   listV6Complaints,
+  listV6AdminComplaintReviews,
   listV6AdminSettings,
   listV6AdminProfessionalReviews,
   listV6ClientAddresses,
@@ -82,6 +83,7 @@ import {
   removeV6Channel,
   reviewV6ProfessionalDocument,
   reviewV6ProfessionalOnboarding,
+  reviewV6OrderComplaint,
   sendV6OrderProposal,
   saveV6ProfessionalServices,
   saveV6ProfessionalSpecialties,
@@ -117,6 +119,7 @@ import {
   saveStoredConfig,
 } from '../lib/v6Supabase';
 import type {
+  V6AdminComplaintReview,
   V6AdminProfessionalReview,
   V6AdminReviewDocument,
   V6AdminReviewStatus,
@@ -5261,6 +5264,7 @@ function AccountPanel({
   const [savingPaymentType, setSavingPaymentType] = useState<PaymentMethod | null>(null);
   const [adminSettings, setAdminSettings] = useState<V6AdminSetting[]>([]);
   const [adminReviews, setAdminReviews] = useState<V6AdminProfessionalReview[]>([]);
+  const [adminComplaints, setAdminComplaints] = useState<V6AdminComplaintReview[]>([]);
   const referralCode = `MANITO-${normalizeText(profile.full_name || profile.email || profile.id)
     .replace(/[^a-z0-9]+/g, '')
     .slice(0, 6)
@@ -5273,8 +5277,9 @@ function AccountPanel({
       getV6UserSecurityPreferences(profile.id),
       profile.role === 'admin' ? listV6AdminSettings() : Promise.resolve([]),
       profile.role === 'admin' ? listV6AdminProfessionalReviews() : Promise.resolve([]),
+      profile.role === 'admin' ? listV6AdminComplaintReviews() : Promise.resolve([]),
     ])
-      .then(([nextPayments, nextSecurityPreferences, nextSettings, nextReviews]) => {
+      .then(([nextPayments, nextSecurityPreferences, nextSettings, nextReviews, nextComplaints]) => {
         if (!alive) return;
         setPaymentProfiles(uniquePaymentProfiles(nextPayments));
         if (nextSecurityPreferences) {
@@ -5285,6 +5290,7 @@ function AccountPanel({
         }
         setAdminSettings(nextSettings);
         setAdminReviews(nextReviews);
+        setAdminComplaints(nextComplaints);
       })
       .catch(() => undefined);
     return () => {
@@ -5630,8 +5636,10 @@ function AccountPanel({
       {profile.role === 'admin' && (
         <AdminReviewWorkbench
           reviews={adminReviews}
+          complaints={adminComplaints}
           settings={adminSettings}
           setReviews={setAdminReviews}
+          setComplaints={setAdminComplaints}
           setNotice={setNotice}
         />
       )}
@@ -5654,25 +5662,38 @@ function AccountPanel({
 
 function AdminReviewWorkbench({
   reviews,
+  complaints,
   settings,
   setReviews,
+  setComplaints,
   setNotice,
 }: {
   reviews: V6AdminProfessionalReview[];
+  complaints: V6AdminComplaintReview[];
   settings: V6AdminSetting[];
   setReviews: (reviews: V6AdminProfessionalReview[]) => void;
+  setComplaints: (complaints: V6AdminComplaintReview[]) => void;
   setNotice: (message: string) => void;
 }) {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [complaintNotes, setComplaintNotes] = useState<Record<string, string>>({});
 
   const pendingCount = reviews.filter((review) =>
     ['submitted', 'in_review', 'observed'].includes(review.onboarding_status),
   ).length;
   const approvedCount = reviews.filter((review) => review.onboarding_status === 'approved').length;
+  const openComplaintCount = complaints.filter((complaint) =>
+    ['open', 'in_review'].includes(complaint.status),
+  ).length;
 
   async function refreshReviews() {
-    setReviews(await listV6AdminProfessionalReviews());
+    const [nextReviews, nextComplaints] = await Promise.all([
+      listV6AdminProfessionalReviews(),
+      listV6AdminComplaintReviews(),
+    ]);
+    setReviews(nextReviews);
+    setComplaints(nextComplaints);
   }
 
   async function reviewProfessional(review: V6AdminProfessionalReview, status: V6AdminReviewStatus) {
@@ -5730,6 +5751,24 @@ function AdminReviewWorkbench({
     window.open(signedUrl, '_blank', 'noopener,noreferrer');
   }
 
+  async function reviewComplaint(complaint: V6AdminComplaintReview, status: V6Complaint['status']) {
+    const key = `${complaint.id}:${status}`;
+    setBusyKey(key);
+    try {
+      await reviewV6OrderComplaint({
+        complaintId: complaint.id,
+        status,
+        resolutionNote: complaintNotes[complaint.id] || complaint.resolution_note,
+      });
+      await refreshReviews();
+      setNotice(adminComplaintResultLabel(status));
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : 'No se pudo resolver la garantía.');
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   return (
     <section className="v6-card v6-admin-workbench">
       <div className="v6-section-head">
@@ -5751,8 +5790,87 @@ function AdminReviewWorkbench({
           <strong>{approvedCount}</strong>
           <span>aprobadas</span>
         </article>
+        <article>
+          <strong>{openComplaintCount}</strong>
+          <span>garantías abiertas</span>
+        </article>
       </div>
 
+      <div className="v6-section-head compact">
+        <h3>Garantías y reclamos</h3>
+        <span>{complaints.length}</span>
+      </div>
+      <div className="v6-admin-review-list">
+        {complaints.map((complaint) => (
+          <article className="v6-admin-review-card" key={complaint.id}>
+            <div className="v6-section-head compact">
+              <h3>{complaint.service_name}</h3>
+              <span>{adminComplaintStatusLabel(complaint.status)}</span>
+            </div>
+            <p className="v6-muted">
+              {complaint.client_name} · {complaint.client_city || 'sin ciudad'} · profesional {complaint.professional_name || 'sin asignar'}
+            </p>
+            <div className="v6-admin-block">
+              <strong>{complaint.reason}</strong>
+              {complaint.detail && <p>{complaint.detail}</p>}
+              <small>
+                Pedido #{complaint.order_id.slice(0, 8).toUpperCase()} · {money(complaint.order_price)} · abierto {shortDate(complaint.created_at)}
+              </small>
+            </div>
+            {complaint.resolution_note && (
+              <p className="v6-note">Resolución: {complaint.resolution_note}</p>
+            )}
+            <label className="v6-field">
+              <span>Resolución / nota interna</span>
+              <textarea
+                value={complaintNotes[complaint.id] || ''}
+                onChange={(event) =>
+                  setComplaintNotes((current) => ({ ...current, [complaint.id]: event.target.value }))
+                }
+                placeholder="Ej: se acuerda nueva visita sin cargo..."
+              />
+            </label>
+            <div className="v6-actions-row compact">
+              <button
+                className="v6-secondary"
+                type="button"
+                disabled={busyKey === `${complaint.id}:in_review`}
+                onClick={() => void reviewComplaint(complaint, 'in_review')}
+              >
+                En revisión
+              </button>
+              <button
+                className="v6-primary"
+                type="button"
+                disabled={busyKey === `${complaint.id}:resolved`}
+                onClick={() => void reviewComplaint(complaint, 'resolved')}
+              >
+                Resolver
+              </button>
+              <button
+                className="v6-danger"
+                type="button"
+                disabled={busyKey === `${complaint.id}:rejected`}
+                onClick={() => void reviewComplaint(complaint, 'rejected')}
+              >
+                Rechazar
+              </button>
+            </div>
+          </article>
+        ))}
+        {!complaints.length && (
+          <div className="v6-empty">
+            <ShieldCheck size={24} aria-hidden="true" />
+            <strong>No hay garantías abiertas</strong>
+            <p>Los casos abiertos desde pedidos finalizados van a aparecer acá.</p>
+          </div>
+        )}
+      </div>
+
+      <div className="v6-section-head compact">
+        <h3>Altas profesionales</h3>
+        <span>{reviews.length}</span>
+      </div>
       <div className="v6-admin-review-list">
         {reviews.map((review) => (
           <article className="v6-admin-review-card" key={review.professional_id}>
@@ -5934,6 +6052,26 @@ function adminDocumentResultLabel(status: 'approved' | 'observed' | 'rejected') 
     approved: 'Documento aprobado.',
     observed: 'Documento observado.',
     rejected: 'Documento rechazado.',
+  };
+  return labels[status];
+}
+
+function adminComplaintStatusLabel(status: V6Complaint['status']) {
+  const labels: Record<V6Complaint['status'], string> = {
+    open: 'Abierta',
+    in_review: 'En revisión',
+    resolved: 'Resuelta',
+    rejected: 'Rechazada',
+  };
+  return labels[status] || status;
+}
+
+function adminComplaintResultLabel(status: V6Complaint['status']) {
+  const labels: Record<V6Complaint['status'], string> = {
+    open: 'Garantía abierta.',
+    in_review: 'Garantía marcada en revisión.',
+    resolved: 'Garantía resuelta.',
+    rejected: 'Garantía rechazada.',
   };
   return labels[status];
 }

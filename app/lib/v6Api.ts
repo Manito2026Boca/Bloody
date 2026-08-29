@@ -3,6 +3,7 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getV6Supabase } from './v6Supabase';
 import type {
+  V6AdminComplaintReview,
   V6AdminProfessionalReview,
   V6AdminReviewStatus,
   V6AdminSetting,
@@ -791,16 +792,12 @@ export async function addV6Complaint(input: {
   reason: string;
   detail: string;
 }) {
-  const { data, error } = await getV6Supabase()
-    .from('complaints')
-    .insert({
-      order_id: input.orderId,
-      opened_by: input.openedBy,
-      reason: input.reason,
-      detail: input.detail || null,
-    })
-    .select('*')
-    .single();
+  void input.openedBy;
+  const { data, error } = await getV6Supabase().rpc('open_order_complaint', {
+    p_order_id: input.orderId,
+    p_reason: input.reason,
+    p_detail: input.detail,
+  });
   fail(error);
   return data as V6Complaint;
 }
@@ -1107,6 +1104,27 @@ export async function reviewV6ProfessionalDocument(input: {
   });
   fail(error);
   return data as V6ProfessionalDocument;
+}
+
+export async function listV6AdminComplaintReviews() {
+  const { data, error } = await getV6Supabase().rpc('list_admin_complaint_reviews');
+  if (isMissingV5Table(error)) return [];
+  fail(error);
+  return (data || []) as V6AdminComplaintReview[];
+}
+
+export async function reviewV6OrderComplaint(input: {
+  complaintId: string;
+  status: V6Complaint['status'];
+  resolutionNote?: string | null;
+}) {
+  const { data, error } = await getV6Supabase().rpc('review_order_complaint', {
+    p_complaint_id: input.complaintId,
+    p_status: input.status,
+    p_resolution_note: input.resolutionNote || null,
+  });
+  fail(error);
+  return data as V6Complaint;
 }
 
 export function subscribeV6Orders(onChange: () => void) {
