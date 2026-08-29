@@ -107,6 +107,10 @@ import {
   visibleClientPin,
 } from '../lib/orderFlow';
 import {
+  missingBlockingRequirements,
+  professionalOnboardingRequirements,
+} from '../lib/professionalOnboarding';
+import {
   clearStoredConfig,
   getV6Supabase,
   isV6SupabaseConfigured,
@@ -4329,6 +4333,60 @@ function ProfilePanel({
       ),
     [documents],
   );
+  const completedDocuments = requiredDocuments.filter((item) =>
+    uploadedDocumentKinds.has(item.kind),
+  ).length;
+  const hasPayoutDetails = Boolean(
+    payoutAlias.trim() || payoutCbu.trim() || walletPaymentLink.trim(),
+  );
+  const onboardingRequirements = useMemo(
+    () =>
+      professionalOnboardingRequirements({
+        servicesCount: proServices.length,
+        specialtiesCount: proSpecialties.length,
+        completedDocumentsCount: completedDocuments,
+        requiredDocumentsCount: requiredDocuments.length,
+        fullName,
+        phone,
+        city,
+        headline,
+        bio,
+        yearsExperience,
+        workZone,
+        workRadius,
+        workDaysCount: workDays.length,
+        workStart,
+        workEnd,
+        hasPayoutDetails,
+        portfolioCount: portfolio.length,
+      }),
+    [
+      bio,
+      city,
+      completedDocuments,
+      fullName,
+      hasPayoutDetails,
+      headline,
+      phone,
+      portfolio.length,
+      proServices.length,
+      proSpecialties.length,
+      workDays.length,
+      workEnd,
+      workRadius,
+      workStart,
+      workZone,
+      yearsExperience,
+    ],
+  );
+  const missingRequirements = useMemo(
+    () => missingBlockingRequirements(onboardingRequirements),
+    [onboardingRequirements],
+  );
+  const completedRequirementCount = onboardingRequirements.filter((requirement) => requirement.complete).length;
+  const professionalProgress = onboardingRequirements.length
+    ? Math.round((completedRequirementCount / onboardingRequirements.length) * 100)
+    : 0;
 
   function shortEvidencePath(path: string | null) {
     if (!path) return 'Sin evidencia';
@@ -4563,17 +4621,47 @@ function ProfilePanel({
   }
 
   async function submitOnboarding() {
-    const missingDocuments = requiredDocuments.filter((item) => !uploadedDocumentKinds.has(item.kind));
-    if (missingDocuments.length) {
-      setError(`Faltan documentos: ${missingDocuments.map((item) => item.label).join(', ')}.`);
-      return;
-    }
-    if (!proServices.length) {
-      setError('Elegí al menos un servicio para que el alta tenga sentido.');
+    if (missingRequirements.length) {
+      setError(`Para enviar faltan: ${missingRequirements.map((item) => item.label).join(', ')}.`);
       return;
     }
     setSubmittingOnboarding(true);
     try {
+      const selectedIds = proServices.map((item) => item.service_id);
+      const changedProfile = await updateV6Profile(profile.id, {
+        full_name: fullName.trim(),
+        phone: phone.trim() || null,
+        city: city.trim() || null,
+      });
+      const nextProfile = await upsertV6ProfessionalProfile({
+        professionalId: profile.id,
+        headline: headline.trim(),
+        bio: bio.trim(),
+        yearsExperience: Number(yearsExperience) || 0,
+        responseMinutes: professionalProfile?.response_minutes || 35,
+        insuranceLabel: insuranceLabel.trim(),
+        workCity: workZone.trim(),
+        serviceRadiusKm: Number(workRadius) || 8,
+        workDays,
+        workStartsAt: workStart,
+        workEndsAt: workEnd,
+      });
+      await upsertV6ProfessionalPayoutDetails({
+        professionalId: profile.id,
+        payoutAlias: payoutAlias.trim(),
+        payoutCbu: payoutCbu.trim(),
+        walletPaymentLink: walletPaymentLink.trim(),
+      });
+      setProfile(changedProfile);
+      setProfessionalProfile(nextProfile);
+      setProServices(await saveV6ProfessionalServices(profile.id, selectedIds, services, serviceRatesFor(selectedIds)));
+      setProSpecialties(await saveV6ProfessionalSpecialties(
+        profile.id,
+        proSpecialties
+          .filter((item) => selectedIds.includes(item.service_id))
+          .map((item) => item.specialty_id),
+        specialties,
+      ));
       setOnboarding(await upsertV6ProfessionalOnboarding({
         professionalId: profile.id,
         status: 'submitted',
@@ -4623,11 +4711,6 @@ function ProfilePanel({
     }
   }
 
-  const professionalProgress = Math.round((professionalStep / professionalSteps.length) * 100);
-  const completedDocuments = requiredDocuments.filter((item) =>
-    uploadedDocumentKinds.has(item.kind),
-  ).length;
-
   return (
     <>
       <section className="v6-card">
@@ -4656,9 +4739,16 @@ function ProfilePanel({
                 <BadgeCheck size={17} aria-hidden="true" /> Checklist de alta
               </span>
               <small>
-                {proServices.length} rubros · {proSpecialties.length} especialidades · {completedDocuments}/{requiredDocuments.length} documentos · paso interno {onboarding?.current_step || 1}/16
+                {completedRequirementCount}/{onboardingRequirements.length} requisitos · {completedDocuments}/{requiredDocuments.length} documentos · paso interno {onboarding?.current_step || 1}/16
               </small>
             </div>
+            {missingRequirements.length > 0 && (
+              <div className="v6-requirement-list">
+                {missingRequirements.slice(0, 3).map((requirement) => (
+                  <span key={requirement.id}>{requirement.label}</span>
+                ))}
+              </div>
+            )}
             <div className="v6-wizard-actions">
               <button
                 className="v6-secondary"
@@ -4681,7 +4771,7 @@ function ProfilePanel({
                   className="v6-primary"
                   type="button"
                   onClick={submitOnboarding}
-                  disabled={submittingOnboarding}
+                  disabled={submittingOnboarding || missingRequirements.length > 0}
                 >
                   {submittingOnboarding ? 'Enviando...' : 'Enviar a verificación'}
                 </button>
@@ -5107,23 +5197,25 @@ function ProfilePanel({
               </small>
             </div>
             <div className="v6-step-grid">
-              <span className={proServices.length ? 'done' : ''}>Servicios cargados</span>
-              <span className={selectedSpecialtyNames.length ? 'done' : ''}>
-                {selectedSpecialtyNames.length ? `${selectedSpecialtyNames.length} especialidades` : 'Especialidades opcionales'}
-              </span>
-              <span className={professionalProfile ? 'done' : ''}>Perfil público guardado</span>
-              <span className={phone && city ? 'done' : ''}>Datos personales</span>
-              <span className={completedDocuments === requiredDocuments.length ? 'done' : ''}>Documentos completos</span>
-              <span className={portfolio.length ? 'done' : ''}>Portfolio</span>
-              <span className={workZone && workDays.length ? 'done' : ''}>Zona y horarios</span>
-              <span className={payoutAlias || payoutCbu || walletPaymentLink ? 'done' : ''}>Datos de cobro</span>
+              {onboardingRequirements.map((requirement) => (
+                <span className={requirement.complete ? 'done' : ''} key={requirement.id}>
+                  {requirement.label}{!requirement.blocking ? ' · recomendado' : ''}
+                </span>
+              ))}
               <span className={paymentAccount?.can_receive_online_payments ? 'done' : ''}>Mercado Pago preparado</span>
             </div>
+            {missingRequirements.length > 0 && (
+              <div className="v6-requirement-list">
+                {missingRequirements.map((requirement) => (
+                  <span key={requirement.id}>{requirement.label}</span>
+                ))}
+              </div>
+            )}
             <button
               className="v6-primary"
               type="button"
               onClick={submitOnboarding}
-              disabled={submittingOnboarding}
+              disabled={submittingOnboarding || missingRequirements.length > 0}
             >
               {submittingOnboarding ? 'Enviando...' : 'Enviar alta a verificación'}
             </button>
