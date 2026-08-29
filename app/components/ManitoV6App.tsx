@@ -152,6 +152,7 @@ import type {
   V6UserSecurityPreferences,
 } from '../lib/v6Types';
 import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
+import { friendlyAuthError } from '../lib/authMessages';
 
 type Tab = 'home' | 'search' | 'orders' | 'favorites' | 'profile' | 'account';
 type AuthMode = 'login' | 'signup' | 'reset';
@@ -1035,6 +1036,35 @@ function getAuthCallbackUrl() {
   return `${getAuthRedirectUrl().replace(/\/$/, '')}/auth/callback`;
 }
 
+function profileNameFromSession(user: Session['user']) {
+  const metadata = user.user_metadata as Record<string, unknown>;
+  const metadataName = metadata.full_name;
+  if (typeof metadataName === 'string' && metadataName.trim()) {
+    return metadataName.trim();
+  }
+  const emailName = user.email?.split('@')[0]?.replace(/[._-]+/g, ' ').trim();
+  return emailName || 'Usuario MANITO';
+}
+
+async function getOrRecoverV6Profile(user: Session['user']) {
+  try {
+    const existingProfile = await getV6Profile(user.id);
+    if (existingProfile?.id) {
+      return existingProfile;
+    }
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : String(caught);
+    if (!message.toLowerCase().includes('no existe tu perfil manito')) {
+      throw caught;
+    }
+  }
+
+  return completeV6Profile({
+    fullName: profileNameFromSession(user),
+    role: 'client',
+  });
+}
+
 function loadSavedAddresses(profileId: string): SavedAddress[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -1197,9 +1227,10 @@ export default function ManitoV6App() {
   const [clientProblemQuery, setClientProblemQuery] = useState('');
   const lastRealtimeNoticeAt = useRef(0);
 
-  const loadData = useCallback(async (userId: string) => {
+  const loadData = useCallback(async (user: Session['user']) => {
     setProfileLoading(true);
     try {
+      const userId = user.id;
       const [
         nextProfile,
         nextServices,
@@ -1210,7 +1241,7 @@ export default function ManitoV6App() {
         nextProSpecialties,
         nextPublicProfessionals,
       ] = await Promise.all([
-        getV6Profile(userId),
+        getOrRecoverV6Profile(user),
         listV6Services(),
         listV6Specialties(),
         listV6Orders(),
@@ -1271,7 +1302,7 @@ export default function ManitoV6App() {
             await completeV6Profile({ fullName: parsed.fullName, role: parsed.role || 'client' });
             window.localStorage.removeItem(pendingProfileKey(email));
           }
-          await loadData(data.session.user.id);
+          await loadData(data.session.user);
         }
       })
       .catch((caught) => {
@@ -1285,7 +1316,7 @@ export default function ManitoV6App() {
       (_event, nextSession) => {
         setSession(nextSession);
         if (nextSession?.user.id) {
-          void loadData(nextSession.user.id).catch((caught) =>
+          void loadData(nextSession.user).catch((caught) =>
             setError(friendlySessionError(caught, 'No se pudo cargar tu perfil.')),
           );
         } else {
@@ -1474,8 +1505,16 @@ export default function ManitoV6App() {
     return (
       <main className="v6-app v6-center">
         <section className="v6-card">
+          <Image
+            className="v6-logo-image v6-logo-image-compact"
+            src="/logo-main.jpg"
+            alt="MANITO - Tu ayuda de confianza"
+            width={560}
+            height={584}
+            priority
+          />
           <p className="v6-live">
-            <CircleDot size={14} aria-hidden="true" /> MANITO V6
+            <CircleDot size={14} aria-hidden="true" /> Backend conectado
           </p>
           <h1>{profileLoading ? 'Cargando perfil...' : 'Cargando backend...'}</h1>
         </section>
@@ -1517,9 +1556,14 @@ export default function ManitoV6App() {
     <main className="v6-app">
       <header className="v6-top">
         <div>
-          <strong>
-            MANI<span>TO</span>
-          </strong>
+          <Image
+            className="v6-header-logo"
+            src="/logo-main.jpg"
+            alt="MANITO - Tu ayuda de confianza"
+            width={560}
+            height={584}
+            priority
+          />
           <p className="v6-kicker">Tu ubicación</p>
           <button
             className="v6-location"
@@ -1758,8 +1802,16 @@ function SetupScreen({ onConnected }: { onConnected: () => void }) {
     <main className="v6-app v6-center">
       <section className="v6-card">
         <p className="v6-live">
-          <CircleDot size={14} aria-hidden="true" /> V6 backend real
+          <CircleDot size={14} aria-hidden="true" /> Backend real
         </p>
+        <Image
+          className="v6-logo-image v6-logo-image-compact"
+          src="/logo-main.jpg"
+          alt="MANITO - Tu ayuda de confianza"
+          width={560}
+          height={584}
+          priority
+        />
         <h1>Conectá MANITO con Supabase.</h1>
         <p className="v6-muted">
           Usá la URL del proyecto y la publishable key. La seguridad queda en
@@ -1788,11 +1840,43 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [resendingConfirmation, setResendingConfirmation] = useState(false);
+
+  async function resendConfirmation() {
+    setError(null);
+    setLocalNotice(null);
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setError('Escribí tu email para reenviar la confirmación.');
+      return;
+    }
+
+    setResendingConfirmation(true);
+    try {
+      const supabase = getV6Supabase();
+      const { error: resendError } = await supabase.auth.resend({
+        type: 'signup',
+        email: cleanEmail,
+        options: {
+          emailRedirectTo: getAuthCallbackUrl(),
+        },
+      });
+      if (resendError) throw resendError;
+      setLocalNotice('Si tu cuenta está pendiente de confirmación, te enviamos otro correo.');
+      setNotice('Revisá tu email para confirmar el acceso.');
+    } catch (caught) {
+      setError(friendlyAuthError(caught, 'No pudimos enviar el correo de confirmación. Probá nuevamente en unos minutos.'));
+    } finally {
+      setResendingConfirmation(false);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setLocalNotice(null);
+    setSubmitting(true);
     try {
       const supabase = getV6Supabase();
       const cleanEmail = email.trim().toLowerCase();
@@ -1841,16 +1925,23 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         setNotice('Cuenta creada. Revisá tu email para confirmar el acceso.');
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'No se pudo ingresar.');
+      setError(friendlyAuthError(caught, 'No se pudo ingresar.'));
+    } finally {
+      setSubmitting(false);
     }
   }
 
   return (
     <main className="v6-app v6-center">
       <section className="v6-card">
-        <p className="v6-logo">
-          MANI<span>TO</span>
-        </p>
+        <Image
+          className="v6-logo-image"
+          src="/logo-main.jpg"
+          alt="MANITO - Tu ayuda de confianza"
+          width={560}
+          height={584}
+          priority
+        />
         <h1>
           {mode === 'login'
             ? 'Entra a MANITO.'
@@ -1906,9 +1997,25 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
           )}
           {error && <p className="v6-alert">{error}</p>}
           {localNotice && <p className="v6-note">{localNotice}</p>}
-          <button className="v6-primary" type="submit">
-            {mode === 'login' ? 'Ingresar' : mode === 'reset' ? 'Mandar link' : 'Crear cuenta'}
+          <button className="v6-primary" type="submit" disabled={submitting}>
+            {submitting
+              ? 'Procesando...'
+              : mode === 'login'
+                ? 'Ingresar'
+                : mode === 'reset'
+                  ? 'Mandar link'
+                  : 'Crear cuenta'}
           </button>
+          {mode !== 'reset' && (
+            <button
+              className="v6-secondary"
+              type="button"
+              onClick={resendConfirmation}
+              disabled={resendingConfirmation}
+            >
+              {resendingConfirmation ? 'Enviando...' : 'Reenviar correo de confirmación'}
+            </button>
+          )}
           {mode === 'login' && (
             <button className="v6-text-button" type="button" onClick={() => setMode('reset')}>
               ¿No te acordás la contraseña?

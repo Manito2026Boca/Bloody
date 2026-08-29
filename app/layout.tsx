@@ -2,14 +2,16 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://bloody-eta.vercel.app'),
   title: 'MANITO',
   applicationName: 'MANITO',
   description:
-    'Contratá, seguí y gestioná servicios para el hogar en Argentina.',
+    'Tu ayuda de confianza para contratar, seguir y gestionar servicios en Argentina.',
   manifest: '/manifest.webmanifest',
   icons: {
     icon: [
-      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.png', sizes: '64x64', type: 'image/png' },
+      { url: '/logo-icon.png', sizes: '512x512', type: 'image/png' },
       { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
       { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
     ],
@@ -23,8 +25,9 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'MANITO',
     description:
-      'El flujo tipo delivery para resolver servicios del hogar con profesionales verificados.',
+      'Tu ayuda de confianza para resolver servicios con profesionales verificados.',
     type: 'website',
+    images: [{ url: '/logo-main.jpg', width: 560, height: 584, alt: 'MANITO - Tu ayuda de confianza' }],
   },
 };
 

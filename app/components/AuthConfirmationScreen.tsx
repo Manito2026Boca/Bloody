@@ -1,6 +1,7 @@
 'use client';
 
 import { CheckCircle2, Loader2, MailCheck, RotateCcw } from 'lucide-react';
+import Image from 'next/image';
 import type { FormEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { completeV6Profile } from '../lib/v6Api';
@@ -223,9 +224,14 @@ export default function AuthConfirmationScreen({
   return (
     <main className="v6-app v6-center">
       <section className="v6-card v6-confirm-card">
-        <p className="v6-logo">
-          MANI<span>TO</span>
-        </p>
+        <Image
+          className="v6-logo-image v6-logo-image-center"
+          src="/logo-main.jpg"
+          alt="MANITO - Tu ayuda de confianza"
+          width={560}
+          height={584}
+          priority
+        />
         <div className="v6-confirm-icon" aria-hidden="true">
           {state === 'loading' ? (
             <Loader2 className="v6-spin" size={30} />

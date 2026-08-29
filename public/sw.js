@@ -1,8 +1,10 @@
-const CACHE_NAME = 'manito-shell-v3';
+const CACHE_NAME = 'manito-shell-v4';
 const CORE_ASSETS = [
   '/',
   '/manifest.webmanifest',
-  '/favicon.svg',
+  '/favicon.png',
+  '/logo-main.jpg',
+  '/logo-icon.png',
   '/icon-192.png',
   '/icon-512.png',
 ];

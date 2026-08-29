@@ -2,7 +2,7 @@
   "id": "/",
   "name": "MANITO",
   "short_name": "MANITO",
-  "description": "Contratación y seguimiento de servicios del hogar en Argentina.",
+  "description": "Tu ayuda de confianza para contratar, seguir y gestionar servicios en Argentina.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
@@ -13,6 +13,12 @@
   "categories": ["business", "lifestyle", "utilities"],
   "prefer_related_applications": false,
   "icons": [
+    {
+      "src": "/logo-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/icon-192.png",
       "sizes": "192x192",
@@ -26,9 +32,9 @@
       "purpose": "any maskable"
     },
     {
-      "src": "/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/favicon.png",
+      "sizes": "64x64",
+      "type": "image/png",
       "purpose": "any"
     }
   ]

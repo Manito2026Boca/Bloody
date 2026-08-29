@@ -576,6 +576,16 @@ a {
   width: min(100%, 460px);
 }
 
+.auth-logo {
+  display: block;
+  width: min(100%, 210px);
+  height: auto;
+  margin: 0 0 14px;
+  border-radius: 8px;
+  background: white;
+  object-fit: contain;
+}
+
 .auth-mark {
   width: 62px;
   height: 62px;
@@ -680,6 +690,34 @@ a {
 .v6-top strong span,
 .v6-logo span {
   color: var(--orange-600);
+}
+
+.v6-header-logo,
+.v6-logo-image {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  border-radius: 8px;
+  background: white;
+  object-fit: contain;
+}
+
+.v6-header-logo {
+  width: 142px;
+}
+
+.v6-logo-image {
+  width: min(100%, 250px);
+  margin: 0 0 14px;
+}
+
+.v6-logo-image-center {
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.v6-logo-image-compact {
+  width: 178px;
 }
 
 .v6-top p,
