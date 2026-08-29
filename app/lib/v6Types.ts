@@ -114,8 +114,8 @@ export type V6Order = {
   match_reasons?: string[] | null;
   distance_km?: number | null;
   service?: V6Service | null;
-  client?: Pick<V6Profile, 'id' | 'full_name' | 'phone' | 'city'> | null;
-  professional?: Pick<V6Profile, 'id' | 'full_name' | 'phone' | 'city'> | null;
+  client?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & { phone?: string | null } | null;
+  professional?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & { phone?: string | null } | null;
 };
 
 export type V6ClientAddress = {
@@ -288,7 +288,7 @@ export type V6OrderProposal = {
   status: 'sent' | 'accepted' | 'rejected' | 'expired';
   created_at: string;
   updated_at: string;
-  professional?: Pick<V6Profile, 'id' | 'full_name' | 'phone' | 'city'> | null;
+  professional?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & { phone?: string | null } | null;
 };
 
 export type V6OrderExtra = {

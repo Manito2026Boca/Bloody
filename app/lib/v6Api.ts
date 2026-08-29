@@ -60,6 +60,13 @@ function safeStorageFileName(name: string) {
 }
 
 export async function getV6Profile(userId: string) {
+  void userId;
+  const { data: rpcData, error: rpcError } = await getV6Supabase().rpc('get_my_profile');
+  if (!isMissingV5Table(rpcError)) {
+    fail(rpcError);
+    return rpcData as V6Profile;
+  }
+
   const { data, error } = await getV6Supabase()
     .from('profiles')
     .select('*')
@@ -90,25 +97,47 @@ export async function updateV6Profile(
   patch: Pick<V6Profile, 'full_name'> &
     Partial<Pick<V6Profile, 'phone' | 'city' | 'lat' | 'lng'>>,
 ) {
-  const { data, error } = await getV6Supabase()
+  const current = await getV6Profile(userId);
+  const { data, error } = await getV6Supabase().rpc('update_my_profile', {
+    p_full_name: patch.full_name,
+    p_phone: patch.phone === undefined ? current.phone : patch.phone,
+    p_city: patch.city === undefined ? current.city : patch.city,
+    p_lat: patch.lat === undefined ? current.lat : patch.lat,
+    p_lng: patch.lng === undefined ? current.lng : patch.lng,
+  });
+  if (!isMissingV5Table(error)) {
+    fail(error);
+    return data as V6Profile;
+  }
+
+  const { data: fallbackData, error: fallbackError } = await getV6Supabase()
     .from('profiles')
     .update(patch)
     .eq('id', userId)
     .select('*')
     .single();
-  fail(error);
-  return data as V6Profile;
+  fail(fallbackError);
+  return fallbackData as V6Profile;
 }
 
 export async function setV6Availability(userId: string, isAvailable: boolean) {
-  const { data, error } = await getV6Supabase()
+  void userId;
+  const { data, error } = await getV6Supabase().rpc('set_my_availability', {
+    p_is_available: isAvailable,
+  });
+  if (!isMissingV5Table(error)) {
+    fail(error);
+    return data as V6Profile;
+  }
+
+  const { data: fallbackData, error: fallbackError } = await getV6Supabase()
     .from('profiles')
     .update({ is_available: isAvailable })
     .eq('id', userId)
     .select('*')
     .single();
-  fail(error);
-  return data as V6Profile;
+  fail(fallbackError);
+  return fallbackData as V6Profile;
 }
 
 export async function listV6Services() {
@@ -419,7 +448,7 @@ export async function listV6Orders() {
   const { data, error } = await supabase
     .from('orders')
     .select(
-      '*,service:services(id,slug,name,emoji,base_price,active,allow_immediate,allow_scheduled,allow_quote,supports_recurring),client:profiles!orders_client_id_fkey(id,full_name,phone,city),professional:profiles!orders_professional_id_fkey(id,full_name,phone,city)',
+      '*,service:services(id,slug,name,emoji,base_price,active,allow_immediate,allow_scheduled,allow_quote,supports_recurring),client:profiles!orders_client_id_fkey(id,full_name,city),professional:profiles!orders_professional_id_fkey(id,full_name,city)',
     )
     .order('created_at', { ascending: false })
     .limit(100);
@@ -553,7 +582,7 @@ export async function createV6RecurringServicePlan(input: {
 export async function listV6OrderProposals(orderId: string) {
   const { data, error } = await getV6Supabase()
     .from('order_proposals')
-    .select('*,professional:profiles!order_proposals_professional_id_fkey(id,full_name,phone,city)')
+    .select('*,professional:profiles!order_proposals_professional_id_fkey(id,full_name,city)')
     .eq('order_id', orderId)
     .order('created_at', { ascending: false });
   if (isMissingV5Table(error)) return [];
