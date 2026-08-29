@@ -153,6 +153,7 @@ import type {
 } from '../lib/v6Types';
 import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 import { friendlyAuthError } from '../lib/authMessages';
+import { isRecoverableMissingProfileError } from '../lib/profileRecovery';
 
 type Tab = 'home' | 'search' | 'orders' | 'favorites' | 'profile' | 'account';
 type AuthMode = 'login' | 'signup' | 'reset';
@@ -1053,8 +1054,7 @@ async function getOrRecoverV6Profile(user: Session['user']) {
       return existingProfile;
     }
   } catch (caught) {
-    const message = caught instanceof Error ? caught.message : String(caught);
-    if (!message.toLowerCase().includes('no existe tu perfil manito')) {
+    if (!isRecoverableMissingProfileError(caught)) {
       throw caught;
     }
   }
@@ -1231,8 +1231,11 @@ export default function ManitoV6App() {
     setProfileLoading(true);
     try {
       const userId = user.id;
+      const nextProfile = await getOrRecoverV6Profile(user);
+      setError(null);
+      setProfile(nextProfile);
+
       const [
-        nextProfile,
         nextServices,
         nextSpecialties,
         nextOrders,
@@ -1240,8 +1243,7 @@ export default function ManitoV6App() {
         nextProServices,
         nextProSpecialties,
         nextPublicProfessionals,
-      ] = await Promise.all([
-        getOrRecoverV6Profile(user),
+      ] = await Promise.allSettled([
         listV6Services(),
         listV6Specialties(),
         listV6Orders(),
@@ -1250,15 +1252,30 @@ export default function ManitoV6App() {
         listV6ProfessionalSpecialties(userId),
         listV6PublicProfessionals(),
       ]);
-      setError(null);
-      setProfile(nextProfile);
-      setServices(nextServices);
-      setSpecialties(nextSpecialties);
-      setOrders(nextOrders);
-      setNotifications(nextNotifications);
-      setProServices(nextProServices);
-      setProSpecialties(nextProSpecialties);
-      setPublicProfessionals(nextPublicProfessionals);
+
+      if (nextServices.status === 'fulfilled') setServices(nextServices.value);
+      if (nextSpecialties.status === 'fulfilled') setSpecialties(nextSpecialties.value);
+      if (nextOrders.status === 'fulfilled') setOrders(nextOrders.value);
+      if (nextNotifications.status === 'fulfilled') setNotifications(nextNotifications.value);
+      if (nextProServices.status === 'fulfilled') setProServices(nextProServices.value);
+      if (nextProSpecialties.status === 'fulfilled') setProSpecialties(nextProSpecialties.value);
+      if (nextPublicProfessionals.status === 'fulfilled') {
+        setPublicProfessionals(nextPublicProfessionals.value);
+      }
+
+      const secondaryLoadFailed = [
+        nextServices,
+        nextSpecialties,
+        nextOrders,
+        nextNotifications,
+        nextProServices,
+        nextProSpecialties,
+        nextPublicProfessionals,
+      ].some((result) => result.status === 'rejected');
+
+      if (secondaryLoadFailed) {
+        setNotice('Entraste correctamente. Algunos datos pueden tardar unos segundos en actualizar.');
+      }
     } finally {
       setProfileLoading(false);
     }
