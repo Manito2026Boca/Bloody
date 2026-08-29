@@ -47,7 +47,7 @@ export function canProfessionalAdvanceOrder(order: V6Order, profileId: string) {
 
 export function visibleClientPin(order: Pick<V6Order, 'status' | 'start_pin' | 'end_pin'>, role: V6Role) {
   if (role !== 'client') return null;
-  if (['accepted', 'en_camino', 'en_sitio'].includes(order.status)) {
+  if (order.status === 'en_sitio') {
     return { label: 'PIN inicio', value: order.start_pin || 'pendiente' };
   }
   if (order.status === 'trabajando') {

@@ -32,7 +32,9 @@ describe('orderFlow', () => {
   });
 
   it('only reveals the correct PIN to the client at the correct stage', () => {
-    expect(visibleClientPin(order('accepted'), 'client')).toEqual({
+    expect(visibleClientPin(order('accepted'), 'client')).toBeNull();
+    expect(visibleClientPin(order('en_camino'), 'client')).toBeNull();
+    expect(visibleClientPin(order('en_sitio'), 'client')).toEqual({
       label: 'PIN inicio',
       value: '1234',
     });

@@ -60,6 +60,74 @@ function safeStorageFileName(name: string) {
   return cleaned || 'archivo';
 }
 
+const safeOrderColumns = [
+  'id',
+  'client_id',
+  'professional_id',
+  'service_id',
+  'description',
+  'address',
+  'mode',
+  'scheduled_at',
+  'status',
+  'price',
+  'client_lat',
+  'client_lng',
+  'created_at',
+  'updated_at',
+  'accepted_at',
+  'completed_at',
+  'assignment_mode',
+  'preferred_professional_id',
+  'payment_method',
+  'guarantee_days',
+  'eta_minutes',
+  'payment_status',
+  'online_payment_required',
+  'payment_required_at',
+  'paid_at',
+].join(',');
+
+const safeOrderSelect = `${safeOrderColumns},service:services(id,slug,name,emoji,base_price,active,allow_immediate,allow_scheduled,allow_quote,supports_recurring),client:profiles!orders_client_id_fkey(id,full_name,city),professional:profiles!orders_professional_id_fkey(id,full_name,city)`;
+
+type V6VisibleOrderPin = {
+  order_id: string;
+  pin_stage: 'start' | 'end';
+  pin_value: string;
+};
+
+function orderCanHaveVisibleClientPin(order: Pick<V6Order, 'status'>) {
+  return order.status === 'en_sitio' || order.status === 'trabajando';
+}
+
+async function attachVisibleOrderPins(orders: V6Order[]) {
+  const pinCandidates = orders.filter(orderCanHaveVisibleClientPin);
+  if (!pinCandidates.length) return orders;
+
+  const pinResults = await Promise.all(
+    pinCandidates.map(async (order) => {
+      const { data, error } = await getV6Supabase().rpc('get_order_pin', {
+        p_order_id: order.id,
+      });
+      if (isMissingV5Table(error)) return null;
+      fail(error);
+      return ((data || []) as V6VisibleOrderPin[])[0] || null;
+    }),
+  );
+
+  const pinsByOrderId = new Map<string, V6VisibleOrderPin>();
+  for (const pin of pinResults) {
+    if (pin?.order_id && pin.pin_value) pinsByOrderId.set(pin.order_id, pin);
+  }
+
+  return orders.map((order) => {
+    const pin = pinsByOrderId.get(order.id);
+    if (!pin) return order;
+    if (pin.pin_stage === 'start') return { ...order, start_pin: pin.pin_value, end_pin: null };
+    return { ...order, start_pin: null, end_pin: pin.pin_value };
+  });
+}
+
 export async function getV6Profile(userId: string) {
   void userId;
   const { data: rpcData, error: rpcError } = await getV6Supabase().rpc('get_my_profile');
@@ -448,14 +516,12 @@ export async function listV6Orders() {
   const supabase = getV6Supabase();
   const { data, error } = await supabase
     .from('orders')
-    .select(
-      '*,service:services(id,slug,name,emoji,base_price,active,allow_immediate,allow_scheduled,allow_quote,supports_recurring),client:profiles!orders_client_id_fkey(id,full_name,city),professional:profiles!orders_professional_id_fkey(id,full_name,city)',
-    )
+    .select(safeOrderSelect)
     .order('created_at', { ascending: false })
     .limit(100);
   fail(error);
 
-  const ownOrders = (data || []) as V6Order[];
+  const ownOrders = await attachVisibleOrderPins((data || []) as unknown as V6Order[]);
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) return ownOrders;
@@ -530,11 +596,11 @@ export async function createV6Order(input: {
       client_lat: input.lat,
       client_lng: input.lng,
     })
-    .select('*')
+    .select(safeOrderColumns)
     .single();
   if (!isMissingV5Table(error)) {
     fail(error);
-    return data as V6Order;
+    return data as unknown as V6Order;
   }
 
   const { data: legacyData, error: legacyError } = await supabase
@@ -551,10 +617,10 @@ export async function createV6Order(input: {
       client_lat: input.lat,
       client_lng: input.lng,
     })
-    .select('*')
+    .select(safeOrderColumns)
     .single();
   fail(legacyError);
-  return legacyData as V6Order;
+  return legacyData as unknown as V6Order;
 }
 
 export async function createV6RecurringServicePlan(input: {

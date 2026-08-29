@@ -4245,7 +4245,7 @@ function OrderCard({
             </span>
             <span>
               <b>PIN final</b>
-              {order.end_pin || 'Registrado'}
+              Validado
             </span>
           </div>
           {complaints.length > 0 && (
