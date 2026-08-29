@@ -108,6 +108,7 @@ import {
   orderStatusFlow,
   visibleClientPin,
 } from '../lib/orderFlow';
+import { paymentCapabilities, type ManitoPaymentMethod } from '../lib/paymentCapabilities';
 import {
   missingBlockingRequirements,
   professionalOnboardingRequirements,
@@ -155,7 +156,7 @@ import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 type Tab = 'home' | 'search' | 'orders' | 'favorites' | 'profile' | 'account';
 type AuthMode = 'login' | 'signup' | 'reset';
 type AssignmentMode = 'auto' | 'manual';
-type PaymentMethod = 'card' | 'wallet' | 'cash';
+type PaymentMethod = ManitoPaymentMethod;
 type AppMode = 'client' | 'professional';
 type RecurrenceFrequency = 'weekly' | 'biweekly' | 'monthly';
 type ProfessionalOrderMatch = {
@@ -204,11 +205,15 @@ const statusFlow = orderStatusFlow;
 const deployedAppUrl =
   'https://bloody-eta.vercel.app';
 const onlineCardEnabled = false;
-const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: ReactNode }> = [
-  { id: 'card', label: 'Tarjeta', icon: <CreditCard size={17} aria-hidden="true" /> },
-  { id: 'wallet', label: 'Cuenta DNI / billetera', icon: <Wallet size={17} aria-hidden="true" /> },
-  { id: 'cash', label: 'Efectivo', icon: <Banknote size={17} aria-hidden="true" /> },
-];
+const paymentOptionIcons: Record<PaymentMethod, ReactNode> = {
+  card: <CreditCard size={17} aria-hidden="true" />,
+  wallet: <Wallet size={17} aria-hidden="true" />,
+  cash: <Banknote size={17} aria-hidden="true" />,
+};
+const paymentOptions = paymentCapabilities({ onlineCardEnabled }).map((option) => ({
+  ...option,
+  icon: paymentOptionIcons[option.id],
+}));
 const contractModeOptions: Array<{ id: V6Mode; title: string; body: string; icon: ReactNode }> = [
   { id: 'immediate', title: 'Ahora', body: 'Lo antes posible', icon: <PlugZap size={20} aria-hidden="true" /> },
   { id: 'scheduled', title: 'Programar', body: 'Día y horario', icon: <Clock size={20} aria-hidden="true" /> },
@@ -2857,11 +2862,11 @@ function ClientHome({
                       type="button"
                       className="v6-choice"
                       aria-pressed={paymentMethod === option.id}
-                      disabled={option.id === 'card' && !onlineCardEnabled}
+                      aria-disabled={option.disabled}
                       key={option.id}
                       onClick={() => {
-                        if (option.id === 'card' && !onlineCardEnabled) {
-                          setNotice('Tarjeta online se habilita cuando conectemos Mercado Pago.');
+                        if (option.disabled) {
+                          setNotice(option.detail);
                           return;
                         }
                         setPaymentMethod(option.id);
@@ -2869,7 +2874,7 @@ function ClientHome({
                     >
                       {option.icon}
                       {option.label}
-                      {option.id === 'card' && !onlineCardEnabled && <small>Próximamente</small>}
+                      <small>{option.shortHint}</small>
                     </button>
                   ))}
                 </div>
@@ -2886,7 +2891,12 @@ function ClientHome({
                 )}
                 {paymentMethod === 'wallet' && (
                   <p className="v6-note">
-                    Para pruebas, MANITO registra Cuenta DNI/billetera como método preferido. El cobro real se coordina por QR o link hasta integrar un proveedor de pagos.
+                    {paymentOptions.find((option) => option.id === 'wallet')?.detail}
+                  </p>
+                )}
+                {paymentMethod === 'cash' && (
+                  <p className="v6-note">
+                    {paymentOptions.find((option) => option.id === 'cash')?.detail}
                   </p>
                 )}
               </>
@@ -5561,7 +5571,7 @@ function AccountPanel({
           <span>{paymentProfiles.length}</span>
         </div>
         <p className="v6-muted">
-          Guardamos un método preferido. Cuenta DNI/billetera queda como coordinación por QR o link hasta integrar una pasarela real.
+          Guardamos un método preferido para acelerar pedidos. Tarjeta queda bloqueada hasta activar Mercado Pago marketplace; Cuenta DNI/billetera se coordina por QR o link dentro del chat.
         </p>
         <div className="v6-choice-grid three">
           {paymentOptions.map((option) => (
@@ -5569,11 +5579,19 @@ function AccountPanel({
               className="v6-choice"
               type="button"
               key={option.id}
-              onClick={() => addPayment(option.id)}
+              onClick={() => {
+                if (option.disabled) {
+                  setNotice(option.detail);
+                  return;
+                }
+                addPayment(option.id);
+              }}
+              aria-disabled={option.disabled}
               disabled={Boolean(savingPaymentType)}
             >
               {option.icon}
               {savingPaymentType === option.id ? 'Guardando...' : option.label}
+              <small>{option.shortHint}</small>
             </button>
           ))}
         </div>
