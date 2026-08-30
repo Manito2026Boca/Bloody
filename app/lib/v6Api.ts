@@ -71,6 +71,13 @@ const safeOrderColumns = [
   'scheduled_at',
   'status',
   'price',
+  'estimated_price',
+  'agreed_price',
+  'agreed_scope',
+  'contracted_at',
+  'accepted_proposal_id',
+  'contract_snapshot',
+  'pricing_policy_snapshot',
   'client_lat',
   'client_lng',
   'created_at',
@@ -573,10 +580,12 @@ export async function createV6Order(input: {
   etaMinutes?: number | null;
   scheduledAt: string | null;
   price: number | null;
+  estimatedPrice?: number | null;
   lat: number | null;
   lng: number | null;
 }) {
   const supabase = getV6Supabase();
+  const estimatedPrice = input.estimatedPrice ?? input.price;
   const { data, error } = await supabase
     .from('orders')
     .insert({
@@ -592,7 +601,8 @@ export async function createV6Order(input: {
       guarantee_days: input.guaranteeDays ?? 7,
       eta_minutes: input.etaMinutes || null,
       scheduled_at: input.scheduledAt,
-      price: input.price,
+      estimated_price: estimatedPrice,
+      price: estimatedPrice,
       client_lat: input.lat,
       client_lng: input.lng,
     })
@@ -613,7 +623,7 @@ export async function createV6Order(input: {
       mode: input.mode,
       status: initialOrderStatus(input.mode),
       scheduled_at: input.scheduledAt,
-      price: input.price,
+      price: estimatedPrice,
       client_lat: input.lat,
       client_lng: input.lng,
     })

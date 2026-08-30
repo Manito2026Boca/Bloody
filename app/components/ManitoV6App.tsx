@@ -110,6 +110,14 @@ import {
 } from '../lib/orderFlow';
 import { paymentCapabilities, type ManitoPaymentMethod } from '../lib/paymentCapabilities';
 import {
+  approvedExtrasTotal,
+  orderCommissionAmount,
+  orderContractAmount,
+  orderDisplayAmount,
+  orderEstimatedAmount,
+  orderServiceTotal,
+} from '../lib/economics';
+import {
   missingBlockingRequirements,
   professionalOnboardingRequirements,
 } from '../lib/professionalOnboarding';
@@ -2125,7 +2133,7 @@ function ClientHome({
       ? null
       : (effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate?.priceFrom
         ? selectedProfessionalCandidate.priceFrom
-        : selectedBasePrice) + (mode === 'scheduled' ? 2000 : 0)
+        : selectedBasePrice)
     : null;
   const etaText =
     mode === 'quote'
@@ -2261,25 +2269,7 @@ function ClientHome({
     setCreatingOrder(true);
     try {
       const orderAddress = formatAddress(address, addressCity);
-      const orderDescription = [
-        description,
-        recommendedSpecialties.length
-          ? `Especialidad sugerida: ${recommendedSpecialties.map((match) => match.specialty.name).join(', ')}`
-          : null,
-        `Asignación: ${
-          mode === 'quote'
-            ? 'presupuesto abierto sin asignación inmediata'
-            : effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate
-            ? `prefiero a ${publicProfessionalName(selectedProfessionalCandidate.professional)}`
-            : 'automática MANITO'
-        }`,
-        mode === 'quote' ? 'Pago: se define cuando aceptes una propuesta' : `Pago: ${paymentLabel(paymentMethod)}`,
-        repeatService && mode === 'scheduled' ? `Recurrencia solicitada: ${recurrenceOptions.find((item) => item.id === recurrenceFrequency)?.label}` : null,
-        photoNames.length ? `Fotos cargadas: ${photoNames.join(', ')}` : null,
-        'Protección MANITO: servicio registrado con chat, evidencia y adicionales aprobados.',
-      ]
-        .filter(Boolean)
-        .join('\n');
+      const orderDescription = description.trim();
       const createdOrder = await createV6Order({
         clientId: profile.id,
         serviceId: selectedService.id,
@@ -2296,6 +2286,7 @@ function ClientHome({
         etaMinutes: mode === 'quote' ? null : selectedProfessionalCandidate?.etaMinutes || null,
         scheduledAt: mode === 'scheduled' && scheduledAt ? new Date(scheduledAt).toISOString() : null,
         price: estimatedPrice,
+        estimatedPrice,
         lat: coords?.lat || null,
         lng: coords?.lng || null,
       });
@@ -3492,10 +3483,13 @@ function ProfessionalHome({
   }
 
   const grossIncome = activeOrders.reduce(
-    (total, order) => total + Number(order.price || order.service?.base_price || 0),
+    (total, order) => total + Number(orderServiceTotal(order) ?? orderDisplayAmount(order) ?? 0),
     0,
   );
-  const commission = Math.round(grossIncome * 0.12);
+  const commission = activeOrders.reduce(
+    (total, order) => total + orderCommissionAmount(order),
+    0,
+  );
   const netIncome = Math.max(0, grossIncome - commission);
   const completedJobs = activeOrders.filter((order) => order.status === 'completed').length;
   const proProgress = Math.min(100, completedJobs * 10 + proServices.length * 8);
@@ -3593,7 +3587,7 @@ function ProfessionalHome({
                       <MapPin size={13} aria-hidden="true" /> {match.order.address}
                     </small>
                   </div>
-                  <b>{money(match.order.service?.base_price)}</b>
+                  <b>{money(orderEstimatedAmount(match.order))}</b>
                 </div>
                 <MatchSummary match={match} />
                 <button className="v6-primary" type="button" onClick={() => accept(match.order.id)}>
@@ -3698,9 +3692,9 @@ function OrderCard({
   const [evidenceStage, setEvidenceStage] = useState<V6OrderPhoto['stage']>('during');
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
-  const [proposalLabor, setProposalLabor] = useState(String(order.service?.base_price || 18000));
+  const [proposalLabor, setProposalLabor] = useState(String(orderEstimatedAmount(order) ?? 0));
   const [proposalMaterials, setProposalMaterials] = useState('0');
-  const [proposalVisit, setProposalVisit] = useState('6500');
+  const [proposalVisit, setProposalVisit] = useState('0');
   const [proposalNote, setProposalNote] = useState('Puedo verlo hoy y confirmar materiales antes de empezar.');
   const [extraTitle, setExtraTitle] = useState('Material adicional');
   const [extraAmount, setExtraAmount] = useState('4500');
@@ -3794,7 +3788,7 @@ function OrderCard({
         laborPrice: Number(proposalLabor) || 0,
         materialsPrice: Number(proposalMaterials) || 0,
         visitPrice: Number(proposalVisit) || 0,
-        manitoFee: 2500,
+        manitoFee: 0,
         estimatedMinutes: 90,
         availabilityLabel: 'Hoy',
         observation: proposalNote,
@@ -3982,7 +3976,7 @@ function OrderCard({
             )
           )}
         </div>
-        <b>{money(order.price || order.service?.base_price)}</b>
+        <b>{money(orderDisplayAmount(order))}</b>
       </div>
       <StatusSteps status={order.status} />
       <div className="v6-meta-row">
@@ -4049,7 +4043,7 @@ function OrderCard({
             <strong>
               <CreditCard size={16} aria-hidden="true" /> Confirmar pago
             </strong>
-            <span>{money(order.price || order.service?.base_price)}</span>
+            <span>{money(orderContractAmount(order) ?? orderDisplayAmount(order))}</span>
           </div>
           <p>
             Para esta etapa de pruebas, registrá el pago coordinado. Cuando integremos Mercado Pago, este paso se confirmará por webhook.
@@ -4233,7 +4227,7 @@ function OrderCard({
             </span>
             <span>
               <b>Precio final</b>
-              {money(order.price || order.service?.base_price)}
+              {money(orderServiceTotal(order, approvedExtras) ?? orderDisplayAmount(order))}
             </span>
             <span>
               <b>Evidencia</b>

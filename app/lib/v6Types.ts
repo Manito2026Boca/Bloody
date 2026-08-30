@@ -93,6 +93,13 @@ export type V6Order = {
   scheduled_at: string | null;
   status: V6OrderStatus;
   price: number | null;
+  estimated_price?: number | null;
+  agreed_price?: number | null;
+  agreed_scope?: string | null;
+  contracted_at?: string | null;
+  accepted_proposal_id?: string | null;
+  contract_snapshot?: Record<string, unknown> | null;
+  pricing_policy_snapshot?: Record<string, unknown> | null;
   assignment_mode?: V6AssignmentMode | null;
   preferred_professional_id?: string | null;
   payment_method?: V6PaymentMethod | null;
