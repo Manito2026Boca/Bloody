@@ -69,6 +69,8 @@ const safeOrderColumns = [
   'address',
   'mode',
   'scheduled_at',
+  'estimated_duration_minutes',
+  'scheduled_end',
   'status',
   'price',
   'estimated_price',
@@ -579,6 +581,7 @@ export async function createV6Order(input: {
   guaranteeDays?: number;
   etaMinutes?: number | null;
   scheduledAt: string | null;
+  estimatedDurationMinutes?: number | null;
   price: number | null;
   estimatedPrice?: number | null;
   lat: number | null;
@@ -601,6 +604,7 @@ export async function createV6Order(input: {
       guarantee_days: input.guaranteeDays ?? 7,
       eta_minutes: input.etaMinutes || null,
       scheduled_at: input.scheduledAt,
+      estimated_duration_minutes: input.estimatedDurationMinutes || null,
       estimated_price: estimatedPrice,
       price: estimatedPrice,
       client_lat: input.lat,
@@ -623,6 +627,7 @@ export async function createV6Order(input: {
       mode: input.mode,
       status: initialOrderStatus(input.mode),
       scheduled_at: input.scheduledAt,
+      estimated_duration_minutes: input.estimatedDurationMinutes || null,
       price: estimatedPrice,
       client_lat: input.lat,
       client_lng: input.lng,

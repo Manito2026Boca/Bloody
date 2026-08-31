@@ -91,6 +91,8 @@ export type V6Order = {
   address: string;
   mode: V6Mode;
   scheduled_at: string | null;
+  estimated_duration_minutes?: number | null;
+  scheduled_end?: string | null;
   status: V6OrderStatus;
   price: number | null;
   estimated_price?: number | null;

@@ -198,6 +198,8 @@ type ProfessionalCandidate = {
   etaMinutes: number | null;
   distanceKm: number | null;
 };
+
+const scheduledReservationDurationMinutes = 120;
 type ServiceGroupId =
   | 'all'
   | 'home'
@@ -774,14 +776,19 @@ function professionalCandidatesForService({
 
       if (mode === 'scheduled' && scheduledAt) {
         const scheduled = new Date(scheduledAt);
+        const scheduledEnd = addMinutes(scheduled, scheduledReservationDurationMinutes);
         const activeDays = professional.professional_profile?.work_days?.length
           ? professional.professional_profile.work_days
           : ['Lun', 'Mar', 'Mie', 'Jue', 'Vie'];
         const scheduledDay = normalizeDayLabel(scheduledDayLabel(scheduledAt));
         const worksThatDay = activeDays.map(normalizeDayLabel).includes(scheduledDay);
         const scheduledTime = scheduled.toTimeString().slice(0, 5);
+        const scheduledEndTime = scheduledEnd.toTimeString().slice(0, 5);
         if (!worksThatDay) return null;
-        if (!timeInRange(scheduledTime, professional.professional_profile?.work_starts_at, professional.professional_profile?.work_ends_at)) {
+        if (
+          !timeInRange(scheduledTime, professional.professional_profile?.work_starts_at, professional.professional_profile?.work_ends_at) ||
+          !timeInRange(scheduledEndTime, professional.professional_profile?.work_starts_at, professional.professional_profile?.work_ends_at)
+        ) {
           return null;
         }
         reasons.push(`Horario ${scheduledTime}`);
@@ -939,6 +946,12 @@ function scheduledDayLabel(value: string) {
   return ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'][new Date(value).getDay()];
 }
 
+function addMinutes(date: Date, minutes: number) {
+  const next = new Date(date);
+  next.setMinutes(next.getMinutes() + minutes);
+  return next;
+}
+
 function timeInRange(value: string, start?: string | null, end?: string | null) {
   if (!start || !end) return true;
   const minutes = (time: string) => {
@@ -997,14 +1010,21 @@ function evaluateProfessionalOrderMatch(
 
   if (order.scheduled_at) {
     const scheduled = new Date(order.scheduled_at);
+    const scheduledEnd = order.scheduled_end
+      ? new Date(order.scheduled_end)
+      : addMinutes(scheduled, order.estimated_duration_minutes || order.eta_minutes || scheduledReservationDurationMinutes);
     const activeDays = professionalProfile?.work_days?.length
       ? professionalProfile.work_days
       : ['Lun', 'Mar', 'Mie', 'Jue', 'Vie'];
     const scheduledDay = normalizeDayLabel(scheduledDayLabel(order.scheduled_at));
     const worksThatDay = activeDays.map(normalizeDayLabel).includes(scheduledDay);
     const scheduledTime = scheduled.toTimeString().slice(0, 5);
+    const scheduledEndTime = scheduledEnd.toTimeString().slice(0, 5);
     if (!worksThatDay) return null;
-    if (!timeInRange(scheduledTime, professionalProfile?.work_starts_at, professionalProfile?.work_ends_at)) {
+    if (
+      !timeInRange(scheduledTime, professionalProfile?.work_starts_at, professionalProfile?.work_ends_at) ||
+      !timeInRange(scheduledEndTime, professionalProfile?.work_starts_at, professionalProfile?.work_ends_at)
+    ) {
       return null;
     }
     reasons.push(`Horario ${scheduledTime}`);
@@ -2311,6 +2331,7 @@ function ClientHome({
         guaranteeDays: 7,
         etaMinutes: mode === 'quote' ? null : selectedProfessionalCandidate?.etaMinutes || null,
         scheduledAt: mode === 'scheduled' && scheduledAt ? new Date(scheduledAt).toISOString() : null,
+        estimatedDurationMinutes: mode === 'scheduled' ? scheduledReservationDurationMinutes : null,
         price: estimatedPrice,
         estimatedPrice,
         lat: coords?.lat || null,
