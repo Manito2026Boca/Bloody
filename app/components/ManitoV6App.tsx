@@ -48,10 +48,11 @@ import {
   cancelV6Order,
   completeV6Profile,
   completeTrackedV6Order,
-  confirmV6OrderPayment,
+  confirmV6ManualPayment,
   createV6RecurringServicePlan,
   createV6Order,
   decideV6OrderExtra,
+  disputeV6ManualPayment,
   getV6Profile,
   getV6MediaSignedUrl,
   getV6ProfessionalOnboarding,
@@ -84,6 +85,7 @@ import {
   reviewV6ProfessionalDocument,
   reviewV6ProfessionalOnboarding,
   reviewV6OrderComplaint,
+  reportV6OrderPayment,
   sendV6OrderProposal,
   saveV6ProfessionalServices,
   saveV6ProfessionalSpecialties,
@@ -112,7 +114,6 @@ import { paymentCapabilities, type ManitoPaymentMethod } from '../lib/paymentCap
 import {
   approvedExtrasTotal,
   orderCommissionAmount,
-  orderContractAmount,
   orderDisplayAmount,
   orderEstimatedAmount,
   orderServiceTotal,
@@ -266,12 +267,37 @@ function paymentLabel(method?: string | null) {
 
 function paymentStatusLabel(status?: V6PaymentStatus | null) {
   if (status === 'paid') return 'Pago confirmado';
-  if (status === 'pending' || status === 'authorized') return 'Pago pendiente';
+  if (status === 'pending' || status === 'authorized') return 'Esperando confirmación';
   if (status === 'rejected') return 'Pago rechazado';
   if (status === 'refunded') return 'Reembolsado';
   if (status === 'partially_refunded') return 'Reembolso parcial';
   if (status === 'not_required') return 'Sin pago online';
   return 'Aún no pagado';
+}
+
+function paymentRecordStatusLabel(payment?: V6Payment | null) {
+  if (!payment) return 'Sin reporte de pago';
+  if (payment.status === 'reported') return 'Esperando confirmación del profesional';
+  if (payment.status === 'confirmed' || payment.status === 'approved') return 'Pago confirmado';
+  if (payment.status === 'disputed' || payment.status === 'rejected') return 'Pago en revisión';
+  if (payment.status === 'initiated' || payment.status === 'pending' || payment.status === 'awaiting_client_action') {
+    return 'Pago pendiente';
+  }
+  if (payment.status === 'cancelled') return 'Pago cancelado';
+  if (payment.status === 'refunded') return 'Reembolsado';
+  if (payment.status === 'partially_refunded') return 'Reembolso parcial';
+  if (payment.status === 'expired') return 'Pago vencido';
+  return 'Pago pendiente';
+}
+
+function isManualPaymentMethod(method?: string | null) {
+  return method === 'cash' || method === 'wallet' || method === 'transfer';
+}
+
+function reportPaymentButtonLabel(method?: string | null) {
+  if (method === 'cash') return 'Entregué el efectivo';
+  if (method === 'wallet') return 'Transferencia Cuenta DNI realizada';
+  return 'Transferencia realizada';
 }
 
 function paymentProviderLabel(provider?: string | null) {
@@ -3813,12 +3839,35 @@ function OrderCard({
 
   async function confirmPayment() {
     try {
-      await confirmV6OrderPayment(order.id);
+      await reportV6OrderPayment(order.id);
       setOrders(await listV6Orders());
       await refreshCommercialData();
-      setNotice('Pago registrado. El trabajo quedó confirmado.');
+      setNotice('Pago reportado. Esperando confirmación del profesional.');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'No se pudo registrar el pago.');
+      setError(caught instanceof Error ? caught.message : 'No se pudo reportar el pago.');
+    }
+  }
+
+  async function confirmManualPayment() {
+    try {
+      await confirmV6ManualPayment(order.id);
+      setOrders(await listV6Orders());
+      await refreshCommercialData();
+      setNotice('Pago confirmado.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo confirmar el pago.');
+    }
+  }
+
+  async function disputeManualPayment() {
+    const reason = window.prompt('¿Qué problema hubo con el pago?') || '';
+    try {
+      await disputeV6ManualPayment(order.id, reason);
+      setOrders(await listV6Orders());
+      await refreshCommercialData();
+      setNotice('Pago enviado a revisión.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo reportar el problema de pago.');
     }
   }
 
@@ -3933,8 +3982,24 @@ function OrderCard({
   const protectionReference = order.completed_at || order.updated_at || order.created_at;
   const latestPayment = payments[0] || null;
   const approvedPaymentTotal = payments
-    .filter((payment) => payment.status === 'approved')
+    .filter((payment) => payment.status === 'approved' || payment.status === 'confirmed')
     .reduce((total, payment) => total + Number(payment.amount || 0), 0);
+  const manualPayment = isManualPaymentMethod(order.payment_method);
+  const paymentConfirmed = payments.some((payment) => payment.status === 'approved' || payment.status === 'confirmed');
+  const paymentReported = latestPayment?.status === 'reported';
+  const paymentDisputed = latestPayment?.status === 'disputed' || latestPayment?.status === 'rejected';
+  const canClientReportManualPayment =
+    profile.role === 'client' &&
+    order.status === 'completed' &&
+    manualPayment &&
+    !paymentConfirmed &&
+    !paymentReported &&
+    !paymentDisputed;
+  const canProfessionalConfirmManualPayment =
+    profile.role === 'professional' &&
+    order.status === 'completed' &&
+    manualPayment &&
+    paymentReported;
 
   async function shareOrderTracking() {
     const text = orderTrackingText(order);
@@ -3995,10 +4060,11 @@ function OrderCard({
         </div>
         {latestPayment ? (
           <p>
-            {paymentProviderLabel(latestPayment.provider)} registró {money(Number(latestPayment.amount))}
+            {paymentRecordStatusLabel(latestPayment)} · {paymentProviderLabel(latestPayment.provider)} por {money(Number(latestPayment.amount))}
             {' '}· comisión MANITO {money(Number(latestPayment.manito_fee))}
             {' '}· para profesional {money(Number(latestPayment.professional_amount))}
             {approvedPaymentTotal > 0 ? ` · aprobado ${money(approvedPaymentTotal)}` : ''}
+            {latestPayment.receipt_path ? ' · comprobante adjunto' : ''}
           </p>
         ) : order.payment_method === 'card' ? (
           <p>
@@ -4037,27 +4103,52 @@ function OrderCard({
           </span>
         </div>
       </section>
-      {order.status === 'payment_pending' && profile.role === 'client' && (
+      {canClientReportManualPayment && (
         <section className="v6-payment-box action">
           <div>
             <strong>
-              <CreditCard size={16} aria-hidden="true" /> Confirmar pago
+              <CreditCard size={16} aria-hidden="true" /> Reportar pago
             </strong>
-            <span>{money(orderContractAmount(order) ?? orderDisplayAmount(order))}</span>
+            <span>{money(orderServiceTotal(order, approvedExtras) ?? orderDisplayAmount(order))}</span>
           </div>
           <p>
-            Para esta etapa de pruebas, registrá el pago coordinado. Cuando integremos Mercado Pago, este paso se confirmará por webhook.
+            Avisale al profesional que ya pagaste. El pedido queda esperando su confirmación de recepción.
           </p>
-          {order.payment_method === 'card' ? (
-            <p className="v6-alert">
-              Tarjeta online se habilita cuando conectemos Mercado Pago. Para probar ahora, publicá con Cuenta DNI/billetera o efectivo.
-            </p>
-          ) : (
-            <button className="v6-primary" type="button" onClick={confirmPayment}>
-              Marcar pago manual como realizado
-            </button>
-          )}
+          <button className="v6-primary" type="button" onClick={confirmPayment}>
+            {reportPaymentButtonLabel(order.payment_method)}
+          </button>
         </section>
+      )}
+      {profile.role === 'client' && order.status === 'completed' && paymentReported && (
+        <p className="v6-note">
+          Esperando confirmación del profesional. El pago todavía no figura como confirmado.
+        </p>
+      )}
+      {canProfessionalConfirmManualPayment && (
+        <section className="v6-payment-box action">
+          <div>
+            <strong>
+              <CreditCard size={16} aria-hidden="true" /> Confirmar recepción
+            </strong>
+            <span>{money(Number(latestPayment?.amount || 0))}</span>
+          </div>
+          <p>
+            El cliente reportó el pago. Confirmalo sólo si recibiste el importe acordado.
+          </p>
+          <div className="v6-actions compact">
+            <button className="v6-primary" type="button" onClick={confirmManualPayment}>
+              Pago recibido
+            </button>
+            <button className="v6-secondary" type="button" onClick={disputeManualPayment}>
+              Reportar un problema
+            </button>
+          </div>
+        </section>
+      )}
+      {paymentDisputed && (
+        <p className="v6-alert">
+          Pago en revisión. MANITO conserva el historial del pedido, chat y evidencia para revisar la diferencia.
+        </p>
       )}
       {!['completed', 'cancelled'].includes(order.status) && (
         <p className="v6-note">

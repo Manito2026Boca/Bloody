@@ -728,6 +728,29 @@ export async function confirmV6OrderPayment(orderId: string) {
   return data as V6Order;
 }
 
+export async function reportV6OrderPayment(orderId: string, receiptPath?: string | null) {
+  const { error } = await getV6Supabase().rpc('report_order_payment', {
+    p_order_id: orderId,
+    p_receipt_path: receiptPath || null,
+  });
+  fail(error);
+}
+
+export async function confirmV6ManualPayment(orderId: string) {
+  const { error } = await getV6Supabase().rpc('confirm_manual_payment', {
+    p_order_id: orderId,
+  });
+  fail(error);
+}
+
+export async function disputeV6ManualPayment(orderId: string, reason?: string | null) {
+  const { error } = await getV6Supabase().rpc('dispute_manual_payment', {
+    p_order_id: orderId,
+    p_reason: reason || null,
+  });
+  fail(error);
+}
+
 export async function advanceV6Order(orderId: string) {
   const { data, error } = await getV6Supabase().rpc('advance_order', {
     p_order_id: orderId,

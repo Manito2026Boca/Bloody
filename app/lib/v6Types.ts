@@ -204,8 +204,12 @@ export type V6Payment = {
   professional_amount: number;
   currency: string;
   status:
+    | 'initiated'
     | 'pending'
     | 'awaiting_client_action'
+    | 'reported'
+    | 'confirmed'
+    | 'disputed'
     | 'approved'
     | 'rejected'
     | 'cancelled'
@@ -214,6 +218,13 @@ export type V6Payment = {
     | 'expired';
   payment_method: string | null;
   failure_reason: string | null;
+  reported_at?: string | null;
+  confirmed_at?: string | null;
+  disputed_at?: string | null;
+  reported_by?: string | null;
+  confirmed_by?: string | null;
+  disputed_by?: string | null;
+  receipt_path?: string | null;
   created_at: string;
   approved_at: string | null;
   refunded_at: string | null;
