@@ -46,6 +46,7 @@ import {
   addV6PaymentProfile,
   advanceV6Order,
   cancelV6Order,
+  chooseV6ManualOrderProfessional,
   completeV6Profile,
   completeTrackedV6Order,
   confirmV6ManualPayment,
@@ -53,6 +54,7 @@ import {
   createV6Order,
   decideV6OrderExtra,
   disputeV6ManualPayment,
+  fallbackV6ManualOrderToAuto,
   getV6Profile,
   getV6MediaSignedUrl,
   getV6ProfessionalOnboarding,
@@ -85,6 +87,7 @@ import {
   reviewV6ProfessionalDocument,
   reviewV6ProfessionalOnboarding,
   reviewV6OrderComplaint,
+  rejectV6ManualOrderRequest,
   reportV6OrderPayment,
   sendV6OrderProposal,
   saveV6ProfessionalServices,
@@ -967,6 +970,55 @@ function timeInRange(value: string, start?: string | null, end?: string | null) 
   return target >= startMinutes || target <= endMinutes;
 }
 
+function manualRequestIsPending(order: V6Order) {
+  return (
+    order.assignment_mode === 'manual' &&
+    !order.professional_id &&
+    order.manual_response_status === 'pending'
+  );
+}
+
+function manualRequestIsExpiredByClock(order: V6Order) {
+  return (
+    manualRequestIsPending(order) &&
+    Boolean(order.manual_response_deadline_at) &&
+    new Date(order.manual_response_deadline_at as string).getTime() <= Date.now()
+  );
+}
+
+function manualRequestNeedsClientDecision(order: V6Order) {
+  return (
+    order.assignment_mode === 'manual' &&
+    !order.professional_id &&
+    (order.manual_response_status === 'rejected' ||
+      order.manual_response_status === 'expired' ||
+      manualRequestIsExpiredByClock(order))
+  );
+}
+
+function manualRequestCanBeRejectedBy(order: V6Order, profile: V6Profile) {
+  return (
+    profile.role === 'professional' &&
+    manualRequestIsPending(order) &&
+    order.preferred_professional_id === profile.id &&
+    order.manual_requested_professional_id === profile.id &&
+    !manualRequestIsExpiredByClock(order)
+  );
+}
+
+function manualResponseLabel(order: V6Order) {
+  if (manualRequestIsExpiredByClock(order) || order.manual_response_status === 'expired') {
+    return 'El profesional no respondió a tiempo.';
+  }
+  if (order.manual_response_status === 'rejected') {
+    return 'El profesional no pudo tomar el trabajo.';
+  }
+  if (order.manual_response_status === 'pending' && order.manual_response_deadline_at) {
+    return `Esperando respuesta hasta ${shortDate(order.manual_response_deadline_at)}.`;
+  }
+  return null;
+}
+
 function evaluateProfessionalOrderMatch(
   order: V6Order,
   profile: V6Profile,
@@ -1762,6 +1814,7 @@ export default function ManitoV6App() {
           <OrdersList
             profile={viewProfile}
             orders={activeOrders}
+            publicProfessionals={publicProfessionals}
             setOrders={setOrders}
             setChatOrder={setChatOrder}
             setError={setError}
@@ -3162,6 +3215,7 @@ function ClientHome({
             setChatOrder={setChatOrder}
             setError={setError}
             setNotice={setNotice}
+            publicProfessionals={publicProfessionals}
           />
         ))}
         {!clientOrders.length && <Empty title="Todavía no pediste nada" body="Elegí un servicio para crear el primer pedido real." />}
@@ -3529,6 +3583,16 @@ function ProfessionalHome({
     }
   }
 
+  async function rejectManual(orderId: string) {
+    try {
+      await rejectV6ManualOrderRequest(orderId, 'no_disponible');
+      setOrders(await listV6Orders());
+      setNotice('Solicitud rechazada. El cliente va a poder elegir cómo seguir.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo rechazar la solicitud.');
+    }
+  }
+
   const grossIncome = activeOrders.reduce(
     (total, order) => total + Number(orderServiceTotal(order) ?? orderDisplayAmount(order) ?? 0),
     0,
@@ -3637,9 +3701,16 @@ function ProfessionalHome({
                   <b>{money(orderEstimatedAmount(match.order))}</b>
                 </div>
                 <MatchSummary match={match} />
-                <button className="v6-primary" type="button" onClick={() => accept(match.order.id)}>
-                  Aceptar trabajo
-                </button>
+                <div className="v6-actions compact">
+                  <button className="v6-primary" type="button" onClick={() => accept(match.order.id)}>
+                    Aceptar trabajo
+                  </button>
+                  {manualRequestCanBeRejectedBy(match.order, profile) && (
+                    <button className="v6-secondary" type="button" onClick={() => rejectManual(match.order.id)}>
+                      Rechazar solicitud
+                    </button>
+                  )}
+                </div>
               </article>
             ),
           )}
@@ -3687,6 +3758,7 @@ function MatchSummary({ match }: { match: ProfessionalOrderMatch }) {
 function OrdersList(props: {
   profile: V6Profile;
   orders: V6Order[];
+  publicProfessionals: V6PublicProfessional[];
   setOrders: (orders: V6Order[]) => void;
   setChatOrder: (order: V6Order) => void;
   setError: (message: string) => void;
@@ -3720,6 +3792,7 @@ function OrderCard({
   setChatOrder,
   setError,
   setNotice,
+  publicProfessionals = [],
 }: {
   order: V6Order;
   profile: V6Profile;
@@ -3727,6 +3800,7 @@ function OrderCard({
   setChatOrder: (order: V6Order) => void;
   setError: (message: string) => void;
   setNotice: (message: string) => void;
+  publicProfessionals?: V6PublicProfessional[];
 }) {
   const other = profile.role === 'client' ? order.professional : order.client;
   const nextAction = nextProfessionalOrderAction(order.status);
@@ -3749,6 +3823,36 @@ function OrderCard({
   const [ratingComment, setRatingComment] = useState('');
   const [complaintReason, setComplaintReason] = useState('El problema reapareció');
   const [complaintDetail, setComplaintDetail] = useState('');
+  const [manualReplacementProfessionalId, setManualReplacementProfessionalId] = useState('');
+
+  const manualAlternatives = useMemo(
+    () =>
+      publicProfessionals.filter(
+        (professional) =>
+          professional.profile.id !== order.preferred_professional_id &&
+          professional.services.some((service) => service.service_id === order.service_id) &&
+          (order.mode !== 'immediate' || professional.profile.is_available),
+      ),
+    [order.mode, order.preferred_professional_id, order.service_id, publicProfessionals],
+  );
+
+  useEffect(() => {
+    if (
+      manualReplacementProfessionalId &&
+      manualAlternatives.some((professional) => professional.profile.id === manualReplacementProfessionalId)
+    ) {
+      return;
+    }
+    setManualReplacementProfessionalId(manualAlternatives[0]?.profile.id || '');
+  }, [manualAlternatives, manualReplacementProfessionalId]);
+
+  const manualLabel = manualResponseLabel(order);
+  const showManualClientDecision = profile.role === 'client' && manualRequestNeedsClientDecision(order);
+  const showManualPendingNotice =
+    profile.role === 'client' &&
+    manualRequestIsPending(order) &&
+    !manualRequestIsExpiredByClock(order);
+  const canRejectManualRequest = manualRequestCanBeRejectedBy(order, profile);
 
   const refreshCommercialData = useCallback(async () => {
     const [nextProposals, nextExtras, nextComplaints, nextPayments] = await Promise.all([
@@ -3823,6 +3927,40 @@ function OrderCard({
       setNotice('Pedido cancelado.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo cancelar.');
+    }
+  }
+
+  async function rejectManualRequest(reason = 'no_disponible') {
+    try {
+      await rejectV6ManualOrderRequest(order.id, reason);
+      setOrders(await listV6Orders());
+      setNotice('Solicitud rechazada. El cliente va a poder elegir cómo seguir.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo rechazar la solicitud.');
+    }
+  }
+
+  async function chooseAnotherProfessional() {
+    if (!manualReplacementProfessionalId) {
+      setError('Elegí otro profesional disponible.');
+      return;
+    }
+    try {
+      await chooseV6ManualOrderProfessional(order.id, manualReplacementProfessionalId);
+      setOrders(await listV6Orders());
+      setNotice('Solicitud enviada al nuevo profesional.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo elegir otro profesional.');
+    }
+  }
+
+  async function fallbackToAutomaticSearch() {
+    try {
+      await fallbackV6ManualOrderToAuto(order.id);
+      setOrders(await listV6Orders());
+      setNotice('Búsqueda automática activada.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo activar la búsqueda automática.');
     }
   }
 
@@ -4072,6 +4210,52 @@ function OrderCard({
         {order.eta_minutes && <span>ETA {order.eta_minutes} min</span>}
         {clientPin && <span>{clientPin.label} {clientPin.value}</span>}
       </div>
+      {manualLabel && (showManualPendingNotice || showManualClientDecision || canRejectManualRequest) && (
+        <section className="v6-payment-box action">
+          <div>
+            <strong>
+              <Users size={16} aria-hidden="true" /> Solicitud directa
+            </strong>
+            <span>{order.manual_response_status || 'pendiente'}</span>
+          </div>
+          <p>{manualLabel}</p>
+          {showManualClientDecision && (
+            <div className="v6-inline-form">
+              {manualAlternatives.length > 0 && (
+                <select
+                  value={manualReplacementProfessionalId}
+                  onChange={(event) => setManualReplacementProfessionalId(event.target.value)}
+                  aria-label="Elegir otro profesional"
+                >
+                  {manualAlternatives.slice(0, 8).map((professional) => (
+                    <option key={professional.profile.id} value={professional.profile.id}>
+                      {publicProfessionalName(professional)}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                className="v6-secondary"
+                type="button"
+                disabled={!manualAlternatives.length}
+                onClick={chooseAnotherProfessional}
+              >
+                Elegir otro profesional
+              </button>
+              <button className="v6-primary" type="button" onClick={fallbackToAutomaticSearch}>
+                Buscar automáticamente
+              </button>
+            </div>
+          )}
+          {canRejectManualRequest && (
+            <div className="v6-actions compact">
+              <button className="v6-secondary" type="button" onClick={() => rejectManualRequest('no_disponible')}>
+                Rechazar solicitud
+              </button>
+            </div>
+          )}
+        </section>
+      )}
       <section className="v6-payment-box">
         <div>
           <strong>

@@ -88,6 +88,13 @@ const safeOrderColumns = [
   'completed_at',
   'assignment_mode',
   'preferred_professional_id',
+  'manual_requested_professional_id',
+  'manual_requested_at',
+  'manual_response_deadline_at',
+  'manual_response_status',
+  'manual_response_reason',
+  'manual_responded_at',
+  'manual_request_history',
   'payment_method',
   'guarantee_days',
   'eta_minutes',
@@ -535,6 +542,30 @@ export async function listV6Orders() {
   const userId = userData.user?.id;
   if (!userId) return ownOrders;
 
+  const expiredManualOrders = ownOrders.filter(
+    (order) =>
+      order.client_id === userId &&
+      order.assignment_mode === 'manual' &&
+      order.manual_response_status === 'pending' &&
+      order.manual_response_deadline_at &&
+      new Date(order.manual_response_deadline_at).getTime() <= Date.now(),
+  );
+  if (expiredManualOrders.length) {
+    await Promise.allSettled(
+      expiredManualOrders.map((order) =>
+        supabase.rpc('refresh_manual_order_request', { p_order_id: order.id }),
+      ),
+    );
+    const { data: refreshed, error: refreshError } = await supabase
+      .from('orders')
+      .select(safeOrderSelect)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (!refreshError) {
+      return attachVisibleOrderPins((refreshed || []) as unknown as V6Order[]);
+    }
+  }
+
   const { data: profileData, error: profileError } = await supabase
     .from('profiles')
     .select('role')
@@ -723,6 +754,36 @@ export async function acceptV6Order(orderId: string) {
   });
   fail(error);
   return data as V6Order;
+}
+
+export async function rejectV6ManualOrderRequest(orderId: string, reason?: string | null) {
+  const { error } = await getV6Supabase().rpc('reject_manual_order_request', {
+    p_order_id: orderId,
+    p_reason: reason || null,
+  });
+  fail(error);
+}
+
+export async function refreshV6ManualOrderRequest(orderId: string) {
+  const { error } = await getV6Supabase().rpc('refresh_manual_order_request', {
+    p_order_id: orderId,
+  });
+  fail(error);
+}
+
+export async function chooseV6ManualOrderProfessional(orderId: string, professionalId: string) {
+  const { error } = await getV6Supabase().rpc('choose_manual_order_professional', {
+    p_order_id: orderId,
+    p_professional_id: professionalId,
+  });
+  fail(error);
+}
+
+export async function fallbackV6ManualOrderToAuto(orderId: string) {
+  const { error } = await getV6Supabase().rpc('fallback_manual_order_to_auto', {
+    p_order_id: orderId,
+  });
+  fail(error);
 }
 
 export async function confirmV6OrderPayment(orderId: string) {

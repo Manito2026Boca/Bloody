@@ -13,6 +13,7 @@ export type V6PaymentStatus =
   | 'refunded'
   | 'partially_refunded';
 export type V6PaymentProvider = 'mercado_pago' | 'manual' | 'cash' | 'wallet';
+export type V6ManualResponseStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
 
 export type V6OrderStatus =
   | 'open'
@@ -122,6 +123,13 @@ export type V6Order = {
   match_score?: number | null;
   match_reasons?: string[] | null;
   distance_km?: number | null;
+  manual_requested_professional_id?: string | null;
+  manual_requested_at?: string | null;
+  manual_response_deadline_at?: string | null;
+  manual_response_status?: V6ManualResponseStatus | null;
+  manual_response_reason?: string | null;
+  manual_responded_at?: string | null;
+  manual_request_history?: Array<Record<string, unknown>> | null;
   service?: V6Service | null;
   client?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & { phone?: string | null } | null;
   professional?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & { phone?: string | null } | null;
