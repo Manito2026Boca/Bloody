@@ -14,6 +14,8 @@ export type V6PaymentStatus =
   | 'partially_refunded';
 export type V6PaymentProvider = 'mercado_pago' | 'manual' | 'cash' | 'wallet';
 export type V6ManualResponseStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
+export type V6MatchingStatus = 'idle' | 'round_pending' | 'matched' | 'failed';
+export type V6MatchingCandidateStatus = 'pending' | 'accepted' | 'rejected' | 'expired' | 'closed';
 
 export type V6OrderStatus =
   | 'open'
@@ -25,7 +27,8 @@ export type V6OrderStatus =
   | 'en_sitio'
   | 'trabajando'
   | 'completed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'matching_failed';
 
 export type V6Profile = {
   id: string;
@@ -130,6 +133,16 @@ export type V6Order = {
   manual_response_reason?: string | null;
   manual_responded_at?: string | null;
   manual_request_history?: Array<Record<string, unknown>> | null;
+  matching_status?: V6MatchingStatus | null;
+  matching_started_at?: string | null;
+  matching_current_round?: number | null;
+  matching_cycle?: number | null;
+  matching_round_deadline_at?: string | null;
+  matching_failed_at?: string | null;
+  matching_candidate_id?: string | null;
+  matching_candidate_status?: V6MatchingCandidateStatus | null;
+  matching_candidate_round?: number | null;
+  matching_candidate_deadline_at?: string | null;
   service?: V6Service | null;
   client?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & { phone?: string | null } | null;
   professional?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & { phone?: string | null } | null;
@@ -471,6 +484,7 @@ export const V6_STATUS_LABEL: Record<V6OrderStatus, string> = {
   trabajando: 'Trabajando',
   completed: 'Finalizado',
   cancelled: 'Cancelado',
+  matching_failed: 'Sin profesional disponible',
 };
 
 export const V6_MODE_LABEL: Record<V6Mode, string> = {

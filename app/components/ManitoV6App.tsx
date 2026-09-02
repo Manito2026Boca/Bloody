@@ -87,8 +87,10 @@ import {
   reviewV6ProfessionalDocument,
   reviewV6ProfessionalOnboarding,
   reviewV6OrderComplaint,
+  rejectV6MatchingCandidate,
   rejectV6ManualOrderRequest,
   reportV6OrderPayment,
+  retryV6ImmediateMatching,
   sendV6OrderProposal,
   saveV6ProfessionalServices,
   saveV6ProfessionalSpecialties,
@@ -250,6 +252,15 @@ function serviceSupportsMode(service: V6Service | null, mode: V6Mode) {
 
 function isOpenOpportunityStatus(status: V6OrderStatus) {
   return status === 'open' || status === 'scheduled_open' || status === 'waiting_quotes';
+}
+
+function isPendingAutomaticMatchingInvitation(order: V6Order) {
+  return (
+    order.mode === 'immediate' &&
+    (order.assignment_mode || 'auto') === 'auto' &&
+    order.matching_candidate_status === 'pending' &&
+    Boolean(order.matching_candidate_deadline_at)
+  );
 }
 
 function firstSupportedMode(service: V6Service): V6Mode {
@@ -545,6 +556,7 @@ function orderStatusText(order: V6Order, proposalsCount = 0) {
     return proposalsCount > 0 ? 'Propuestas recibidas' : 'Esperando presupuestos';
   }
   if (order.status === 'scheduled_open' || (order.status === 'open' && order.mode === 'scheduled')) return 'Esperando profesional';
+  if (order.status === 'matching_failed') return 'Sin profesional disponible';
   if (order.status === 'open' && order.mode === 'immediate') return 'Buscando ahora';
   return V6_STATUS_LABEL[order.status];
 }
@@ -3593,6 +3605,16 @@ function ProfessionalHome({
     }
   }
 
+  async function rejectAutomaticInvitation(orderId: string) {
+    try {
+      await rejectV6MatchingCandidate(orderId, 'no_disponible');
+      setOrders(await listV6Orders());
+      setNotice('Invitación rechazada. MANITO va a buscar otro profesional.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo rechazar la invitación.');
+    }
+  }
+
   const grossIncome = activeOrders.reduce(
     (total, order) => total + Number(orderServiceTotal(order) ?? orderDisplayAmount(order) ?? 0),
     0,
@@ -3708,6 +3730,11 @@ function ProfessionalHome({
                   {manualRequestCanBeRejectedBy(match.order, profile) && (
                     <button className="v6-secondary" type="button" onClick={() => rejectManual(match.order.id)}>
                       Rechazar solicitud
+                    </button>
+                  )}
+                  {isPendingAutomaticMatchingInvitation(match.order) && (
+                    <button className="v6-secondary" type="button" onClick={() => rejectAutomaticInvitation(match.order.id)}>
+                      No puedo tomarlo
                     </button>
                   )}
                 </div>
@@ -3961,6 +3988,16 @@ function OrderCard({
       setNotice('Búsqueda automática activada.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo activar la búsqueda automática.');
+    }
+  }
+
+  async function retryAutomaticSearch() {
+    try {
+      await retryV6ImmediateMatching(order.id);
+      setOrders(await listV6Orders());
+      setNotice('MANITO volvió a buscar profesionales disponibles.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo reintentar la búsqueda.');
     }
   }
 
@@ -4254,6 +4291,22 @@ function OrderCard({
               </button>
             </div>
           )}
+        </section>
+      )}
+      {profile.role === 'client' && order.status === 'matching_failed' && (
+        <section className="v6-payment-box action">
+          <div>
+            <strong>
+              <Search size={16} aria-hidden="true" /> No encontramos profesional disponible
+            </strong>
+            <span>Ahora</span>
+          </div>
+          <p>Podés reintentar la búsqueda, crear un pedido programado o pedir presupuestos desde Buscar.</p>
+          <div className="v6-actions compact">
+            <button className="v6-primary" type="button" onClick={retryAutomaticSearch}>
+              Reintentar búsqueda
+            </button>
+          </div>
         </section>
       )}
       <section className="v6-payment-box">
@@ -6662,7 +6715,7 @@ function NotificationPanel({
 }
 
 function StatusSteps({ status }: { status: V6OrderStatus }) {
-  if (isOpenOpportunityStatus(status) || status === 'cancelled') return null;
+  if (isOpenOpportunityStatus(status) || status === 'cancelled' || status === 'matching_failed') return null;
   const activeIndex = statusFlow.indexOf(status);
   return (
     <div className="v6-steps">

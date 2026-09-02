@@ -95,6 +95,12 @@ const safeOrderColumns = [
   'manual_response_reason',
   'manual_responded_at',
   'manual_request_history',
+  'matching_status',
+  'matching_started_at',
+  'matching_current_round',
+  'matching_cycle',
+  'matching_round_deadline_at',
+  'matching_failed_at',
   'payment_method',
   'guarantee_days',
   'eta_minutes',
@@ -566,6 +572,33 @@ export async function listV6Orders() {
     }
   }
 
+  const expiredImmediateMatchingOrders = ownOrders.filter(
+    (order) =>
+      order.client_id === userId &&
+      order.mode === 'immediate' &&
+      (order.assignment_mode || 'auto') === 'auto' &&
+      order.professional_id == null &&
+      order.status === 'open' &&
+      order.matching_status === 'round_pending' &&
+      order.matching_round_deadline_at &&
+      new Date(order.matching_round_deadline_at).getTime() <= Date.now(),
+  );
+  if (expiredImmediateMatchingOrders.length) {
+    await Promise.allSettled(
+      expiredImmediateMatchingOrders.map((order) =>
+        supabase.rpc('refresh_immediate_matching', { p_order_id: order.id }),
+      ),
+    );
+    const { data: refreshed, error: refreshError } = await supabase
+      .from('orders')
+      .select(safeOrderSelect)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (!refreshError) {
+      return attachVisibleOrderPins((refreshed || []) as unknown as V6Order[]);
+    }
+  }
+
   const { data: profileData, error: profileError } = await supabase
     .from('profiles')
     .select('role')
@@ -587,6 +620,8 @@ export async function listV6Orders() {
       status: order.status as V6Order['status'],
       payment_method: order.payment_method as V6PaymentMethod | null,
       payment_status: order.payment_status as V6Order['payment_status'],
+      matching_status: order.matching_status as V6Order['matching_status'],
+      matching_candidate_status: order.matching_candidate_status as V6Order['matching_candidate_status'],
     } as V6Order);
   }
   return [...merged.values()].sort(
@@ -766,6 +801,28 @@ export async function rejectV6ManualOrderRequest(orderId: string, reason?: strin
 
 export async function refreshV6ManualOrderRequest(orderId: string) {
   const { error } = await getV6Supabase().rpc('refresh_manual_order_request', {
+    p_order_id: orderId,
+  });
+  fail(error);
+}
+
+export async function rejectV6MatchingCandidate(orderId: string, reason?: string | null) {
+  const { error } = await getV6Supabase().rpc('reject_matching_candidate', {
+    p_order_id: orderId,
+    p_reason: reason || null,
+  });
+  fail(error);
+}
+
+export async function refreshV6ImmediateMatching(orderId: string) {
+  const { error } = await getV6Supabase().rpc('refresh_immediate_matching', {
+    p_order_id: orderId,
+  });
+  fail(error);
+}
+
+export async function retryV6ImmediateMatching(orderId: string) {
+  const { error } = await getV6Supabase().rpc('retry_immediate_matching', {
     p_order_id: orderId,
   });
   fail(error);
