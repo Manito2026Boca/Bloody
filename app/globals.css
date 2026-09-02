@@ -2188,6 +2188,22 @@ a.v6-evidence-link {
   padding-bottom: 2px;
 }
 
+.v6-evidence-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.v6-evidence-group {
+  display: grid;
+  gap: 7px;
+}
+
+.v6-evidence-group > strong {
+  color: var(--ink);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
 .v6-photo-item {
   position: relative;
   width: 74px;

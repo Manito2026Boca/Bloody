@@ -60,6 +60,11 @@ function safeStorageFileName(name: string) {
   return cleaned || 'archivo';
 }
 
+function uniqueStoragePart() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 const safeOrderColumns = [
   'id',
   'client_id',
@@ -110,7 +115,7 @@ const safeOrderColumns = [
   'paid_at',
 ].join(',');
 
-const safeOrderSelect = `${safeOrderColumns},service:services(id,slug,name,emoji,base_price,active,allow_immediate,allow_scheduled,allow_quote,supports_recurring),client:profiles!orders_client_id_fkey(id,full_name,city),professional:profiles!orders_professional_id_fkey(id,full_name,city)`;
+const safeOrderSelect = `${safeOrderColumns},service:services(id,slug,name,emoji,base_price,active,allow_immediate,allow_scheduled,allow_quote,supports_recurring,requires_completion_evidence),client:profiles!orders_client_id_fkey(id,full_name,city),professional:profiles!orders_professional_id_fkey(id,full_name,city)`;
 
 type V6VisibleOrderPin = {
   order_id: string;
@@ -937,10 +942,7 @@ export async function addV6OrderExtra(input: {
 
 export async function listV6OrderPhotos(orderId: string) {
   const { data, error } = await getV6Supabase()
-    .from('order_photos')
-    .select('*')
-    .eq('order_id', orderId)
-    .order('created_at');
+    .rpc('list_order_evidence', { p_order_id: orderId });
   if (isMissingV5Table(error)) return [];
   fail(error);
   return (data || []) as V6OrderPhoto[];
@@ -954,16 +956,14 @@ export async function addV6OrderPhoto(input: {
   caption?: string | null;
 }) {
   const { data, error } = await getV6Supabase()
-    .from('order_photos')
-    .insert({
-      order_id: input.orderId,
-      uploaded_by: input.uploadedBy,
-      stage: input.stage,
-      file_path: input.filePath,
-      caption: input.caption || null,
-    })
-    .select('*')
-    .single();
+    .rpc('add_order_evidence', {
+      p_order_id: input.orderId,
+      p_stage: input.stage,
+      p_file_path: input.filePath,
+      p_file_name: input.caption || null,
+      p_caption: input.caption || null,
+    });
+  void input.uploadedBy;
   fail(error);
   return data as V6OrderPhoto;
 }
@@ -975,6 +975,15 @@ export async function getV6MediaSignedUrl(filePath: string) {
     .createSignedUrl(filePath, 600);
   if (error) return null;
   return data.signedUrl;
+}
+
+export async function removeV6MediaFiles(filePaths: string[]) {
+  if (!filePaths.length) return;
+  const { error } = await getV6Supabase()
+    .storage
+    .from('manito-media')
+    .remove(filePaths);
+  fail(error);
 }
 
 export async function decideV6OrderExtra(extraId: string, status: 'approved' | 'rejected') {
@@ -1231,6 +1240,26 @@ export async function uploadV6MediaFile(input: {
 }) {
   const fileName = safeStorageFileName(input.file.name);
   const path = `${input.ownerId}/${input.area}/${Date.now()}-${fileName}`;
+  const { data, error } = await getV6Supabase()
+    .storage
+    .from('manito-media')
+    .upload(path, input.file, {
+      cacheControl: '3600',
+      contentType: input.file.type || undefined,
+      upsert: false,
+    });
+  fail(error);
+  if (!data?.path) throw new Error('No se pudo guardar el archivo.');
+  return data.path;
+}
+
+export async function uploadV6OrderEvidenceFile(input: {
+  orderId: string;
+  ownerId: string;
+  file: File;
+}) {
+  const fileName = safeStorageFileName(input.file.name);
+  const path = `orders/${input.orderId}/evidence/${input.ownerId}/${uniqueStoragePart()}-${fileName}`;
   const { data, error } = await getV6Supabase()
     .storage
     .from('manito-media')

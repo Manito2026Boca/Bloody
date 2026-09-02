@@ -55,6 +55,7 @@ export type V6Service = {
   allow_scheduled?: boolean;
   allow_quote?: boolean;
   supports_recurring?: boolean;
+  requires_completion_evidence?: boolean;
 };
 
 export type V6ProfessionalService = {
@@ -357,6 +358,7 @@ export type V6OrderPhoto = {
   uploaded_by: string;
   stage: 'before' | 'during' | 'after';
   file_path: string;
+  file_name: string | null;
   caption: string | null;
   created_at: string;
 };

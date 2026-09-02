@@ -83,6 +83,7 @@ import {
   listV6Services,
   listV6Specialties,
   markV6NotificationsRead,
+  removeV6MediaFiles,
   removeV6Channel,
   reviewV6ProfessionalDocument,
   reviewV6ProfessionalOnboarding,
@@ -101,6 +102,7 @@ import {
   subscribeV6Orders,
   updateV6Profile,
   uploadV6MediaFile,
+  uploadV6OrderEvidenceFile,
   upsertV6ClientAddress,
   upsertV6ProfessionalDocument,
   upsertV6ProfessionalOnboarding,
@@ -365,7 +367,7 @@ function uniquePaymentProfiles(profiles: V6PaymentProfile[]) {
 
 function photoStageLabel(stage: V6OrderPhoto['stage']) {
   if (stage === 'before') return 'Antes';
-  if (stage === 'after') return 'Después';
+  if (stage === 'after') return 'Trabajo terminado';
   return 'Durante';
 }
 
@@ -2455,18 +2457,23 @@ function ClientHome({
         try {
           await Promise.all(
             photoFiles.map(async (file) => {
-              const filePath = await uploadV6MediaFile({
+              const filePath = await uploadV6OrderEvidenceFile({
+                orderId: createdOrder.id,
                 ownerId: profile.id,
-                area: 'orders',
                 file,
               });
-              await addV6OrderPhoto({
-                orderId: createdOrder.id,
-                uploadedBy: profile.id,
-                stage: 'before',
-                filePath,
-                caption: file.name,
-              });
+              try {
+                await addV6OrderPhoto({
+                  orderId: createdOrder.id,
+                  uploadedBy: profile.id,
+                  stage: 'before',
+                  filePath,
+                  caption: file.name,
+                });
+              } catch (caught) {
+                await removeV6MediaFiles([filePath]).catch(() => undefined);
+                throw caught;
+              }
             }),
           );
         } catch {
@@ -3909,6 +3916,30 @@ function OrderCard({
     setManualReplacementProfessionalId(manualAlternatives[0]?.profile.id || '');
   }, [manualAlternatives, manualReplacementProfessionalId]);
 
+  const evidenceStageOptions = useMemo(() => {
+    const options: Array<{ value: V6OrderPhoto['stage']; label: string }> = [];
+    const isClient = order.client_id === profile.id;
+    const isAssignedProfessional = order.professional_id === profile.id;
+    const canAddBefore =
+      (isClient || isAssignedProfessional) &&
+      ['open', 'scheduled_open', 'waiting_quotes', 'payment_pending', 'accepted', 'en_camino', 'en_sitio'].includes(order.status);
+    const canAddDuring =
+      (isClient || isAssignedProfessional) &&
+      ['accepted', 'en_camino', 'en_sitio', 'trabajando'].includes(order.status);
+    const canAddAfter = isAssignedProfessional && order.status === 'trabajando';
+
+    if (canAddBefore) options.push({ value: 'before', label: 'Antes' });
+    if (canAddDuring) options.push({ value: 'during', label: 'Durante' });
+    if (canAddAfter) options.push({ value: 'after', label: 'Trabajo terminado' });
+    return options;
+  }, [order.client_id, order.professional_id, order.status, profile.id]);
+
+  useEffect(() => {
+    if (!evidenceStageOptions.length) return;
+    if (evidenceStageOptions.some((option) => option.value === evidenceStage)) return;
+    setEvidenceStage(evidenceStageOptions[0].value);
+  }, [evidenceStage, evidenceStageOptions]);
+
   const manualLabel = manualResponseLabel(order);
   const showManualClientDecision = profile.role === 'client' && manualRequestNeedsClientDecision(order);
   const showManualPendingNotice =
@@ -3983,6 +4014,10 @@ function OrderCard({
         if (!pin) return;
         await startV6Order(order.id, pin);
       } else if (nextAction.kind === 'complete_with_pin') {
+        if (order.service?.requires_completion_evidence && !photos.some((photo) => photo.stage === 'after')) {
+          setError('Agregá al menos una foto del trabajo terminado antes de finalizar.');
+          return;
+        }
         const pin = window.prompt(nextAction.prompt);
         if (!pin) return;
         await completeTrackedV6Order(order.id, pin);
@@ -4199,18 +4234,23 @@ function OrderCard({
     }
     setUploadingEvidence(true);
     try {
-      const filePath = await uploadV6MediaFile({
+      const filePath = await uploadV6OrderEvidenceFile({
+        orderId: order.id,
         ownerId: profile.id,
-        area: 'orders',
         file: evidenceFile,
       });
-      await addV6OrderPhoto({
-        orderId: order.id,
-        uploadedBy: profile.id,
-        stage: evidenceStage,
-        filePath,
-        caption: evidenceFile.name,
-      });
+      try {
+        await addV6OrderPhoto({
+          orderId: order.id,
+          uploadedBy: profile.id,
+          stage: evidenceStage,
+          filePath,
+          caption: evidenceFile.name,
+        });
+      } catch (caught) {
+        await removeV6MediaFiles([filePath]).catch(() => undefined);
+        throw caught;
+      }
       await refreshPhotos();
       setEvidenceFile(null);
       event.currentTarget.reset();
@@ -4222,14 +4262,17 @@ function OrderCard({
     }
   }
 
-  const canUploadEvidence =
-    order.professional_id === profile.id &&
-    ['accepted', 'en_camino', 'en_sitio', 'trabajando'].includes(order.status);
+  const canUploadEvidence = evidenceStageOptions.length > 0;
   const canChat = Boolean(order.professional_id);
   const canShareTracking = !['completed', 'cancelled'].includes(order.status);
   const approvedExtras = extras.filter((extra) => extra.status === 'approved');
   const beforePhotos = photos.filter((photo) => photo.stage === 'before').length;
   const afterPhotos = photos.filter((photo) => photo.stage === 'after').length;
+  const photosByStage = {
+    before: photos.filter((photo) => photo.stage === 'before'),
+    during: photos.filter((photo) => photo.stage === 'during'),
+    after: photos.filter((photo) => photo.stage === 'after'),
+  };
   const protectionReference = order.completed_at || order.updated_at || order.created_at;
   const latestPayment = payments[0] || null;
   const approvedPaymentTotal = payments
@@ -4490,24 +4533,33 @@ function OrderCard({
         </div>
       )}
       {photos.length > 0 && (
-        <div className="v6-photo-strip">
-          {photos.map((photo) => (
-            <figure className="v6-photo-item" key={photo.id}>
-              {photo.signedUrl ? (
-                <Image
-                  src={photo.signedUrl}
-                  alt={photo.caption || 'Foto del pedido'}
-                  width={88}
-                  height={88}
-                  unoptimized
-                />
-              ) : (
-                <span>
-                  <Camera size={15} aria-hidden="true" /> {photo.caption || 'Foto del pedido'}
-                </span>
-              )}
-              <figcaption>{photoStageLabel(photo.stage)}</figcaption>
-            </figure>
+        <div className="v6-evidence-groups">
+          {(['before', 'during', 'after'] as const).map((stage) => (
+            photosByStage[stage].length > 0 && (
+              <section className="v6-evidence-group" key={stage}>
+                <strong>{photoStageLabel(stage)}</strong>
+                <div className="v6-photo-strip">
+                  {photosByStage[stage].map((photo) => (
+                    <figure className="v6-photo-item" key={photo.id}>
+                      {photo.signedUrl ? (
+                        <Image
+                          src={photo.signedUrl}
+                          alt={photo.caption || 'Foto del pedido'}
+                          width={88}
+                          height={88}
+                          unoptimized
+                        />
+                      ) : (
+                        <span>
+                          <Camera size={15} aria-hidden="true" /> {photo.caption || 'Foto del pedido'}
+                        </span>
+                      )}
+                      {photo.caption && <figcaption>{photo.caption}</figcaption>}
+                    </figure>
+                  ))}
+                </div>
+              </section>
+            )
           ))}
         </div>
       )}
@@ -4524,8 +4576,11 @@ function OrderCard({
                 value={evidenceStage}
                 onChange={(event) => setEvidenceStage(event.target.value as V6OrderPhoto['stage'])}
               >
-                <option value="during">Durante</option>
-                <option value="after">Después</option>
+                {evidenceStageOptions.map((option) => (
+                  <option value={option.value} key={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="v6-field">
