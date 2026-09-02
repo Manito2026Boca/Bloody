@@ -1917,6 +1917,69 @@ a.v6-evidence-link {
   padding: 10px;
 }
 
+.v6-quote-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.v6-quote-head > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.v6-quote-head strong {
+  overflow-wrap: anywhere;
+}
+
+.v6-quote-head span,
+.v6-quote-components {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.v6-quote-total {
+  color: var(--green-900);
+  font-size: 1.25rem;
+}
+
+.v6-quote-components span {
+  border: 1px solid #b8d9cb;
+  border-radius: 999px;
+  background: var(--mist);
+  color: var(--green-900);
+  padding: 4px 7px;
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.v6-proposal-status {
+  border: 1px solid #b8d9cb;
+  border-radius: 999px;
+  background: var(--mist);
+  color: var(--green-900);
+  padding: 4px 8px;
+  font-size: 0.68rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.v6-proposal-status.accepted {
+  border-color: #9bccba;
+  background: #e5f6ef;
+}
+
+.v6-proposal-status.rejected,
+.v6-proposal-status.expired {
+  border-color: #ddd5c8;
+  background: #f5efe4;
+  color: var(--muted);
+}
+
 .v6-quote-card span,
 .v6-quote-card p,
 .v6-summary small {
@@ -2186,6 +2249,27 @@ a.v6-evidence-link {
   border-radius: 8px;
   background: rgb(245 239 228 / 46%);
   padding: 10px;
+}
+
+.v6-inline-form label {
+  display: grid;
+  gap: 4px;
+}
+
+.v6-inline-form label > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.v6-inline-wide {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 431px) {
+  .v6-quote-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .v6-evidence-form {

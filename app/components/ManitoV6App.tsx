@@ -484,6 +484,39 @@ function shortDate(value: string) {
   }).format(new Date(value));
 }
 
+function shortDateTime(value?: string | null) {
+  if (!value) return 'A coordinar';
+  return shortDate(value);
+}
+
+function dateTimeInputValue(value?: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function proposalTotal(proposal: V6OrderProposal) {
+  return proposal.visit_price + proposal.labor_price + proposal.materials_price + proposal.manito_fee;
+}
+
+function proposalIsExpiredByClock(proposal: V6OrderProposal) {
+  return proposal.status === 'sent' && !!proposal.valid_until && new Date(proposal.valid_until).getTime() <= Date.now();
+}
+
+function proposalStatusLabel(proposal: V6OrderProposal) {
+  if (proposal.status === 'accepted') return 'Aceptada';
+  if (proposal.status === 'rejected') return 'No seleccionada';
+  if (proposal.status === 'expired' || proposalIsExpiredByClock(proposal)) return 'Vencida';
+  return 'Vigente';
+}
+
+function proposalAvailabilityText(proposal: V6OrderProposal) {
+  if (proposal.available_from) return `Desde ${shortDate(proposal.available_from)}`;
+  return proposal.availability_label || 'A coordinar';
+}
+
 function cityFromLocationLabel(value?: string | null) {
   const clean = (value || '').trim();
   if (!clean || clean.startsWith('GPS ')) return '';
@@ -3843,7 +3876,10 @@ function OrderCard({
   const [proposalLabor, setProposalLabor] = useState(String(orderEstimatedAmount(order) ?? 0));
   const [proposalMaterials, setProposalMaterials] = useState('0');
   const [proposalVisit, setProposalVisit] = useState('0');
-  const [proposalNote, setProposalNote] = useState('Puedo verlo hoy y confirmar materiales antes de empezar.');
+  const [proposalDuration, setProposalDuration] = useState('90');
+  const [proposalAvailability, setProposalAvailability] = useState('');
+  const [proposalAvailableFrom, setProposalAvailableFrom] = useState('');
+  const [proposalNote, setProposalNote] = useState('');
   const [extraTitle, setExtraTitle] = useState('Material adicional');
   const [extraAmount, setExtraAmount] = useState('4500');
   const [ratingStars, setRatingStars] = useState(5);
@@ -3927,6 +3963,19 @@ function OrderCard({
     };
   }, [order.id, refreshPhotos]);
 
+  useEffect(() => {
+    if (profile.role !== 'professional') return;
+    const ownProposal = proposals.find((proposal) => proposal.professional_id === profile.id);
+    if (!ownProposal) return;
+    setProposalLabor(String(ownProposal.labor_price || 0));
+    setProposalMaterials(String(ownProposal.materials_price || 0));
+    setProposalVisit(String(ownProposal.visit_price || 0));
+    setProposalDuration(ownProposal.estimated_minutes ? String(ownProposal.estimated_minutes) : '90');
+    setProposalAvailability(ownProposal.availability_label || '');
+    setProposalAvailableFrom(dateTimeInputValue(ownProposal.available_from));
+    setProposalNote(ownProposal.observation || '');
+  }, [profile.id, profile.role, proposals]);
+
   async function advance() {
     try {
       if (nextAction.kind === 'start_with_pin') {
@@ -4003,6 +4052,11 @@ function OrderCard({
 
   async function sendProposal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const duration = Number(proposalDuration) || 0;
+    if (duration < 15 || duration > 1440) {
+      setError('Indicá una duración estimada entre 15 minutos y 24 horas.');
+      return;
+    }
     try {
       await sendV6OrderProposal({
         orderId: order.id,
@@ -4011,8 +4065,9 @@ function OrderCard({
         materialsPrice: Number(proposalMaterials) || 0,
         visitPrice: Number(proposalVisit) || 0,
         manitoFee: 0,
-        estimatedMinutes: 90,
-        availabilityLabel: 'Hoy',
+        estimatedMinutes: duration,
+        availabilityLabel: proposalAvailability.trim(),
+        availableFrom: proposalAvailableFrom ? new Date(proposalAvailableFrom).toISOString() : null,
         observation: proposalNote,
       });
       await refreshCommercialData();
@@ -4491,20 +4546,27 @@ function OrderCard({
         <div className="v6-quote-list">
           {proposals.map((proposal) => (
             <article className="v6-quote-card" key={proposal.id}>
-              <strong>
-                {proposal.professional?.full_name || 'Profesional MANITO'}
-                {proposals[0]?.id === proposal.id && <b> Última propuesta</b>}
-              </strong>
-              <span>
-                Total {money(proposal.visit_price + proposal.labor_price + proposal.materials_price + proposal.manito_fee)}
-                {' '}· {proposal.availability_label || 'A coordinar'} · {proposal.estimated_minutes || 90} min
-              </span>
-              <p>
-                Visita {money(proposal.visit_price)} + mano de obra {money(proposal.labor_price)}
-                {' '}+ materiales {money(proposal.materials_price)} + fee {money(proposal.manito_fee)}
-              </p>
+              <div className="v6-quote-head">
+                <div>
+                  <strong>{proposal.professional?.full_name || 'Profesional MANITO'}</strong>
+                  <span>
+                    <Star size={13} aria-hidden="true" />
+                    {Number(proposal.professional?.rating_avg || 0).toFixed(1)} · {proposal.professional?.jobs_completed || 0} trabajos
+                    {proposal.professional?.verified ? ' · verificado' : ''}
+                  </span>
+                </div>
+                <b className={`v6-proposal-status ${proposal.status}`}>{proposalStatusLabel(proposal)}</b>
+              </div>
+              <strong className="v6-quote-total">{money(proposalTotal(proposal))}</strong>
+              <div className="v6-quote-components">
+                <span>Mano de obra {money(proposal.labor_price)}</span>
+                <span>Materiales {money(proposal.materials_price)}</span>
+                <span>Visita {money(proposal.visit_price)}</span>
+                {proposal.manito_fee > 0 && <span>Fee {money(proposal.manito_fee)}</span>}
+              </div>
+              <p>{proposalAvailabilityText(proposal)} · {proposal.estimated_minutes || 'A definir'} min · válida hasta {shortDateTime(proposal.valid_until)}</p>
               {proposal.observation && <p>{proposal.observation}</p>}
-              {profile.role === 'client' && isOpenOpportunityStatus(order.status) && proposal.status === 'sent' && (
+              {profile.role === 'client' && isOpenOpportunityStatus(order.status) && proposal.status === 'sent' && !proposalIsExpiredByClock(proposal) && (
                 <button className="v6-primary" type="button" onClick={() => acceptProposal(proposal.id)}>
                   Aceptar presupuesto
                 </button>
@@ -4514,11 +4576,35 @@ function OrderCard({
         </div>
       )}
       {profile.role === 'professional' && order.mode === 'quote' && isOpenOpportunityStatus(order.status) && (
-        <form className="v6-inline-form" onSubmit={sendProposal}>
-          <input value={proposalLabor} onChange={(event) => setProposalLabor(event.target.value)} aria-label="Mano de obra" />
-          <input value={proposalMaterials} onChange={(event) => setProposalMaterials(event.target.value)} aria-label="Materiales" />
-          <input value={proposalVisit} onChange={(event) => setProposalVisit(event.target.value)} aria-label="Visita" />
-          <textarea value={proposalNote} onChange={(event) => setProposalNote(event.target.value)} aria-label="Observación" />
+        <form className="v6-inline-form v6-quote-form" onSubmit={sendProposal}>
+          <label>
+            <span>Mano de obra</span>
+            <input value={proposalLabor} onChange={(event) => setProposalLabor(event.target.value)} inputMode="numeric" />
+          </label>
+          <label>
+            <span>Materiales</span>
+            <input value={proposalMaterials} onChange={(event) => setProposalMaterials(event.target.value)} inputMode="numeric" />
+          </label>
+          <label>
+            <span>Visita</span>
+            <input value={proposalVisit} onChange={(event) => setProposalVisit(event.target.value)} inputMode="numeric" />
+          </label>
+          <label>
+            <span>Duración estimada</span>
+            <input value={proposalDuration} onChange={(event) => setProposalDuration(event.target.value)} inputMode="numeric" />
+          </label>
+          <label>
+            <span>Disponible desde</span>
+            <input type="datetime-local" value={proposalAvailableFrom} onChange={(event) => setProposalAvailableFrom(event.target.value)} />
+          </label>
+          <label>
+            <span>Disponibilidad</span>
+            <input value={proposalAvailability} onChange={(event) => setProposalAvailability(event.target.value)} placeholder="Ej: No antes del viernes" />
+          </label>
+          <label className="v6-inline-wide">
+            <span>Observación</span>
+            <textarea value={proposalNote} onChange={(event) => setProposalNote(event.target.value)} placeholder="Alcance, condiciones o aclaraciones del presupuesto" />
+          </label>
           <button className="v6-secondary" type="submit">Enviar presupuesto</button>
         </form>
       )}

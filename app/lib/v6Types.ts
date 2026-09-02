@@ -325,11 +325,19 @@ export type V6OrderProposal = {
   manito_fee: number;
   estimated_minutes: number | null;
   availability_label: string | null;
+  available_from?: string | null;
   observation: string | null;
   status: 'sent' | 'accepted' | 'rejected' | 'expired';
+  valid_until?: string | null;
   created_at: string;
   updated_at: string;
-  professional?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & { phone?: string | null } | null;
+  professional?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & {
+    phone?: string | null;
+    rating_avg?: number | null;
+    jobs_completed?: number | null;
+    verified?: boolean | null;
+    manito_pro?: boolean | null;
+  } | null;
 };
 
 export type V6OrderExtra = {

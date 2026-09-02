@@ -728,11 +728,9 @@ export async function createV6RecurringServicePlan(input: {
 }
 
 export async function listV6OrderProposals(orderId: string) {
-  const { data, error } = await getV6Supabase()
-    .from('order_proposals')
-    .select('*,professional:profiles!order_proposals_professional_id_fkey(id,full_name,city)')
-    .eq('order_id', orderId)
-    .order('created_at', { ascending: false });
+  const { data, error } = await getV6Supabase().rpc('list_order_proposals', {
+    p_order_id: orderId,
+  });
   if (isMissingV5Table(error)) return [];
   fail(error);
   return (data || []) as V6OrderProposal[];
@@ -758,6 +756,7 @@ export async function sendV6OrderProposal(input: {
   manitoFee: number;
   estimatedMinutes: number;
   availabilityLabel: string;
+  availableFrom?: string | null;
   observation: string;
 }) {
   void input.professionalId;
@@ -770,6 +769,7 @@ export async function sendV6OrderProposal(input: {
     p_estimated_minutes: input.estimatedMinutes,
     p_availability_label: input.availabilityLabel,
     p_observation: input.observation,
+    p_available_from: input.availableFrom || null,
   });
   fail(error);
   return data as V6OrderProposal;
