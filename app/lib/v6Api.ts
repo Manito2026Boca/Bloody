@@ -91,6 +91,14 @@ const safeOrderColumns = [
   'updated_at',
   'accepted_at',
   'completed_at',
+  'cancelled_by',
+  'cancelled_at',
+  'cancellation_actor',
+  'cancellation_reason',
+  'cancellation_note',
+  'cancellation_phase',
+  'cancellation_responsibility',
+  'cancellation_fee',
   'assignment_mode',
   'preferred_professional_id',
   'manual_requested_professional_id',
@@ -905,9 +913,11 @@ export async function completeTrackedV6Order(orderId: string, pin: string) {
   return data as V6Order;
 }
 
-export async function cancelV6Order(orderId: string) {
+export async function cancelV6Order(orderId: string, reason: string, note?: string | null) {
   const { data, error } = await getV6Supabase().rpc('cancel_order', {
     p_order_id: orderId,
+    p_reason: reason,
+    p_note: note || null,
   });
   fail(error);
   return data as V6Order;

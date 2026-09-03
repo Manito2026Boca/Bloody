@@ -16,6 +16,17 @@ export type V6PaymentProvider = 'mercado_pago' | 'manual' | 'cash' | 'wallet';
 export type V6ManualResponseStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
 export type V6MatchingStatus = 'idle' | 'round_pending' | 'matched' | 'failed';
 export type V6MatchingCandidateStatus = 'pending' | 'accepted' | 'rejected' | 'expired' | 'closed';
+export type V6CancellationActor = 'client' | 'professional';
+export type V6CancellationReason =
+  | 'service_no_longer_needed'
+  | 'schedule_changed'
+  | 'professional_unavailable_or_delayed'
+  | 'unavailable'
+  | 'schedule_problem'
+  | 'service_not_compatible'
+  | 'emergency'
+  | 'other';
+export type V6CancellationResponsibility = 'client' | 'professional' | 'shared' | 'manito' | 'undetermined';
 
 export type V6OrderStatus =
   | 'open'
@@ -124,6 +135,14 @@ export type V6Order = {
   updated_at: string;
   accepted_at: string | null;
   completed_at: string | null;
+  cancelled_by?: string | null;
+  cancelled_at?: string | null;
+  cancellation_actor?: V6CancellationActor | null;
+  cancellation_reason?: V6CancellationReason | null;
+  cancellation_note?: string | null;
+  cancellation_phase?: V6OrderStatus | null;
+  cancellation_responsibility?: V6CancellationResponsibility | null;
+  cancellation_fee?: number | null;
   match_score?: number | null;
   match_reasons?: string[] | null;
   distance_km?: number | null;

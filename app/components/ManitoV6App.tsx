@@ -141,6 +141,7 @@ import type {
   V6AdminReviewDocument,
   V6AdminReviewStatus,
   V6AdminSetting,
+  V6CancellationReason,
   V6Complaint,
   V6Message,
   V6Mode,
@@ -230,6 +231,22 @@ const paymentOptionIcons: Record<PaymentMethod, ReactNode> = {
   wallet: <Wallet size={17} aria-hidden="true" />,
   cash: <Banknote size={17} aria-hidden="true" />,
 };
+
+const clientCancellationReasons: Array<{ value: V6CancellationReason; label: string }> = [
+  { value: 'service_no_longer_needed', label: 'Ya no necesito el servicio' },
+  { value: 'schedule_changed', label: 'Cambié de horario' },
+  { value: 'professional_unavailable_or_delayed', label: 'El profesional se demoró o no puede venir' },
+  { value: 'other', label: 'Otro motivo' },
+];
+
+const professionalCancellationReasons: Array<{ value: V6CancellationReason; label: string }> = [
+  { value: 'unavailable', label: 'No estoy disponible' },
+  { value: 'schedule_problem', label: 'Problema de agenda' },
+  { value: 'service_not_compatible', label: 'El trabajo no es compatible' },
+  { value: 'emergency', label: 'Emergencia' },
+  { value: 'other', label: 'Otro motivo' },
+];
+
 const paymentOptions = paymentCapabilities({ onlineCardEnabled }).map((option) => ({
   ...option,
   icon: paymentOptionIcons[option.id],
@@ -594,6 +611,21 @@ function orderStatusText(order: V6Order, proposalsCount = 0) {
   if (order.status === 'matching_failed') return 'Sin profesional disponible';
   if (order.status === 'open' && order.mode === 'immediate') return 'Buscando ahora';
   return V6_STATUS_LABEL[order.status];
+}
+
+function cancellationReasonLabel(reason?: string | null) {
+  return (
+    [...clientCancellationReasons, ...professionalCancellationReasons].find((option) => option.value === reason)?.label ||
+    'Motivo no especificado'
+  );
+}
+
+function cancellationResponsibilityLabel(responsibility?: string | null) {
+  if (responsibility === 'client') return 'cliente';
+  if (responsibility === 'professional') return 'profesional';
+  if (responsibility === 'shared') return 'compartida';
+  if (responsibility === 'manito') return 'MANITO';
+  return 'a revisar';
 }
 
 function serviceIcon(slug: string) {
@@ -3894,6 +3926,15 @@ function OrderCard({
   const [complaintReason, setComplaintReason] = useState('El problema reapareció');
   const [complaintDetail, setComplaintDetail] = useState('');
   const [manualReplacementProfessionalId, setManualReplacementProfessionalId] = useState('');
+  const [showCancellationForm, setShowCancellationForm] = useState(false);
+  const cancellationReasonOptions = profile.role === 'professional' ? professionalCancellationReasons : clientCancellationReasons;
+  const [cancellationReason, setCancellationReason] = useState<V6CancellationReason>(cancellationReasonOptions[0].value);
+  const [cancellationNote, setCancellationNote] = useState('');
+
+  useEffect(() => {
+    if (cancellationReasonOptions.some((option) => option.value === cancellationReason)) return;
+    setCancellationReason(cancellationReasonOptions[0].value);
+  }, [cancellationReason, cancellationReasonOptions]);
 
   const manualAlternatives = useMemo(
     () =>
@@ -4031,11 +4072,27 @@ function OrderCard({
     }
   }
 
-  async function cancel() {
+  async function cancel(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (cancellationReason === 'other' && !cancellationNote.trim()) {
+      setError('Contanos brevemente el motivo de la cancelación.');
+      return;
+    }
+    const phaseWarning =
+      order.status === 'en_camino'
+        ? 'El profesional ya está en camino.'
+        : order.status === 'en_sitio'
+          ? 'El profesional ya llegó al domicilio.'
+          : '';
+    const confirmed = window.confirm(
+      `${phaseWarning ? `${phaseWarning}\n\n` : ''}¿Cancelar este servicio?`,
+    );
+    if (!confirmed) return;
     try {
-      await cancelV6Order(order.id);
+      await cancelV6Order(order.id, cancellationReason, cancellationNote);
       setOrders(await listV6Orders());
-      setNotice('Pedido cancelado.');
+      setNotice('Servicio cancelado.');
+      setShowCancellationForm(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo cancelar.');
     }
@@ -4265,6 +4322,16 @@ function OrderCard({
   const canUploadEvidence = evidenceStageOptions.length > 0;
   const canChat = Boolean(order.professional_id);
   const canShareTracking = !['completed', 'cancelled'].includes(order.status);
+  const canClientCancel =
+    profile.role === 'client' &&
+    ['open', 'scheduled_open', 'waiting_quotes', 'matching_failed', 'payment_pending', 'accepted', 'en_camino', 'en_sitio'].includes(
+      order.status,
+    );
+  const canProfessionalCancel =
+    profile.role === 'professional' &&
+    order.professional_id === profile.id &&
+    ['accepted', 'en_camino', 'en_sitio'].includes(order.status);
+  const canCancelOrder = canClientCancel || canProfessionalCancel;
   const approvedExtras = extras.filter((extra) => extra.status === 'approved');
   const beforePhotos = photos.filter((photo) => photo.stage === 'before').length;
   const afterPhotos = photos.filter((photo) => photo.stage === 'after').length;
@@ -4338,6 +4405,15 @@ function OrderCard({
         <b>{money(orderDisplayAmount(order))}</b>
       </div>
       <StatusSteps status={order.status} />
+      {order.status === 'cancelled' && (
+        <p className="v6-alert">
+          Servicio cancelado
+          {order.cancellation_phase ? ` desde ${V6_STATUS_LABEL[order.cancellation_phase] || order.cancellation_phase}` : ''}.
+          {' '}Motivo: {cancellationReasonLabel(order.cancellation_reason)}.
+          {' '}Responsabilidad: {cancellationResponsibilityLabel(order.cancellation_responsibility)}.
+          {order.cancellation_note ? ` Nota: ${order.cancellation_note}` : ''}
+        </p>
+      )}
       <div className="v6-meta-row">
         <span><ShieldCheck size={14} aria-hidden="true" /> Protección MANITO</span>
         <span>{paymentStatusLabel(order.payment_status)}</span>
@@ -4782,9 +4858,42 @@ function OrderCard({
           </form>
         </div>
       )}
+      {showCancellationForm && canCancelOrder && (
+        <form className="v6-inline-form" onSubmit={cancel}>
+          <select
+            value={cancellationReason}
+            onChange={(event) => setCancellationReason(event.target.value as V6CancellationReason)}
+            aria-label="Motivo de cancelación"
+          >
+            {cancellationReasonOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <textarea
+            value={cancellationNote}
+            onChange={(event) => setCancellationNote(event.target.value)}
+            placeholder={cancellationReason === 'other' ? 'Contanos brevemente qué pasó' : 'Nota opcional'}
+          />
+          {['en_camino', 'en_sitio'].includes(order.status) && (
+            <p className="v6-note">
+              {order.status === 'en_camino'
+                ? 'El profesional ya está en camino. Queda registrado para revisión operativa.'
+                : 'El profesional ya llegó. Queda registrado para revisión operativa.'}
+            </p>
+          )}
+          <div className="v6-actions">
+            <button className="v6-danger" type="submit">Confirmar cancelación</button>
+            <button className="v6-secondary" type="button" onClick={() => setShowCancellationForm(false)}>
+              Volver
+            </button>
+          </div>
+        </form>
+      )}
       <div className="v6-actions">
-        {profile.role === 'client' && ['open', 'scheduled_open', 'waiting_quotes', 'payment_pending', 'accepted'].includes(order.status) && (
-          <button className="v6-danger" type="button" onClick={cancel}>Cancelar</button>
+        {canCancelOrder && !showCancellationForm && (
+          <button className="v6-danger" type="button" onClick={() => setShowCancellationForm(true)}>
+            Cancelar servicio
+          </button>
         )}
         {profile.role === 'professional' &&
           canProfessionalAdvanceOrder(order, profile.id) && (
