@@ -125,7 +125,9 @@ export type V6Order = {
   online_payment_required?: boolean;
   payment_required_at?: string | null;
   paid_at?: string | null;
+  /** @deprecated Historical compatibility only; use protection_window_days. */
   guarantee_days?: number | null;
+  protection_window_days?: number | null;
   eta_minutes?: number | null;
   start_pin?: string | null;
   end_pin?: string | null;
@@ -392,18 +394,52 @@ export type V6Rating = {
   created_at: string;
 };
 
+export type V6ClaimType = 'work_quality' | 'incomplete_work' | 'damage' | 'unexpected_charge' | 'professional_conduct' | 'other';
+export type V6ResolutionType = 'revisit' | 'correction' | 'replacement_professional' | 'credit' | 'partial_refund' | 'full_refund' | 'rejected' | 'other';
+
 export type V6Complaint = {
   id: string;
   order_id: string;
   opened_by: string;
   reason: string;
   detail: string | null;
-  status: 'open' | 'in_review' | 'resolved' | 'rejected';
+  status: 'open' | 'under_review' | 'awaiting_professional' | 'resolved' | 'rejected';
+  claim_type: V6ClaimType | null;
+  opened_by_role: 'client' | null;
+  protection_window_days: number | null;
+  professional_response: string | null;
+  professional_responded_at: string | null;
+  resolution_type: V6ResolutionType | null;
+  resolution_amount: number | null;
   resolution_note: string | null;
   resolved_at: string | null;
   reviewed_by: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type V6ComplaintEvidence = {
+  id: string;
+  complaint_id: string;
+  uploaded_by: string;
+  file_path: string;
+  file_name: string;
+  caption: string | null;
+  created_at: string;
+};
+
+export type V6ComplaintContext = {
+  complaint: V6Complaint;
+  order: Pick<V6Order, 'id' | 'completed_at' | 'agreed_scope' | 'agreed_price' | 'accepted_proposal_id' | 'contract_snapshot' | 'cancelled_at' | 'cancellation_reason'>;
+  proposal: V6OrderProposal | null;
+  extras: V6OrderExtra[];
+  order_evidence: V6OrderPhoto[];
+  complaint_evidence: V6ComplaintEvidence[];
+  payments: Pick<V6Payment, 'id' | 'amount' | 'status' | 'created_at'>[];
+  payment_events: Array<{ id: string; event_type: string; created_at: string }>;
+  messages: V6Message[];
+  ratings: V6Rating[];
+  events: Array<{ id: number; event_type: string; actor_id: string | null; from_status: V6Complaint['status'] | null; to_status: V6Complaint['status']; created_at: string }>;
 };
 
 export type V6AdminComplaintReview = V6Complaint & {

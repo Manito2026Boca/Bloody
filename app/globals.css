@@ -2064,6 +2064,43 @@ a.v6-evidence-link {
   line-height: 1.4;
 }
 
+.v6-protection-case {
+  min-width: 0;
+  padding-block: 16px;
+  border-top: 1px solid #ccd8d5;
+  overflow-wrap: anywhere;
+}
+
+.v6-protection-files,
+.v6-protection-context {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.v6-protection-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.v6-protection-context pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.v6-protection-case input[type='file'],
+.v6-protection input[type='file'] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.v6-protection-case .v6-section-head,
+.v6-protection-case .v6-actions-row {
+  flex-wrap: wrap;
+}
+
 .v6-protection.compact {
   gap: 8px;
   padding: 10px;

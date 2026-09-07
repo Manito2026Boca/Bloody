@@ -116,6 +116,7 @@ const safeOrderColumns = [
   'matching_failed_at',
   'payment_method',
   'guarantee_days',
+  'protection_window_days',
   'eta_minutes',
   'payment_status',
   'online_payment_required',
@@ -657,7 +658,6 @@ export async function createV6Order(input: {
   assignmentMode?: V6AssignmentMode;
   preferredProfessionalId?: string | null;
   paymentMethod?: V6PaymentMethod | null;
-  guaranteeDays?: number;
   etaMinutes?: number | null;
   scheduledAt: string | null;
   estimatedDurationMinutes?: number | null;
@@ -680,7 +680,6 @@ export async function createV6Order(input: {
       assignment_mode: input.assignmentMode || 'auto',
       preferred_professional_id: input.preferredProfessionalId || null,
       payment_method: input.paymentMethod || null,
-      guarantee_days: input.guaranteeDays ?? 7,
       eta_minutes: input.etaMinutes || null,
       scheduled_at: input.scheduledAt,
       estimated_duration_minutes: input.estimatedDurationMinutes || null,
@@ -1029,11 +1028,9 @@ export async function addV6Rating(input: {
 
 export async function addV6Complaint(input: {
   orderId: string;
-  openedBy: string;
-  reason: string;
+  reason: NonNullable<V6Complaint['claim_type']>;
   detail: string;
 }) {
-  void input.openedBy;
   const { data, error } = await getV6Supabase().rpc('open_order_complaint', {
     p_order_id: input.orderId,
     p_reason: input.reason,
@@ -1378,11 +1375,15 @@ export async function reviewV6OrderComplaint(input: {
   complaintId: string;
   status: V6Complaint['status'];
   resolutionNote?: string | null;
+  resolutionType?: V6Complaint['resolution_type'];
+  resolutionAmount?: number | null;
 }) {
   const { data, error } = await getV6Supabase().rpc('review_order_complaint', {
     p_complaint_id: input.complaintId,
     p_status: input.status,
     p_resolution_note: input.resolutionNote || null,
+    p_resolution_type: input.resolutionType || null,
+    p_resolution_amount: input.resolutionAmount ?? null,
   });
   fail(error);
   return data as V6Complaint;

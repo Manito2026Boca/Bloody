@@ -2,6 +2,8 @@
 
 import type { Session } from '@supabase/supabase-js';
 import Image from 'next/image';
+import { ProtectionAdminCase, ProtectionPanel } from './ProtectionManito';
+import { subscribeV6Complaints } from '../lib/v6ProtectionApi';
 import {
   BadgeCheck,
   Banknote,
@@ -38,7 +40,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   acceptV6Proposal,
   acceptV6Order,
-  addV6Complaint,
   addV6OrderPhoto,
   addV6OrderExtra,
   addV6PortfolioItem,
@@ -62,7 +63,6 @@ import {
   getV6ProfessionalPayoutDetails,
   getV6ProfessionalProfile,
   getV6UserSecurityPreferences,
-  listV6Complaints,
   listV6AdminComplaintReviews,
   listV6AdminSettings,
   listV6AdminProfessionalReviews,
@@ -87,7 +87,6 @@ import {
   removeV6Channel,
   reviewV6ProfessionalDocument,
   reviewV6ProfessionalOnboarding,
-  reviewV6OrderComplaint,
   rejectV6MatchingCandidate,
   rejectV6ManualOrderRequest,
   reportV6OrderPayment,
@@ -142,7 +141,6 @@ import type {
   V6AdminReviewStatus,
   V6AdminSetting,
   V6CancellationReason,
-  V6Complaint,
   V6Message,
   V6Mode,
   V6Notification,
@@ -560,16 +558,6 @@ function composeProfileLocation(city: string, detail: string) {
     : `${cleanDetail}, ${cleanCity}`;
 }
 
-function guaranteeUntilText(order: V6Order) {
-  const days = order.guarantee_days || 7;
-  const reference = new Date(order.completed_at || order.updated_at || order.created_at);
-  reference.setDate(reference.getDate() + days);
-  return new Intl.DateTimeFormat('es-AR', {
-    day: '2-digit',
-    month: '2-digit',
-  }).format(reference);
-}
-
 function paymentCoordinationHint(order: V6Order, role: V6Role) {
   if (order.payment_method === 'wallet') {
     return role === 'client'
@@ -584,7 +572,7 @@ function paymentCoordinationHint(order: V6Order, role: V6Role) {
   if (order.payment_method === 'card') {
     return 'El modelo queda preparado para Mercado Pago marketplace: cobro online, comisión MANITO y saldo al prestador.';
   }
-  return 'El pago se coordina dentro del pedido para conservar chat, evidencia y garantía.';
+  return 'El pago se coordina dentro del pedido para conservar chat, evidencia y Protección MANITO.';
 }
 
 function appointmentDate(order: V6Order) {
@@ -2460,7 +2448,6 @@ function ClientHome({
             ? selectedProfessionalCandidate.professional.profile.id
             : null,
         paymentMethod: mode === 'quote' ? null : paymentMethod,
-        guaranteeDays: 7,
         etaMinutes: mode === 'quote' ? null : selectedProfessionalCandidate?.etaMinutes || null,
         scheduledAt: mode === 'scheduled' && scheduledAt ? new Date(scheduledAt).toISOString() : null,
         estimatedDurationMinutes: mode === 'scheduled' ? scheduledReservationDurationMinutes : null,
@@ -2830,7 +2817,7 @@ function ClientHome({
         <div className="v6-flow-step">
           <span>3</span>
           <strong>Queda registrado</strong>
-          <small>fotos, adicionales y garantía</small>
+          <small>fotos, adicionales y Protección MANITO</small>
         </div>
       </section>
 
@@ -3906,7 +3893,6 @@ function OrderCard({
   const clientPin = visibleClientPin(order, profile.role);
   const [proposals, setProposals] = useState<V6OrderProposal[]>([]);
   const [extras, setExtras] = useState<V6OrderExtra[]>([]);
-  const [complaints, setComplaints] = useState<V6Complaint[]>([]);
   const [payments, setPayments] = useState<V6Payment[]>([]);
   const [photos, setPhotos] = useState<Array<V6OrderPhoto & { signedUrl: string | null }>>([]);
   const [evidenceStage, setEvidenceStage] = useState<V6OrderPhoto['stage']>('during');
@@ -3923,8 +3909,6 @@ function OrderCard({
   const [extraAmount, setExtraAmount] = useState('4500');
   const [ratingStars, setRatingStars] = useState(5);
   const [ratingComment, setRatingComment] = useState('');
-  const [complaintReason, setComplaintReason] = useState('El problema reapareció');
-  const [complaintDetail, setComplaintDetail] = useState('');
   const [manualReplacementProfessionalId, setManualReplacementProfessionalId] = useState('');
   const [showCancellationForm, setShowCancellationForm] = useState(false);
   const cancellationReasonOptions = profile.role === 'professional' ? professionalCancellationReasons : clientCancellationReasons;
@@ -3990,15 +3974,13 @@ function OrderCard({
   const canRejectManualRequest = manualRequestCanBeRejectedBy(order, profile);
 
   const refreshCommercialData = useCallback(async () => {
-    const [nextProposals, nextExtras, nextComplaints, nextPayments] = await Promise.all([
+    const [nextProposals, nextExtras, nextPayments] = await Promise.all([
       listV6OrderProposals(order.id),
       listV6OrderExtras(order.id),
-      listV6Complaints(order.id),
       listV6PaymentsForOrder(order.id),
     ]);
     setProposals(nextProposals);
     setExtras(nextExtras);
-    setComplaints(nextComplaints);
     setPayments(nextPayments);
   }, [order.id]);
 
@@ -4018,14 +4000,12 @@ function OrderCard({
     Promise.all([
       listV6OrderProposals(order.id),
       listV6OrderExtras(order.id),
-      listV6Complaints(order.id),
       listV6PaymentsForOrder(order.id),
     ])
-      .then(async ([nextProposals, nextExtras, nextComplaints, nextPayments]) => {
+      .then(async ([nextProposals, nextExtras, nextPayments]) => {
         if (!alive) return;
         setProposals(nextProposals);
         setExtras(nextExtras);
-        setComplaints(nextComplaints);
         setPayments(nextPayments);
         if (alive) await refreshPhotos();
       })
@@ -4262,27 +4242,6 @@ function OrderCard({
     }
   }
 
-  async function submitComplaint(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!complaintDetail.trim()) {
-      setError('Contanos qué pasó para abrir la revisión.');
-      return;
-    }
-    try {
-      await addV6Complaint({
-        orderId: order.id,
-        openedBy: profile.id,
-        reason: complaintReason,
-        detail: complaintDetail,
-      });
-      await refreshCommercialData();
-      setNotice('Revisión abierta. MANITO revisa el caso con el historial del pedido.');
-      setComplaintDetail('');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'No se pudo abrir la revisión.');
-    }
-  }
-
   async function uploadOrderEvidence(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!evidenceFile) {
@@ -4508,15 +4467,14 @@ function OrderCard({
           </p>
         ) : (
           <p>
-            Pago registrado como coordinación manual. Para máxima Protección MANITO, el próximo paso será cobrar online antes de iniciar el trabajo.
+            Pago registrado como coordinación manual dentro del pedido.
           </p>
         )}
       </section>
-      <section className="v6-protection compact">
+      {order.status !== 'completed' && <section className="v6-protection compact">
         <div className="v6-section-head compact">
           <div>
-            <h2>Garantía MANITO</h2>
-            <span>{order.guarantee_days || 7} días</span>
+            <h2>Protección MANITO</h2>
           </div>
           <ShieldCheck size={18} aria-hidden="true" />
         </div>
@@ -4531,10 +4489,11 @@ function OrderCard({
           </span>
           <span>
             <b>Vigencia</b>
-            {order.status === 'completed' ? `Hasta ${guaranteeUntilText(order)}` : 'Empieza al finalizar'}
+            Disponible al finalizar, según el servicio.
           </span>
         </div>
-      </section>
+      </section>}
+      {order.status === 'completed' && <ProtectionPanel key={order.id} order={order} profile={profile} notify={setNotice} />}
       {canClientReportManualPayment && (
         <section className="v6-payment-box action">
           <div>
@@ -4808,17 +4767,6 @@ function OrderCard({
               Validado
             </span>
           </div>
-          {complaints.length > 0 && (
-            <div className="v6-complaint-list">
-              {complaints.map((complaint) => (
-                <article key={complaint.id}>
-                  <strong>{complaint.reason}</strong>
-                  <span>{complaint.status.replace('_', ' ')} · {shortDate(complaint.created_at)}</span>
-                  {complaint.detail && <p>{complaint.detail}</p>}
-                </article>
-              ))}
-            </div>
-          )}
         </section>
       )}
       {profile.role === 'client' && order.status === 'completed' && order.professional_id && (
@@ -4831,30 +4779,6 @@ function OrderCard({
             </select>
             <input value={ratingComment} onChange={(event) => setRatingComment(event.target.value)} placeholder="Comentario" />
             <button className="v6-secondary" type="submit">Calificar</button>
-          </form>
-          <form className="v6-inline-form" onSubmit={submitComplaint}>
-            <div className="v6-section-head compact">
-              <h2>¿Tuviste un problema con este trabajo?</h2>
-              <span>Protección</span>
-            </div>
-            <select
-              value={complaintReason}
-              onChange={(event) => setComplaintReason(event.target.value)}
-              aria-label="Motivo de revisión"
-            >
-              <option>El problema reapareció</option>
-              <option>Trabajo incompleto</option>
-              <option>Daño relacionado con el trabajo</option>
-              <option>Cobro o adicional no acordado</option>
-              <option>Conducta del profesional</option>
-              <option>Otro problema</option>
-            </select>
-            <textarea
-              value={complaintDetail}
-              onChange={(event) => setComplaintDetail(event.target.value)}
-              placeholder="Describí qué pasó. Si podés, agregá fotos al seguimiento para que MANITO revise con evidencia."
-            />
-            <button className="v6-secondary" type="submit">Solicitar revisión</button>
           </form>
         </div>
       )}
@@ -4942,7 +4866,7 @@ function ProfilePanel({
   const [portfolio, setPortfolio] = useState<V6PortfolioItem[]>([]);
   const [professionalStep, setProfessionalStep] = useState(1);
   const [headline, setHeadline] = useState('Tecnico verificado para urgencias del hogar');
-  const [bio, setBio] = useState('Trabajo con turnos puntuales, presupuesto claro y garantía MANITO.');
+  const [bio, setBio] = useState('Trabajo con turnos puntuales, presupuesto claro y Protección MANITO.');
   const [yearsExperience, setYearsExperience] = useState('3');
   const [insuranceLabel, setInsuranceLabel] = useState('Responsabilidad civil vigente');
   const [workZone, setWorkZone] = useState(profile.city || 'Mar del Plata');
@@ -6412,24 +6336,28 @@ function AdminReviewWorkbench({
 }) {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [complaintNotes, setComplaintNotes] = useState<Record<string, string>>({});
 
   const pendingCount = reviews.filter((review) =>
     ['submitted', 'in_review', 'observed'].includes(review.onboarding_status),
   ).length;
   const approvedCount = reviews.filter((review) => review.onboarding_status === 'approved').length;
   const openComplaintCount = complaints.filter((complaint) =>
-    ['open', 'in_review'].includes(complaint.status),
+    ['open', 'under_review', 'awaiting_professional'].includes(complaint.status),
   ).length;
 
-  async function refreshReviews() {
+  const refreshReviews = useCallback(async () => {
     const [nextReviews, nextComplaints] = await Promise.all([
       listV6AdminProfessionalReviews(),
       listV6AdminComplaintReviews(),
     ]);
     setReviews(nextReviews);
     setComplaints(nextComplaints);
-  }
+  }, [setReviews, setComplaints]);
+
+  useEffect(() => {
+    const channel = subscribeV6Complaints(null, () => { void refreshReviews().catch(() => setNotice('No pudimos actualizar los casos.')); });
+    return () => removeV6Channel(channel);
+  }, [refreshReviews, setNotice]);
 
   async function reviewProfessional(review: V6AdminProfessionalReview, status: V6AdminReviewStatus) {
     const key = `${review.professional_id}:${status}`;
@@ -6486,24 +6414,6 @@ function AdminReviewWorkbench({
     window.open(signedUrl, '_blank', 'noopener,noreferrer');
   }
 
-  async function reviewComplaint(complaint: V6AdminComplaintReview, status: V6Complaint['status']) {
-    const key = `${complaint.id}:${status}`;
-    setBusyKey(key);
-    try {
-      await reviewV6OrderComplaint({
-        complaintId: complaint.id,
-        status,
-        resolutionNote: complaintNotes[complaint.id] || complaint.resolution_note,
-      });
-      await refreshReviews();
-      setNotice(adminComplaintResultLabel(status));
-    } catch (caught) {
-      setNotice(caught instanceof Error ? caught.message : 'No se pudo resolver la garantía.');
-    } finally {
-      setBusyKey(null);
-    }
-  }
-
   return (
     <section className="v6-card v6-admin-workbench">
       <div className="v6-section-head">
@@ -6527,76 +6437,22 @@ function AdminReviewWorkbench({
         </article>
         <article>
           <strong>{openComplaintCount}</strong>
-          <span>garantías abiertas</span>
+          <span>casos de Protección abiertos</span>
         </article>
       </div>
 
       <div className="v6-section-head compact">
-        <h3>Garantías y reclamos</h3>
+        <h3>Protección MANITO</h3>
         <span>{complaints.length}</span>
       </div>
       <div className="v6-admin-review-list">
         {complaints.map((complaint) => (
-          <article className="v6-admin-review-card" key={complaint.id}>
-            <div className="v6-section-head compact">
-              <h3>{complaint.service_name}</h3>
-              <span>{adminComplaintStatusLabel(complaint.status)}</span>
-            </div>
-            <p className="v6-muted">
-              {complaint.client_name} · {complaint.client_city || 'sin ciudad'} · profesional {complaint.professional_name || 'sin asignar'}
-            </p>
-            <div className="v6-admin-block">
-              <strong>{complaint.reason}</strong>
-              {complaint.detail && <p>{complaint.detail}</p>}
-              <small>
-                Pedido #{complaint.order_id.slice(0, 8).toUpperCase()} · {money(complaint.order_price)} · abierto {shortDate(complaint.created_at)}
-              </small>
-            </div>
-            {complaint.resolution_note && (
-              <p className="v6-note">Resolución: {complaint.resolution_note}</p>
-            )}
-            <label className="v6-field">
-              <span>Resolución / nota interna</span>
-              <textarea
-                value={complaintNotes[complaint.id] || ''}
-                onChange={(event) =>
-                  setComplaintNotes((current) => ({ ...current, [complaint.id]: event.target.value }))
-                }
-                placeholder="Ej: se acuerda nueva visita sin cargo..."
-              />
-            </label>
-            <div className="v6-actions-row compact">
-              <button
-                className="v6-secondary"
-                type="button"
-                disabled={busyKey === `${complaint.id}:in_review`}
-                onClick={() => void reviewComplaint(complaint, 'in_review')}
-              >
-                En revisión
-              </button>
-              <button
-                className="v6-primary"
-                type="button"
-                disabled={busyKey === `${complaint.id}:resolved`}
-                onClick={() => void reviewComplaint(complaint, 'resolved')}
-              >
-                Resolver
-              </button>
-              <button
-                className="v6-danger"
-                type="button"
-                disabled={busyKey === `${complaint.id}:rejected`}
-                onClick={() => void reviewComplaint(complaint, 'rejected')}
-              >
-                Rechazar
-              </button>
-            </div>
-          </article>
+          <ProtectionAdminCase key={complaint.id} item={complaint} refresh={refreshReviews} notify={setNotice} />
         ))}
         {!complaints.length && (
           <div className="v6-empty">
             <ShieldCheck size={24} aria-hidden="true" />
-            <strong>No hay garantías abiertas</strong>
+            <strong>No hay casos de Protección</strong>
             <p>Los casos abiertos desde pedidos finalizados van a aparecer acá.</p>
           </div>
         )}
@@ -6787,26 +6643,6 @@ function adminDocumentResultLabel(status: 'approved' | 'observed' | 'rejected') 
     approved: 'Documento aprobado.',
     observed: 'Documento observado.',
     rejected: 'Documento rechazado.',
-  };
-  return labels[status];
-}
-
-function adminComplaintStatusLabel(status: V6Complaint['status']) {
-  const labels: Record<V6Complaint['status'], string> = {
-    open: 'Abierta',
-    in_review: 'En revisión',
-    resolved: 'Resuelta',
-    rejected: 'Rechazada',
-  };
-  return labels[status] || status;
-}
-
-function adminComplaintResultLabel(status: V6Complaint['status']) {
-  const labels: Record<V6Complaint['status'], string> = {
-    open: 'Garantía abierta.',
-    in_review: 'Garantía marcada en revisión.',
-    resolved: 'Garantía resuelta.',
-    rejected: 'Garantía rechazada.',
   };
   return labels[status];
 }
