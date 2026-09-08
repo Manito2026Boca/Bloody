@@ -67,6 +67,8 @@ function uniqueStoragePart() {
 
 const safeOrderColumns = [
   'id',
+  'recurring_plan_id',
+  'recurrence_due_at',
   'client_id',
   'professional_id',
   'service_id',
@@ -668,6 +670,17 @@ export async function createV6Order(input: {
 }) {
   const supabase = getV6Supabase();
   const estimatedPrice = input.estimatedPrice ?? input.price;
+  if (input.mode === 'scheduled') {
+    const { data, error } = await supabase.rpc('create_scheduled_order', { p_data: {
+      service_id: input.serviceId, description: input.description, address: input.address,
+      scheduled_at: input.scheduledAt, estimated_duration_minutes: input.estimatedDurationMinutes,
+      preferred_professional_id: input.assignmentMode === 'manual' ? input.preferredProfessionalId : null,
+      payment_method: input.paymentMethod, client_lat: input.lat, client_lng: input.lng,
+    } });
+    fail(error);
+    if (!data?.id) throw new Error('No se pudo confirmar la creación del pedido.');
+    return data as V6Order;
+  }
   const { data, error } = await supabase
     .from('orders')
     .insert({
@@ -717,25 +730,13 @@ export async function createV6Order(input: {
 }
 
 export async function createV6RecurringServicePlan(input: {
-  clientId: string;
-  serviceId: number;
   sourceOrderId: string;
   frequency: V6RecurringServicePlan['frequency'];
-  nextScheduledAt: string | null;
 }) {
   const { data, error } = await getV6Supabase()
-    .from('recurring_service_plans')
-    .insert({
-      client_id: input.clientId,
-      service_id: input.serviceId,
-      source_order_id: input.sourceOrderId,
-      frequency: input.frequency,
-      next_scheduled_at: input.nextScheduledAt,
-    })
-    .select('*')
-    .single();
-  if (isMissingV5Table(error)) return null;
+    .rpc('create_recurring_plan', { p_source_order_id: input.sourceOrderId, p_frequency: input.frequency });
   fail(error);
+  if (!data?.id) throw new Error('No se pudo confirmar la creación del plan.');
   return data as V6RecurringServicePlan;
 }
 

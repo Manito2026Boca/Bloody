@@ -13,7 +13,7 @@ export type V6PaymentStatus =
   | 'refunded'
   | 'partially_refunded';
 export type V6PaymentProvider = 'mercado_pago' | 'manual' | 'cash' | 'wallet';
-export type V6ManualResponseStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
+export type V6ManualResponseStatus = 'pending' | 'accepted' | 'rejected' | 'expired' | 'awaiting_client_choice';
 export type V6MatchingStatus = 'idle' | 'round_pending' | 'matched' | 'failed';
 export type V6MatchingCandidateStatus = 'pending' | 'accepted' | 'rejected' | 'expired' | 'closed';
 export type V6CancellationActor = 'client' | 'professional';
@@ -100,6 +100,8 @@ export type V6PublicProfessional = {
 
 export type V6Order = {
   id: string;
+  recurring_plan_id?: string | null;
+  recurrence_due_at?: string | null;
   client_id: string;
   professional_id: string | null;
   service_id: number;
@@ -188,6 +190,17 @@ export type V6RecurringServicePlan = {
   client_id: string;
   service_id: number;
   source_order_id: string | null;
+  preferred_professional_id: string | null;
+  preferred_professional_name?: string | null;
+  service_name?: string;
+  description: string;
+  address: string;
+  client_lat: number | null;
+  client_lng: number | null;
+  estimated_duration_minutes: number;
+  anchor_at: string;
+  generation_error: string | null;
+  latest_order?: { id: string; status: V6OrderStatus; scheduled_at: string; manual_response_status: V6ManualResponseStatus | null } | null;
   frequency: 'weekly' | 'biweekly' | 'monthly';
   status: 'active' | 'paused' | 'cancelled';
   next_scheduled_at: string | null;

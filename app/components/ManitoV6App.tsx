@@ -3,6 +3,7 @@
 import type { Session } from '@supabase/supabase-js';
 import Image from 'next/image';
 import { ProtectionAdminCase, ProtectionPanel } from './ProtectionManito';
+import { RecurringServicesPanel, RecurringAdminPanel } from './RecurringServicesPanel';
 import { subscribeV6Complaints } from '../lib/v6ProtectionApi';
 import {
   BadgeCheck,
@@ -1057,7 +1058,8 @@ function manualRequestNeedsClientDecision(order: V6Order) {
   return (
     order.assignment_mode === 'manual' &&
     !order.professional_id &&
-    (order.manual_response_status === 'rejected' ||
+    (order.manual_response_status === 'awaiting_client_choice' ||
+      order.manual_response_status === 'rejected' ||
       order.manual_response_status === 'expired' ||
       manualRequestIsExpiredByClock(order))
   );
@@ -1074,6 +1076,9 @@ function manualRequestCanBeRejectedBy(order: V6Order, profile: V6Profile) {
 }
 
 function manualResponseLabel(order: V6Order) {
+  if (order.manual_response_status === 'awaiting_client_choice') {
+    return 'Tu profesional preferido no está disponible para esta visita.';
+  }
   if (manualRequestIsExpiredByClock(order) || order.manual_response_status === 'expired') {
     return 'El profesional no respondió a tiempo.';
   }
@@ -2457,18 +2462,17 @@ function ClientHome({
         lng: coords?.lng || null,
       });
       let recurringPlanCreated = false;
+      let recurringPlanFailed = false;
       if (mode === 'scheduled' && repeatService && canRepeatSelectedService) {
         try {
           await createV6RecurringServicePlan({
-            clientId: profile.id,
-            serviceId: selectedService.id,
             sourceOrderId: createdOrder.id,
             frequency: recurrenceFrequency,
-            nextScheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
           });
           recurringPlanCreated = true;
         } catch {
           recurringPlanCreated = false;
+          recurringPlanFailed = true;
         }
       }
       let photoUploadFailed = false;
@@ -2501,7 +2505,9 @@ function ClientHome({
       }
       setOrders(await listV6Orders());
       setNotice(
-        photoUploadFailed
+        recurringPlanFailed
+          ? 'El pedido se publicó, pero no pudimos crear la repetición. Podés reintentarlo desde Cuenta, en Mis servicios recurrentes.'
+          : photoUploadFailed
           ? 'Pedido publicado. Algunas fotos no se pudieron subir; podés compartirlas por chat.'
           : mode === 'quote'
             ? 'Solicitud de presupuesto publicada. Los profesionales compatibles pueden enviarte propuestas.'
@@ -4376,6 +4382,7 @@ function OrderCard({
       <div className="v6-meta-row">
         <span><ShieldCheck size={14} aria-hidden="true" /> Protección MANITO</span>
         <span>{paymentStatusLabel(order.payment_status)}</span>
+        {order.recurring_plan_id && <span>Servicio recurrente</span>}
         {order.payment_method && <span>Pago {paymentLabel(order.payment_method)}</span>}
         {order.eta_minutes && <span>ETA {order.eta_minutes} min</span>}
         {clientPin && <span>{clientPin.label} {clientPin.value}</span>}
@@ -4386,7 +4393,7 @@ function OrderCard({
             <strong>
               <Users size={16} aria-hidden="true" /> Solicitud directa
             </strong>
-            <span>{order.manual_response_status || 'pendiente'}</span>
+            <span>{order.manual_response_status === 'awaiting_client_choice' ? 'Elegí cómo seguir' : order.manual_response_status || 'pendiente'}</span>
           </div>
           <p>{manualLabel}</p>
           {showManualClientDecision && (
@@ -4413,7 +4420,7 @@ function OrderCard({
                 Elegir otro profesional
               </button>
               <button className="v6-primary" type="button" onClick={fallbackToAutomaticSearch}>
-                Buscar automáticamente
+                {order.mode === 'scheduled' ? 'Buscar profesionales' : 'Buscar automáticamente'}
               </button>
             </div>
           )}
@@ -5916,6 +5923,7 @@ function AccountPanel({
   const [adminSettings, setAdminSettings] = useState<V6AdminSetting[]>([]);
   const [adminReviews, setAdminReviews] = useState<V6AdminProfessionalReview[]>([]);
   const [adminComplaints, setAdminComplaints] = useState<V6AdminComplaintReview[]>([]);
+  const [showRecurring, setShowRecurring] = useState(false);
   const referralCode = `MANITO-${normalizeText(profile.full_name || profile.email || profile.id)
     .replace(/[^a-z0-9]+/g, '')
     .slice(0, 6)
@@ -6020,13 +6028,7 @@ function AccountPanel({
   }
 
   function goToRecurringOrders() {
-    const hasOrders = clientOrders.length > 0;
-    onNavigate(hasOrders ? 'orders' : 'home');
-    setNotice(
-      hasOrders
-        ? 'Abrí un pedido anterior para repetirlo o usarlo como referencia.'
-        : 'Todavía no hay pedidos habituales. Creá el primero desde Inicio.',
-    );
+    setShowRecurring(true);
   }
 
   async function shareActiveTracking() {
@@ -6086,6 +6088,11 @@ function AccountPanel({
         <h1>{profile.full_name || 'Usuario MANITO'}</h1>
         <p>{profile.email} · cuenta MANITO</p>
       </section>
+      {showRecurring && <RecurringServicesPanel
+        clientOrders={clientOrders}
+        onOrders={() => onNavigate('orders')}
+        onClose={() => setShowRecurring(false)}
+      />}
       <section className="v6-card v6-account-cta">
         <h2>Tu cuenta de cliente</h2>
         <p>Guardá direcciones, favoritos, pedidos recurrentes y datos de facturación.</p>
@@ -6292,6 +6299,9 @@ function AccountPanel({
           Quiero ser profesional
         </button>
       </section>
+      {profile.role === 'admin' && (
+        <RecurringAdminPanel />
+      )}
       {profile.role === 'admin' && (
         <AdminReviewWorkbench
           reviews={adminReviews}
