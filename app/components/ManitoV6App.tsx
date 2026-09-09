@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { ProtectionAdminCase, ProtectionPanel } from './ProtectionManito';
 import { RecurringServicesPanel, RecurringAdminPanel } from './RecurringServicesPanel';
 import { subscribeV6Complaints } from '../lib/v6ProtectionApi';
+import { subscribeV6OrderDetails } from '../lib/v6OrderRealtime';
 import {
   BadgeCheck,
   Banknote,
@@ -1380,7 +1381,7 @@ async function reverseGeocodePhoneLocation(lat: number, lng: number): Promise<Re
 }
 
 export default function ManitoV6App() {
-  const [configured, setConfigured] = useState(() => isV6SupabaseConfigured());
+  const [configured, setConfigured] = useState<boolean | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<V6Profile | null>(null);
   const [services, setServices] = useState<V6Service[]>([]);
@@ -1393,23 +1394,33 @@ export default function ManitoV6App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('home');
   const [appMode, setAppMode] = useState<AppMode>('client');
-  const [loading, setLoading] = useState(() => isV6SupabaseConfigured());
+  const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatOrder, setChatOrder] = useState<V6Order | null>(null);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
-  const [isStandalone, setIsStandalone] = useState(() => isInstalledDisplayMode());
+  const [isStandalone, setIsStandalone] = useState(false);
   const [savingPhoneLocation, setSavingPhoneLocation] = useState(false);
   const [clientSelectedService, setClientSelectedService] = useState<V6Service | null>(null);
   const [clientProblemQuery, setClientProblemQuery] = useState('');
-  const lastRealtimeNoticeAt = useRef(0);
+  const lastAuthUser = useRef<string | null>(null);
+  const dataLoadEpoch = useRef(0);
+
+  useEffect(() => {
+    const ready = isV6SupabaseConfigured();
+    setConfigured(ready);
+    if (!ready) setLoading(false);
+    setIsStandalone(isInstalledDisplayMode());
+  }, []);
 
   const loadData = useCallback(async (user: Session['user']) => {
+    const epoch = ++dataLoadEpoch.current;
     setProfileLoading(true);
     try {
       const userId = user.id;
       const nextProfile = await getOrRecoverV6Profile(user);
+      if (epoch !== dataLoadEpoch.current) return;
       setError(null);
       setProfile(nextProfile);
 
@@ -1431,6 +1442,7 @@ export default function ManitoV6App() {
         listV6PublicProfessionals(),
       ]);
 
+      if (epoch !== dataLoadEpoch.current) return;
       if (nextServices.status === 'fulfilled') setServices(nextServices.value);
       if (nextSpecialties.status === 'fulfilled') setSpecialties(nextSpecialties.value);
       if (nextOrders.status === 'fulfilled') setOrders(nextOrders.value);
@@ -1455,11 +1467,13 @@ export default function ManitoV6App() {
         setNotice('Entraste correctamente. Algunos datos pueden tardar unos segundos en actualizar.');
       }
     } finally {
-      setProfileLoading(false);
+      if (epoch === dataLoadEpoch.current) setProfileLoading(false);
     }
   }, []);
 
   const resetSession = useCallback(async () => {
+    dataLoadEpoch.current++;
+    lastAuthUser.current = null;
     try {
       await getV6Supabase().auth.signOut({ scope: 'local' });
     } catch {
@@ -1482,11 +1496,15 @@ export default function ManitoV6App() {
     }
 
     const supabase = getV6Supabase();
+    let alive = true;
     supabase.auth
       .getSession()
       .then(async ({ data }) => {
+        if (!alive) return;
         setSession(data.session);
         if (data.session?.user.id) {
+          let needsLoad = lastAuthUser.current !== data.session.user.id;
+          lastAuthUser.current = data.session.user.id;
           const email = data.session.user.email || '';
           const pending = window.localStorage.getItem(pendingProfileKey(email));
           if (pending) {
@@ -1496,25 +1514,29 @@ export default function ManitoV6App() {
             };
             await completeV6Profile({ fullName: parsed.fullName, role: parsed.role || 'client' });
             window.localStorage.removeItem(pendingProfileKey(email));
+            needsLoad = true;
           }
-          await loadData(data.session.user);
+          if (needsLoad) await loadData(data.session.user);
         }
       })
       .catch((caught) => {
-        setSession(null);
-        setProfile(null);
+        if (!alive) return;
         setError(friendlySessionError(caught, 'No se pudo iniciar.'));
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (alive) setLoading(false); });
 
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, nextSession) => {
         setSession(nextSession);
         if (nextSession?.user.id) {
+          if (lastAuthUser.current === nextSession.user.id && _event !== 'USER_UPDATED') return;
+          lastAuthUser.current = nextSession.user.id;
           void loadData(nextSession.user).catch((caught) =>
             setError(friendlySessionError(caught, 'No se pudo cargar tu perfil.')),
           );
         } else {
+          lastAuthUser.current = null;
+          dataLoadEpoch.current++;
           setProfileLoading(false);
           setProfile(null);
           setOrders([]);
@@ -1526,27 +1548,35 @@ export default function ManitoV6App() {
       },
     );
 
-    return () => listener.subscription.unsubscribe();
+    return () => { alive = false; lastAuthUser.current = null; dataLoadEpoch.current++; listener.subscription.unsubscribe(); };
   }, [configured, loadData]);
 
   useEffect(() => {
     if (!profile) return undefined;
-    const channel = subscribeV6Orders(() => {
-      void listV6Orders().then((nextOrders) => {
-        setOrders(nextOrders);
-        const now = Date.now();
-        if (now - lastRealtimeNoticeAt.current > 15000) {
-          lastRealtimeNoticeAt.current = now;
-          setNotice('Pedido actualizado en tiempo real.');
+    let alive = true;
+    let refreshing = false;
+    let pending = false;
+    const refresh = async () => {
+      if (!alive) return;
+      if (refreshing) { pending = true; return; }
+      refreshing = true;
+      try {
+        const [nextOrders, nextNotifications] = await Promise.allSettled([
+          listV6Orders(), listV6Notifications(profile.id),
+        ]);
+        if (!alive) return;
+        if (nextOrders.status === 'fulfilled') setOrders(nextOrders.value);
+        if (nextNotifications.status === 'fulfilled') setNotifications(nextNotifications.value);
+        if (nextOrders.status === 'rejected' || nextNotifications.status === 'rejected') {
+          setNotice('No pudimos actualizar todos los datos. Revisá tu conexión.');
         }
-      });
-    });
-    return () => removeV6Channel(channel);
-  }, [profile]);
-
-  useEffect(() => {
-    if (!profile) return undefined;
-    const channel = getV6Supabase()
+      } finally {
+        refreshing = false;
+        if (pending && alive) { pending = false; void refresh(); }
+      }
+    };
+    const channel = subscribeV6Orders(() => { void refresh(); });
+    const notificationChannel = getV6Supabase()
       .channel(`manito-v6-notifications-${profile.id}`)
       .on(
         'postgres_changes',
@@ -1556,12 +1586,23 @@ export default function ManitoV6App() {
           table: 'notifications',
           filter: `recipient_id=eq.${profile.id}`,
         },
-        () => {
-          void listV6Notifications(profile.id).then(setNotifications);
-        },
+        () => { void refresh(); },
       )
       .subscribe();
-    return () => removeV6Channel(channel);
+    // Opportunities are intentionally not readable through orders RLS before acceptance.
+    // Their notifications trigger a safe RPC reload; visible polling also advances lazy deadlines.
+    const refreshVisible = () => { if (document.visibilityState === 'visible') void refresh(); };
+    const timer = window.setInterval(refreshVisible, 15000);
+    window.addEventListener('online', refreshVisible);
+    document.addEventListener('visibilitychange', refreshVisible);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener('online', refreshVisible);
+      document.removeEventListener('visibilitychange', refreshVisible);
+      removeV6Channel(channel);
+      removeV6Channel(notificationChannel);
+    };
   }, [profile]);
 
   useEffect(() => {
@@ -1692,7 +1733,7 @@ export default function ManitoV6App() {
     }
   }
 
-  if (!configured) {
+  if (configured === false) {
     return <SetupScreen onConnected={() => setConfigured(true)} />;
   }
 
@@ -1723,20 +1764,16 @@ export default function ManitoV6App() {
 
   if (!profile) {
     const profileError = error
-      ? friendlySessionError(error, 'No se encontró tu perfil.')
-      : 'No se encontró tu perfil.';
-    const canResetSession =
-      profileError.includes('hora desfasada') ||
-      profileError.toLowerCase().includes('jwt issued at future');
+      ? friendlySessionError(error, 'No pudimos cargar tu cuenta. Probá nuevamente.')
+      : 'No pudimos cargar tu cuenta. Probá nuevamente.';
     return (
       <main className="v6-app v6-center">
         <section className="v6-card">
           <p className="v6-alert">{profileError}</p>
-          {canResetSession && (
-            <button className="v6-primary" type="button" onClick={resetSession}>
-              Volver a ingresar
-            </button>
-          )}
+          <button className="v6-primary" type="button" onClick={() => {
+            void loadData(session.user).catch(caught => setError(friendlySessionError(caught, 'No pudimos cargar tu cuenta.')));
+          }}>Reintentar</button>
+          <button className="v6-secondary" type="button" onClick={resetSession}>Volver a ingresar</button>
         </section>
       </main>
     );
@@ -3913,6 +3950,8 @@ function OrderCard({
   const [proposalNote, setProposalNote] = useState('');
   const [extraTitle, setExtraTitle] = useState('Material adicional');
   const [extraAmount, setExtraAmount] = useState('4500');
+  const [submittingExtra, setSubmittingExtra] = useState(false);
+  const extraRequestInFlight = useRef(false);
   const [ratingStars, setRatingStars] = useState(5);
   const [ratingComment, setRatingComment] = useState('');
   const [manualReplacementProfessionalId, setManualReplacementProfessionalId] = useState('');
@@ -4003,23 +4042,40 @@ function OrderCard({
 
   useEffect(() => {
     let alive = true;
-    Promise.all([
-      listV6OrderProposals(order.id),
-      listV6OrderExtras(order.id),
-      listV6PaymentsForOrder(order.id),
-    ])
-      .then(async ([nextProposals, nextExtras, nextPayments]) => {
+    let running = false;
+    let pending = false;
+    const refresh = async () => {
+      if (!alive) return;
+      if (running) { pending = true; return; }
+      running = true;
+      try {
+        const results = await Promise.allSettled([
+          listV6OrderProposals(order.id), listV6OrderExtras(order.id),
+          listV6PaymentsForOrder(order.id), listV6OrderPhotos(order.id).then(async rows =>
+            Promise.all(rows.map(async photo => ({ ...photo, signedUrl: await getV6MediaSignedUrl(photo.file_path) })))),
+        ]);
         if (!alive) return;
-        setProposals(nextProposals);
-        setExtras(nextExtras);
-        setPayments(nextPayments);
-        if (alive) await refreshPhotos();
-      })
-      .catch(() => undefined);
+        if (results[0].status === 'fulfilled') setProposals(results[0].value);
+        if (results[1].status === 'fulfilled') setExtras(results[1].value);
+        if (results[2].status === 'fulfilled') setPayments(results[2].value);
+        if (results[3].status === 'fulfilled') setPhotos(results[3].value);
+        if (results.some(result => result.status === 'rejected')) {
+          setNotice('No pudimos actualizar todos los datos del pedido. Revisá tu conexión.');
+        }
+      } finally {
+        running = false;
+        if (pending && alive) { pending = false; void refresh(); }
+      }
+    };
+    const channel = subscribeV6OrderDetails(order.id, () => { void refresh(); });
+    void refresh();
+    window.addEventListener('online', refresh);
     return () => {
       alive = false;
+      window.removeEventListener('online', refresh);
+      removeV6Channel(channel);
     };
-  }, [order.id, refreshPhotos]);
+  }, [order.id, setNotice]);
 
   useEffect(() => {
     if (profile.role !== 'professional') return;
@@ -4202,7 +4258,9 @@ function OrderCard({
 
   async function createExtra(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!order.professional_id) return;
+    if (!order.professional_id || extraRequestInFlight.current) return;
+    extraRequestInFlight.current = true;
+    setSubmittingExtra(true);
     try {
       await addV6OrderExtra({
         orderId: order.id,
@@ -4214,6 +4272,9 @@ function OrderCard({
       setNotice('Adicional enviado para aprobación.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo crear adicional.');
+    } finally {
+      extraRequestInFlight.current = false;
+      setSubmittingExtra(false);
     }
   }
 
@@ -4343,7 +4404,7 @@ function OrderCard({
   }
 
   return (
-    <article className="v6-order">
+    <article className="v6-order" data-order-id={order.id}>
       <div className="v6-order-top">
         <span className="v6-order-icon">{serviceIcon(order.service?.slug || '')}</span>
         <div>
@@ -4725,7 +4786,7 @@ function OrderCard({
         <form className="v6-inline-form" onSubmit={createExtra}>
           <input value={extraTitle} onChange={(event) => setExtraTitle(event.target.value)} aria-label="Detalle adicional" />
           <input value={extraAmount} onChange={(event) => setExtraAmount(event.target.value)} aria-label="Monto adicional" />
-          <button className="v6-secondary" type="submit">Pedir adicional</button>
+          <button className="v6-secondary" type="submit" disabled={submittingExtra}>{submittingExtra ? 'Enviando...' : 'Pedir adicional'}</button>
         </form>
       )}
       {order.status === 'completed' && (

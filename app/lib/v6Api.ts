@@ -1398,6 +1398,9 @@ export function subscribeV6Orders(onChange: () => void) {
       { event: '*', schema: 'public', table: 'orders' },
       onChange,
     )
+    .on('system', {}, (payload) => {
+      if (payload.extension === 'postgres_changes' && payload.status === 'ok') onChange();
+    })
     .subscribe();
   return channel;
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { resolveSupabaseConfig } from './supabaseConfig';
 
 const CFG_KEY = 'manito_v6_supabase';
 
@@ -31,25 +32,25 @@ export function clearStoredConfig() {
   cachedClient = null;
 }
 
+function currentConfig() {
+  return resolveSupabaseConfig({
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    key: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+  }, getStoredConfig());
+}
+
 export function isV6SupabaseConfigured() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-  ) || Boolean(getStoredConfig());
+  return Boolean(currentConfig());
 }
 
 export function getV6Supabase() {
   if (cachedClient) return cachedClient;
 
-  const stored = getStoredConfig();
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || stored?.url;
-  const key =
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    stored?.key;
-
-  if (!url || !key) {
+  const config = currentConfig();
+  if (!config) {
     throw new Error('Falta configurar Supabase.');
   }
+  const { url, key } = config;
 
   cachedClient = createClient(url, key, {
     auth: {

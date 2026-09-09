@@ -3,7 +3,7 @@
 import { CheckCircle2, Loader2, MailCheck, RotateCcw } from 'lucide-react';
 import Image from 'next/image';
 import type { FormEvent } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { completeV6Profile } from '../lib/v6Api';
 import { MIN_PASSWORD_LENGTH, passwordHelpText, passwordSecurityMessage } from '../lib/security';
 import { getV6Supabase } from '../lib/v6Supabase';
@@ -19,7 +19,6 @@ type SupabaseAuthPayload = {
   user?: { email?: string | null } | null;
   session?: { user?: { email?: string | null } | null } | null;
 };
-const deployedAppUrl = 'https://bloody-eta.vercel.app';
 
 function pendingProfileKey(email: string) {
   return `manito_v6_pending_profile:${email.toLowerCase()}`;
@@ -64,19 +63,7 @@ export default function AuthConfirmationScreen({
   const [newPassword, setNewPassword] = useState('');
   const [passwordSaving, setPasswordSaving] = useState(false);
 
-  const appUrl = useMemo(() => {
-    if (typeof window === 'undefined') return deployedAppUrl;
-    const configuredUrl = process.env.NEXT_PUBLIC_APP_URL;
-    if (configuredUrl) return configuredUrl;
-    if (
-      window.location.hostname === 'localhost' ||
-      window.location.hostname === '127.0.0.1' ||
-      window.location.hostname.endsWith('.chatgpt.site')
-    ) {
-      return deployedAppUrl;
-    }
-    return window.location.origin;
-  }, []);
+  const appUrl = '/';
 
   useEffect(() => {
     let alive = true;
@@ -136,7 +123,7 @@ export default function AuthConfirmationScreen({
           if (!data.session) {
             if (!alive) return;
             setState('ready');
-            setMessage('Tu email ya fue confirmado. Ingresá con tu cuenta para seguir.');
+            setMessage('Ingresá con tu cuenta para continuar. Si todavía no confirmaste el correo, podés reenviar el enlace desde el acceso.');
             return;
           }
           confirmedEmail = getConfirmedEmail(data);
@@ -250,6 +237,8 @@ export default function AuthConfirmationScreen({
               ? 'No se pudo validar'
               : state === 'password'
                 ? 'Nueva contraseña'
+              : state === 'ready'
+                ? 'Ingresar a MANITO'
               : 'Cuenta confirmada'}
         </h1>
         <p className={state === 'error' ? 'v6-alert' : 'v6-note'}>{message}</p>
