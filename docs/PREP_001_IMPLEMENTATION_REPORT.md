@@ -187,7 +187,10 @@ Limpieza: cuentas, pedidos, servicio y archivos de fixtures eliminados; sesiones
 
 ## 23. Commit / deploy
 
-Pendiente de anotar el resultado de publicacion al finalizar.
+Codigo: commit c6c4214, enviado a github/main. Vercel confirmo success / Deployment has completed para ese commit.
+Deploy: https://vercel.com/manito/bloody/CCDW3NBVgf5oRsgWfH5LheBaVCsx
+Produccion: https://bloody-eta.vercel.app (HTTP200 verificado). QA autenticada realizada contra Supabase real desde el build local, no se atribuye al HTTP200.
+El commit documental posterior solo registra este resultado; no modifica la implementacion.
 
 # PIN SECURITY: READY
 
