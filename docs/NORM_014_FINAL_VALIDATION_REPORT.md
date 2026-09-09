@@ -254,5 +254,7 @@ Aplicadas y verificadas en Supabase. Sin reaplicar NORM006 ni modificar migracio
 
 ## 33. Commit / deploy
 
-Pendiente de registrar el resultado de publicacion al finalizar. La conclusion NO-GO no cambia por un deploy exitoso.
-
+Codigo: commit 38f59cb, enviado a github/main. Vercel confirmo success / Deployment has completed para ese commit.
+Deployment: https://vercel.com/manito/bloody/MuFZ8TxBfBh2EaXVjFybU5wEeom7
+URL publica: https://bloody-eta.vercel.app (HTTP200). La comprobacion HTTP no sustituye login real con correo.
+Este cierre documental posterior no cambia codigo ni migraciones. La conclusion NO-GO no cambia por un deploy exitoso.
