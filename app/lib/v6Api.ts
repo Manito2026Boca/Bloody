@@ -2,6 +2,7 @@
 
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getV6Supabase } from './v6Supabase';
+import { requireSuccessfulPinAttempt } from './v6PinAttempt';
 import type {
   V6AdminComplaintReview,
   V6AdminProfessionalReview,
@@ -901,7 +902,7 @@ export async function startV6Order(orderId: string, pin: string) {
     p_pin: pin,
   });
   fail(error);
-  return data as V6Order;
+  requireSuccessfulPinAttempt(data);
 }
 
 export async function completeTrackedV6Order(orderId: string, pin: string) {
@@ -910,7 +911,7 @@ export async function completeTrackedV6Order(orderId: string, pin: string) {
     p_pin: pin,
   });
   fail(error);
-  return data as V6Order;
+  requireSuccessfulPinAttempt(data);
 }
 
 export async function cancelV6Order(orderId: string, reason: string, note?: string | null) {

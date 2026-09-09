@@ -28,6 +28,8 @@ select pg_temp.check_true((select count(*)=3 from pg_publication_tables where pu
 insert into auth.users(id,email,raw_app_meta_data,raw_user_meta_data)
 select id,'norm014-rollback-'||id||'@example.invalid','{}','{}' from n14_ids where name<>'order';
 update public.profiles p set full_name='NORM014 rollback',role=case i.name when 'admin' then 'admin' when 'pro' then 'professional' else 'client' end from n14_ids i where i.id=p.id;
+select set_config('request.jwt.claim.sub',pg_temp.id('admin')::text,true);
+insert into public.professional_profiles(professional_id,verified) values(pg_temp.id('pro'),true);
 insert into public.services(slug,name,requires_completion_evidence) values('norm014-rollback-'||pg_temp.id('order'),'NORM014 rollback',true);
 insert into public.orders(id,client_id,professional_id,service_id,description,address,mode,status,agreed_price,agreed_scope,contracted_at,start_pin,end_pin)
 select pg_temp.id('order'),pg_temp.id('client'),pg_temp.id('pro'),id,'Need','Private address','immediate','trabajando',100,'Agreed',now(),'1234','5678' from public.services where slug='norm014-rollback-'||pg_temp.id('order');
@@ -50,7 +52,7 @@ select set_config('request.jwt.claim.sub',pg_temp.id('pro')::text,true);
 select pg_temp.check_true(not exists(select 1 from public.get_order_pin(pg_temp.id('order'))),'assigned RPC never returns PIN');
 select set_config('test.extra',(public.propose_order_extra(pg_temp.id('order'),'Repair',25)).id::text,true);
 select pg_temp.denied(format('select public.decide_order_extra(%L,%L)',current_setting('test.extra'),'approved'),'professional cannot approve own extra');
-select pg_temp.denied(format('select public.complete_order(%L,%L)',pg_temp.id('order'),'5678'),'mandatory final evidence enforced');
+select pg_temp.check_true(public.complete_order(pg_temp.id('order'),'5678')->>'code'='evidence_required','mandatory final evidence enforced');
 select set_config('request.jwt.claim.sub',pg_temp.id('stranger')::text,true);
 select pg_temp.denied(format('select public.decide_order_extra(%L,%L)',current_setting('test.extra'),'approved'),'stranger cannot decide extra');
 select set_config('request.jwt.claim.sub',pg_temp.id('client')::text,true);

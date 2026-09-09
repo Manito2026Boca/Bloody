@@ -95,7 +95,7 @@ if (mode === 'prepare') {
   const clients={},results=[],channels=[];
   const ok=(label)=>{results.push({label,pass:true}); console.log(`PASS ${label}`);};
   const rpc=async(c,name,args={})=>{const r=await c.rpc(name,args); if(r.error) throw new Error(`${name}: ${r.error.code} ${r.error.message}`); return r.data;};
-  const denied=async(p,label)=>{const r=await p; assert(r.error,`Expected denied: ${label}`);ok(label);};
+  const denied=async(p,label)=>{const r=await p; assert(r.error || r.data?.ok === false,`Expected denied: ${label}`);ok(label);};
   const events=[];
   const waitFor=async(predicate,label)=>{const end=Date.now()+12000; while(Date.now()<end){if(predicate()){ok(label);return;}await new Promise(r=>setTimeout(r,100));} throw new Error(`Timeout: ${label}`);};
   const watch=async(name,orderId)=>{

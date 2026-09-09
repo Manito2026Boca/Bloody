@@ -3952,6 +3952,12 @@ function OrderCard({
   const [extraAmount, setExtraAmount] = useState('4500');
   const [submittingExtra, setSubmittingExtra] = useState(false);
   const extraRequestInFlight = useRef(false);
+  const advancingOrder = useRef(false);
+  const [pinActionError, setPinActionError] = useState<string | null>(null);
+  const pinErrorElement = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (pinActionError) pinErrorElement.current?.scrollIntoView({ block: 'nearest' });
+  }, [pinActionError]);
   const [ratingStars, setRatingStars] = useState(5);
   const [ratingComment, setRatingComment] = useState('');
   const [manualReplacementProfessionalId, setManualReplacementProfessionalId] = useState('');
@@ -4091,6 +4097,9 @@ function OrderCard({
   }, [profile.id, profile.role, proposals]);
 
   async function advance() {
+    if (advancingOrder.current) return;
+    advancingOrder.current = true;
+    setPinActionError(null);
     try {
       if (nextAction.kind === 'start_with_pin') {
         const pin = window.prompt(nextAction.prompt);
@@ -4110,7 +4119,11 @@ function OrderCard({
       setOrders(await listV6Orders());
       setNotice('Estado actualizado.');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'No se pudo avanzar.');
+      const message = caught instanceof Error ? caught.message : 'No se pudo avanzar.';
+      if (nextAction.kind === 'start_with_pin' || nextAction.kind === 'complete_with_pin') setPinActionError(message);
+      else setError(message);
+    } finally {
+      advancingOrder.current = false;
     }
   }
 
@@ -4881,6 +4894,7 @@ function OrderCard({
           </div>
         </form>
       )}
+      {pinActionError && <p ref={pinErrorElement} className="v6-alert" role="alert">{pinActionError}</p>}
       <div className="v6-actions">
         {canCancelOrder && !showCancellationForm && (
           <button className="v6-danger" type="button" onClick={() => setShowCancellationForm(true)}>
