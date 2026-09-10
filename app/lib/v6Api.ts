@@ -90,6 +90,8 @@ const safeOrderColumns = [
   'pricing_policy_snapshot',
   'client_lat',
   'client_lng',
+  'location_id',
+  'required_specialty_id',
   'created_at',
   'updated_at',
   'accepted_at',
@@ -654,6 +656,8 @@ function initialOrderStatus(mode: V6Mode) {
 
 export async function createV6Order(input: {
   clientId: string;
+  locationId?: string | null;
+  requiredSpecialtyId?: number | null;
   serviceId: number;
   description: string;
   address: string;
@@ -674,6 +678,7 @@ export async function createV6Order(input: {
   if (input.mode === 'scheduled') {
     const { data, error } = await supabase.rpc('create_scheduled_order', { p_data: {
       service_id: input.serviceId, description: input.description, address: input.address,
+      location_id: input.locationId || null, required_specialty_id: input.requiredSpecialtyId ?? null,
       scheduled_at: input.scheduledAt, estimated_duration_minutes: input.estimatedDurationMinutes,
       preferred_professional_id: input.assignmentMode === 'manual' ? input.preferredProfessionalId : null,
       payment_method: input.paymentMethod, client_lat: input.lat, client_lng: input.lng,
@@ -687,6 +692,8 @@ export async function createV6Order(input: {
     .insert({
       client_id: input.clientId,
       service_id: input.serviceId,
+      location_id: input.locationId || null,
+      required_specialty_id: input.requiredSpecialtyId ?? null,
       description: input.description,
       address: input.address,
       mode: input.mode,
@@ -714,6 +721,8 @@ export async function createV6Order(input: {
     .insert({
       client_id: input.clientId,
       service_id: input.serviceId,
+      location_id: input.locationId || null,
+      required_specialty_id: input.requiredSpecialtyId ?? null,
       description: input.description,
       address: input.address,
       mode: input.mode,

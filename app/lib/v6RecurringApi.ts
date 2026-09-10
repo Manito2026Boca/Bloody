@@ -3,7 +3,7 @@ import type { V6RecurringServicePlan } from './v6Types';
 
 export type RecurringPlanChanges = Partial<Pick<V6RecurringServicePlan,
   'frequency' | 'preferred_professional_id' | 'description' | 'address' |
-  'client_lat' | 'client_lng' | 'estimated_duration_minutes'>> & { scheduled_at?: string };
+  'client_lat' | 'client_lng' | 'estimated_duration_minutes' | 'location_id' | 'required_specialty_id'>> & { scheduled_at?: string };
 
 export type AdminRecurringPlan = Pick<V6RecurringServicePlan, 'id' | 'status' | 'next_scheduled_at' | 'generation_error'> &
   { client_name: string; service_name: string; latest_order_id: string | null; last_generation_attempt_at: string | null };
@@ -22,7 +22,7 @@ export async function listRecurringPlans(): Promise<V6RecurringServicePlan[]> {
 
 export async function updateRecurringPlan(id: string, changes: RecurringPlanChanges): Promise<void> {
   const { error } = await getV6Supabase().rpc('update_recurring_plan', { p_plan_id: id, p_changes: changes });
-  if (error) throw new Error('No pudimos guardar el plan. Revisá la fecha y el profesional elegido.');
+  if (error) throw new Error('No pudimos guardar el plan. Revisá la localidad, la fecha y el profesional elegido.');
 }
 
 export async function changeRecurringPlanStatus(id: string, action: 'pause' | 'resume' | 'cancel'): Promise<void> {

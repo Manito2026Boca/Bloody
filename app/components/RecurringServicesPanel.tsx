@@ -6,6 +6,7 @@ import { createV6RecurringServicePlan, listV6PublicProfessionals } from '../lib/
 import { changeRecurringPlanStatus, listRecurringPlans, updateRecurringPlan, listAdminRecurringPlans, type AdminRecurringPlan } from '../lib/v6RecurringApi';
 import type { V6Order, V6PublicProfessional, V6RecurringServicePlan } from '../lib/v6Types';
 import styles from './RecurringServicesPanel.module.css';
+import { MatchingLocation } from './MatchingLocation';
 
 const frequencies = { weekly: 'Cada semana', biweekly: 'Cada 2 semanas', monthly: 'Cada mes' };
 const states = { active: 'Activo', paused: 'Pausado', cancelled: 'Cancelado' };
@@ -43,6 +44,7 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
+  const [editingLocation, setEditingLocation] = useState('');
   const [confirmCancel, setConfirmCancel] = useState<string | null>(null);
   const [source, setSource] = useState('');
   const [frequency, setFrequency] = useState<V6RecurringServicePlan['frequency']>('weekly');
@@ -104,7 +106,7 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
           plan.status === 'active' ? 'Plan pausado. Los pedidos ya creados siguen vigentes.' : 'Plan reanudado sin visitas atrasadas.')}>
           {plan.status === 'active' ? <Pause size={16} /> : <Play size={16} />}{plan.status === 'active' ? 'Pausar' : 'Reanudar'}
         </button>
-        <button type="button" disabled={busy} onClick={() => setEditing(editing === plan.id ? null : plan.id)}><Pencil size={16} /> Editar</button>
+        <button type="button" disabled={busy} onClick={() => { setEditingLocation(plan.location_id || ''); setEditing(editing === plan.id ? null : plan.id); }}><Pencil size={16} /> Editar</button>
         <button type="button" disabled={busy} onClick={() => setConfirmCancel(plan.id)}><X size={16} /> Cancelar</button>
       </div>}
       {confirmCancel === plan.id && <div role="group" aria-label="Confirmar cancelación">
@@ -120,9 +122,10 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
         void run(() => updateRecurringPlan(plan.id, {
           frequency: data.get('frequency') as V6RecurringServicePlan['frequency'],
           description: String(data.get('description')), address,
+          location_id: editingLocation || null,
           estimated_duration_minutes: Number(data.get('duration')),
           ...(preferred !== (plan.preferred_professional_id || '') ? { preferred_professional_id: preferred || null } : {}),
-          ...(address !== plan.address ? { client_lat: null, client_lng: null } : {}),
+          ...(address !== plan.address || editingLocation !== (plan.location_id || '') ? { client_lat: null, client_lng: null } : {}),
           ...(date ? { scheduled_at: new Date(date + ':00-03:00').toISOString() } : {}),
         }), 'Plan actualizado. Los pedidos ya creados no cambiaron.');
       }}>
@@ -131,6 +134,7 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
         <label>Duración estimada (minutos)<input name="duration" type="number" min="1" max="1440" required defaultValue={plan.estimated_duration_minutes} /></label>
         <label>Descripción<textarea name="description" required minLength={2} defaultValue={plan.description} /></label>
         <label>Dirección y ciudad<input name="address" required minLength={2} defaultValue={plan.address} /></label>
+        <MatchingLocation value={editingLocation} onChange={setEditingLocation} />
         <label>Profesional preferido<select name="preferred" defaultValue={plan.preferred_professional_id || ''}>
           <option value="">Sin preferido</option>
           {plan.preferred_professional_id && !professionals.some(p => p.profile.id === plan.preferred_professional_id) &&

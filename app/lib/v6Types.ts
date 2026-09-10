@@ -100,6 +100,8 @@ export type V6PublicProfessional = {
 
 export type V6Order = {
   id: string;
+  location_id?: string | null;
+  required_specialty_id?: number | null;
   recurring_plan_id?: string | null;
   recurrence_due_at?: string | null;
   client_id: string;
@@ -186,6 +188,8 @@ export type V6ClientAddress = {
 };
 
 export type V6RecurringServicePlan = {
+  location_id?: string | null;
+  required_specialty_id?: number | null;
   id: string;
   client_id: string;
   service_id: number;

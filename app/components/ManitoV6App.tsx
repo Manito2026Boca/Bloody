@@ -2,6 +2,7 @@
 
 import type { Session } from '@supabase/supabase-js';
 import Image from 'next/image';
+import { MatchingLocation, ProfessionalCoverage, CompleteMatchingLocation } from './MatchingLocation';
 import { ProtectionAdminCase, ProtectionPanel } from './ProtectionManito';
 import { RecurringServicesPanel, RecurringAdminPanel } from './RecurringServicesPanel';
 import { subscribeV6Complaints } from '../lib/v6ProtectionApi';
@@ -2299,6 +2300,11 @@ function ClientHome({
   const [description, setDescription] = useState('Necesito un plomero.');
   const [address, setAddress] = useState('');
   const [addressCity, setAddressCity] = useState(profile.city || '');
+  const [locationId, setLocationId] = useState('');
+  const [requiredSpecialty, setRequiredSpecialty] = useState<V6Specialty | null>(null);
+  const requiredSpecialtyId = requiredSpecialty?.service_id === selectedService?.id ? requiredSpecialty?.id ?? null : null;
+  useEffect(() => { setRequiredSpecialty(current => current?.service_id === selectedService?.id ? current : null); }, [selectedService?.id]);
+  const [eligibleResult, setEligibleResult] = useState<{ key: string; ids: string[] }>({ key: '', ids: [] });
   const [mode, setMode] = useState<V6Mode>('immediate');
   const [scheduledAt, setScheduledAt] = useState('');
   const [repeatService, setRepeatService] = useState(false);
@@ -2317,7 +2323,22 @@ function ClientHome({
   const [creatingOrder, setCreatingOrder] = useState(false);
   const requestFormRef = useRef<HTMLElement | null>(null);
   const selectedBasePrice = selectedService?.base_price ?? 0;
-  const candidateProfessionals = useMemo(
+  const eligibilityKey = JSON.stringify({ service_id: selectedService?.id, mode,
+    location_id: locationId || null, required_specialty_id: requiredSpecialtyId,
+    client_lat: coords?.lat ?? null, client_lng: coords?.lng ?? null,
+    scheduled_at: mode === 'scheduled' && scheduledAt ? new Date(scheduledAt).toISOString() : null,
+    estimated_duration_minutes: scheduledReservationDurationMinutes });
+  useEffect(() => {
+    let alive = true;
+    const timer = setTimeout(() => {
+      void getV6Supabase().rpc('list_eligible_request_professionals', { p_data: JSON.parse(eligibilityKey) })
+        .then(({ data, error }) => {
+          if (alive) setEligibleResult({ key: eligibilityKey, ids: error ? [] : data || [] });
+        });
+    }, 200);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [eligibilityKey]);
+  const rankedProfessionals = useMemo(
     () =>
       professionalCandidatesForService({
         service: selectedService,
@@ -2330,6 +2351,8 @@ function ClientHome({
       }),
     [coords, description, mode, problemQuery, publicProfessionals, scheduledAt, selectedService, specialties],
   );
+  const candidateProfessionals = rankedProfessionals.filter(candidate =>
+    eligibleResult.key === eligibilityKey && eligibleResult.ids.includes(candidate.professional.profile.id));
   const selectedProfessionalCandidate =
     candidateProfessionals.find((candidate) => candidate.professional.profile.id === selectedProfessionalId) ||
     candidateProfessionals[0] ||
@@ -2367,9 +2390,6 @@ function ClientHome({
   const selectedServiceSpecialties = selectedService
     ? specialties.filter((specialty) => specialty.service_id === selectedService.id)
     : [];
-  const selectedServiceSpecialtyMatches = selectedService
-    ? detectSpecialtiesForService(selectedService, specialties, `${problemQuery}\n${description}`)
-    : [];
   const query = normalizeText(problemQuery);
   const scoreMatches = scoredServices
     .filter((item) => item.score > 0)
@@ -2384,16 +2404,8 @@ function ClientHome({
           normalizeText(`${service.name} ${service.slug}`).includes(query),
         );
   const filteredServices = filterServicesByGroup(queryFilteredServices, activeServiceGroup);
-  const recommendedProfessional =
-      professionalCandidatesForService({
-        service: recommendedService,
-        professionals: publicProfessionals,
-        specialties,
-        query: `${problemQuery}\n${description}`,
-        clientCoords: coords,
-        mode,
-        scheduledAt,
-    })[0] || null;
+  const recommendedProfessional = recommendedService?.id === selectedService?.id
+    ? candidateProfessionals[0] || null : null;
   const photoNames = photoFiles.map((file) => file.name);
   const selectedPaymentProfile = paymentProfiles.find((payment) => payment.type === paymentMethod);
 
@@ -2460,6 +2472,14 @@ function ClientHome({
       setError('Escribí la ciudad.');
       return;
     }
+    if (!coords && !locationId) {
+      setError('Elegí la localidad del servicio o usá GPS.');
+      return;
+    }
+    if (assignmentMode === 'manual' && !selectedProfessionalCandidate && mode !== 'quote') {
+      setError('Elegí un profesional disponible o cambiá a búsqueda automática.');
+      return;
+    }
     if (mode === 'scheduled') {
       if (!scheduledAt) {
         setError('Elegí día y horario para programar el servicio.');
@@ -2481,6 +2501,8 @@ function ClientHome({
       const createdOrder = await createV6Order({
         clientId: profile.id,
         serviceId: selectedService.id,
+        locationId: locationId || null,
+        requiredSpecialtyId,
         description: orderDescription,
         address: orderAddress,
         mode,
@@ -2495,8 +2517,8 @@ function ClientHome({
         estimatedDurationMinutes: mode === 'scheduled' ? scheduledReservationDurationMinutes : null,
         price: estimatedPrice,
         estimatedPrice,
-        lat: coords?.lat || null,
-        lng: coords?.lng || null,
+        lat: coords?.lat ?? null,
+        lng: coords?.lng ?? null,
       });
       let recurringPlanCreated = false;
       let recurringPlanFailed = false;
@@ -2564,13 +2586,17 @@ function ClientHome({
   }
 
   function captureLocation() {
-    navigator.geolocation?.getCurrentPosition(
+    if (!navigator.geolocation) {
+      setError('Podés continuar eligiendo la localidad y escribiendo la dirección.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
       (position) =>
         setCoords({
           lat: position.coords.latitude,
           lng: position.coords.longitude,
         }),
-      () => setError('No se pudo obtener GPS.'),
+      () => { setCoords(null); setError('No pudimos obtener tu ubicación. Elegí la localidad y escribí la dirección para continuar.'); },
       { enableHighAccuracy: true, timeout: 10000 },
     );
   }
@@ -2624,6 +2650,8 @@ function ClientHome({
   function chooseSavedAddress(addressId: string) {
     const savedAddress = savedAddresses.find((item) => item.id === addressId);
     if (!savedAddress) return;
+    setLocationId('');
+    setCoords(null);
     setAddress(savedAddress.line);
     setAddressCity(savedAddress.city || profile.city || '');
     setAddressLabel(savedAddress.label);
@@ -2702,20 +2730,6 @@ function ClientHome({
     scrollToRequestForm();
   }
 
-  function addSpecialtyToRequest(specialty: V6Specialty) {
-    setDescription((current) => {
-      if (normalizeText(current).includes(normalizeText(specialty.name))) return current;
-      const prefix = current.trim() ? `${current.trim()}\n` : '';
-      return `${prefix}Detalle: ${specialty.name}`;
-    });
-    setProblemQuery(
-      normalizeText(problemQuery).includes(normalizeText(specialty.name))
-        ? problemQuery
-        : `${problemQuery.trim()} ${specialty.name}`.trim(),
-    );
-    setNotice(`${specialty.name} agregado al pedido.`);
-  }
-
   function repeatLastOrder() {
     const lastOrder = clientOrders[0];
     if (!lastOrder) {
@@ -2725,6 +2739,10 @@ function ClientHome({
     }
     const lastService = services.find((service) => service.id === lastOrder.service_id) || null;
     if (lastService) setSelectedService(lastService);
+    setLocationId(lastOrder.location_id || '');
+    setRequiredSpecialty(specialties.find(s => s.id === lastOrder.required_specialty_id) || null);
+    setCoords(lastOrder.client_lat != null && lastOrder.client_lng != null
+      ? { lat: lastOrder.client_lat, lng: lastOrder.client_lng } : null);
     const parsedAddress = splitStoredAddress(lastOrder.address, profile.city);
     setDescription(lastOrder.description.split('\n')[0] || `Necesito ayuda con ${lastService ? serviceDisplayName(lastService) : 'un servicio'}.`);
     setAddress(parsedAddress.line);
@@ -2956,9 +2974,7 @@ function ClientHome({
                 <div className="v6-section-head compact">
                   <h2>Especialidad</h2>
                   <span>
-                    {selectedServiceSpecialtyMatches[0]
-                      ? `detecté ${selectedServiceSpecialtyMatches[0].specialty.name}`
-                      : 'opcional'}
+                    opcional
                   </span>
                 </div>
                 <div className="v6-chip-list">
@@ -2966,8 +2982,8 @@ function ClientHome({
                     <button
                       type="button"
                       key={specialty.id}
-                      aria-pressed={selectedServiceSpecialtyMatches.some((match) => match.specialty.id === specialty.id)}
-                      onClick={() => addSpecialtyToRequest(specialty)}
+                      aria-pressed={requiredSpecialtyId === specialty.id}
+                      onClick={() => setRequiredSpecialty(requiredSpecialtyId === specialty.id ? null : specialty)}
                     >
                       {specialty.name}
                     </button>
@@ -2999,7 +3015,7 @@ function ClientHome({
               <span>Dirección</span>
               <input
                 value={address}
-                onChange={(event) => setAddress(event.target.value)}
+                onChange={(event) => { setAddress(event.target.value); setCoords(null); }}
                 placeholder="Calle, número, piso o referencia"
                 required
               />
@@ -3008,11 +3024,12 @@ function ClientHome({
               <span>Ciudad</span>
               <input
                 value={addressCity}
-                onChange={(event) => setAddressCity(event.target.value)}
+                onChange={(event) => { setAddressCity(event.target.value); setLocationId(''); setCoords(null); }}
                 placeholder="Ej: Tres Arroyos"
                 required
               />
             </label>
+            <MatchingLocation value={locationId} onChange={(id, name) => { setLocationId(id); setCoords(null); if (name) setAddressCity(name); }} />
             <div className="v6-actions-row">
               <button className="v6-secondary" type="button" onClick={captureLocation}>
                 <LocateFixed size={17} aria-hidden="true" />
@@ -3971,15 +3988,30 @@ function OrderCard({
     setCancellationReason(cancellationReasonOptions[0].value);
   }, [cancellationReason, cancellationReasonOptions]);
 
+  const replacementKey = JSON.stringify({ service_id: order.service_id, mode: order.mode,
+    location_id: order.location_id || null, required_specialty_id: order.required_specialty_id ?? null,
+    client_lat: order.client_lat, client_lng: order.client_lng, scheduled_at: order.scheduled_at,
+    estimated_duration_minutes: order.estimated_duration_minutes });
+  const [replacementEligibility, setReplacementEligibility] = useState<{ key: string; ids: string[] }>({ key: '', ids: [] });
+  useEffect(() => {
+    if (order.client_id !== profile.id || order.professional_id || order.assignment_mode !== 'manual') return;
+    let alive = true;
+    void getV6Supabase().rpc('list_eligible_request_professionals', { p_data: JSON.parse(replacementKey) })
+      .then(({ data, error }) => {
+        if (alive) setReplacementEligibility({ key: replacementKey, ids: error ? [] : data || [] });
+      });
+    return () => { alive = false; };
+  }, [replacementKey, order.client_id, order.professional_id, order.assignment_mode, profile.id]);
   const manualAlternatives = useMemo(
     () =>
       publicProfessionals.filter(
         (professional) =>
+          replacementEligibility.key === replacementKey && replacementEligibility.ids.includes(professional.profile.id) &&
           professional.profile.id !== order.preferred_professional_id &&
           professional.services.some((service) => service.service_id === order.service_id) &&
           (order.mode !== 'immediate' || professional.profile.is_available),
       ),
-    [order.mode, order.preferred_professional_id, order.service_id, publicProfessionals],
+    [order.mode, order.preferred_professional_id, order.service_id, publicProfessionals, replacementEligibility, replacementKey],
   );
 
   useEffect(() => {
@@ -4418,6 +4450,10 @@ function OrderCard({
 
   return (
     <article className="v6-order" data-order-id={order.id}>
+      {order.client_id === profile.id && !order.professional_id && !order.location_id &&
+        (order.client_lat == null || order.client_lng == null) &&
+        ['open', 'scheduled_open', 'waiting_quotes', 'matching_failed'].includes(order.status) &&
+        <CompleteMatchingLocation orderId={order.id} onSaved={() => { void listV6Orders().then(setOrders).catch(() => setError('No pudimos actualizar el pedido.')); }} />}
       <div className="v6-order-top">
         <span className="v6-order-icon">{serviceIcon(order.service?.slug || '')}</span>
         <div>
@@ -5795,6 +5831,7 @@ function ProfilePanel({
       {professionalStep === 6 && (
           <section className="v6-card">
             <h2>Zona, horarios y tarifas</h2>
+            <ProfessionalCoverage professionalId={profile.id} />
             <p className="v6-help-text">
               Ajustá dónde trabajás, cuándo estás disponible y cuánto querés cobrar desde cada rubro.
             </p>
