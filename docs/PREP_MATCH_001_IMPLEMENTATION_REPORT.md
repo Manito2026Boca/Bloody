@@ -115,6 +115,6 @@ Para operar sin GPS, los profesionales reales deben declarar su cobertura y los 
 
 ## 22. Commit/deploy
 
-Migracion aplicada y representada en historial remoto con version 20260909225833. Publicacion frontend y referencia de commit: verificar en el cierre de esta tarea; no confundir build local con deploy confirmado.
+Migracion aplicada y representada en historial remoto con version 20260909225833. Implementacion publicada en `main` mediante el commit `9ee3f28`. El despliegue de Vercel finalizo correctamente y `https://bloody-eta.vercel.app` respondio HTTP 200 en la verificacion de cierre.
 
 MATCHING PILOT READINESS: READY
