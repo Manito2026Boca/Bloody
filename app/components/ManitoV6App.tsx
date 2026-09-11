@@ -181,6 +181,10 @@ import type {
 import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 import { friendlyAuthError } from '../lib/authMessages';
 import { isRecoverableMissingProfileError } from '../lib/profileRecovery';
+import {
+  authoritativeRequestCoordinates,
+  type RequestLocationAuthority,
+} from '../lib/requestLocation';
 
 type Tab = ManitoTab;
 type AuthMode = 'login' | 'signup' | 'reset';
@@ -1377,6 +1381,11 @@ type ReverseGeocodeResponse = {
   address?: Record<string, string | undefined>;
 };
 
+type ForwardGeocodeResponse = Array<{
+  lat?: string;
+  lon?: string;
+}>;
+
 function coordinateFallback(lat: number, lng: number) {
   return `GPS ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
 }
@@ -1428,6 +1437,25 @@ async function reverseGeocodePhoneLocation(lat: number, lng: number): Promise<Re
   });
   if (!response.ok) return null;
   return readableReverseLocation((await response.json()) as ReverseGeocodeResponse);
+}
+
+async function geocodeManualLocation(line: string, city: string) {
+  const url = new URL('https://nominatim.openstreetmap.org/search');
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('addressdetails', '1');
+  url.searchParams.set('limit', '1');
+  url.searchParams.set('countrycodes', 'ar');
+  url.searchParams.set('accept-language', 'es-AR,es');
+  url.searchParams.set('q', formatAddress(line, city));
+
+  const response = await fetch(url.toString(), {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) return null;
+  const [match] = (await response.json()) as ForwardGeocodeResponse;
+  const lat = Number(match?.lat);
+  const lng = Number(match?.lon);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
 }
 
 export default function ManitoV6App() {
@@ -1834,7 +1862,7 @@ export default function ManitoV6App() {
   const currentLocation = headerLocation(profile);
 
   return (
-    <main className="v6-app">
+    <main className={`v6-app ${tab === 'home' && appMode === 'client' && clientSelectedService ? 'v6-request-active' : ''}`}>
       <header className="v6-top">
         <div className="v6-top-brand">
           <Image
@@ -2380,7 +2408,12 @@ function ClientHome({
     city: string | null;
     label: string | null;
   } | null>(null);
+  const [locationAuthority, setLocationAuthority] = useState<RequestLocationAuthority | null>(() =>
+    editingOrder ? (editingOrder.client_lat != null && editingOrder.client_lng != null ? 'gps' : 'manual') : null,
+  );
+  const [locationConfirmed, setLocationConfirmed] = useState(Boolean(editingOrder));
   const [locating, setLocating] = useState(false);
+  const [confirmingLocation, setConfirmingLocation] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>(() =>
     loadSavedAddresses(profile.id),
   );
@@ -2396,10 +2429,11 @@ function ClientHome({
   const [creatingOrder, setCreatingOrder] = useState(false);
   const requestFormRef = useRef<HTMLElement | null>(null);
   const manualLocationRef = useRef<HTMLInputElement | null>(null);
+  const authoritativeCoords = authoritativeRequestCoordinates(locationAuthority, coords);
   const selectedBasePrice = selectedService?.base_price ?? 0;
   const eligibilityKey = JSON.stringify({ service_id: selectedService?.id, mode,
     location_id: locationId || null, required_specialty_id: requiredSpecialtyId,
-    client_lat: coords?.lat ?? null, client_lng: coords?.lng ?? null,
+    client_lat: authoritativeCoords?.lat ?? null, client_lng: authoritativeCoords?.lng ?? null,
     scheduled_at: mode === 'scheduled' && scheduledAt ? new Date(scheduledAt).toISOString() : null,
     estimated_duration_minutes: scheduledReservationDurationMinutes });
   useEffect(() => {
@@ -2419,11 +2453,11 @@ function ClientHome({
         professionals: publicProfessionals,
         specialties,
         query: `${problemQuery}\n${description}`,
-        clientCoords: coords,
+        clientCoords: authoritativeCoords,
         mode,
         scheduledAt,
       }),
-    [coords, description, mode, problemQuery, publicProfessionals, scheduledAt, selectedService, specialties],
+    [authoritativeCoords, description, mode, problemQuery, publicProfessionals, scheduledAt, selectedService, specialties],
   );
   const candidateProfessionals = rankedProfessionals.filter(candidate =>
     eligibleResult.key === eligibilityKey && eligibleResult.ids.includes(candidate.professional.profile.id));
@@ -2550,11 +2584,11 @@ function ClientHome({
       setError('Escribí la dirección del servicio.');
       return;
     }
-    if (!addressCity.trim()) {
+    if (!addressCity.trim() && locationAuthority !== 'gps') {
       setError('Escribí la ciudad.');
       return;
     }
-    if (!coords && !locationId) {
+    if (!authoritativeCoords && !locationId) {
       setError('Elegí la localidad del servicio o usá GPS.');
       return;
     }
@@ -2599,8 +2633,8 @@ function ClientHome({
         estimatedDurationMinutes: mode === 'scheduled' ? scheduledReservationDurationMinutes : null,
         price: estimatedPrice,
         estimatedPrice,
-        lat: coords?.lat ?? null,
-        lng: coords?.lng ?? null,
+        lat: authoritativeCoords?.lat ?? null,
+        lng: authoritativeCoords?.lng ?? null,
       };
       const createdOrder = editingOrder
         ? await editV6UncontractedOrder({
@@ -2704,7 +2738,6 @@ function ClientHome({
       const reverse = await reverseGeocodePhoneLocation(lat, lng).catch(() => null);
       setDetectedLocation({ lat, lng, city: reverse?.city || null, label: reverse?.label || null });
     } catch {
-      setCoords(null);
       setError('No pudimos obtener tu ubicación. Ingresala manualmente para continuar.');
       window.requestAnimationFrame(() => manualLocationRef.current?.focus());
     } finally {
@@ -2715,11 +2748,43 @@ function ClientHome({
   function confirmDetectedPhoneLocation() {
     if (!detectedLocation) return;
     setCoords({ lat: detectedLocation.lat, lng: detectedLocation.lng });
+    setLocationAuthority('gps');
+    setLocationConfirmed(true);
     setLocationId('');
-    if (detectedLocation.city) setAddressCity(detectedLocation.city);
-    if (detectedLocation.label && !address.trim()) setAddress(detectedLocation.label);
+    setAddressCity(detectedLocation.city || '');
+    setAddress(detectedLocation.label || detectedLocation.city || coordinateFallback(detectedLocation.lat, detectedLocation.lng));
     setDetectedLocation(null);
-    setNotice('Ubicación confirmada para este trabajo.');
+  }
+
+  function markManualLocation() {
+    setDetectedLocation(null);
+    setCoords(null);
+    setLocationAuthority('manual');
+    setLocationConfirmed(false);
+  }
+
+  function beginManualLocation() {
+    markManualLocation();
+    window.requestAnimationFrame(() => manualLocationRef.current?.focus());
+  }
+
+  async function confirmManualLocation() {
+    setConfirmingLocation(true);
+    try {
+      const geocoded = await geocodeManualLocation(address.trim(), addressCity.trim()).catch(() => null);
+      if (geocoded) {
+        setCoords(geocoded);
+        setLocationAuthority('manual_geocoded');
+      } else {
+        setCoords(null);
+        setLocationAuthority('manual');
+      }
+      setDetectedLocation(null);
+      setLocationConfirmed(Boolean(geocoded || locationId));
+      return geocoded;
+    } finally {
+      setConfirmingLocation(false);
+    }
   }
 
   async function saveAddress() {
@@ -2737,8 +2802,8 @@ function ClientHome({
         label: addressLabel.trim() || 'Dirección',
         line: address.trim(),
         city: addressCity.trim(),
-        lat: coords?.lat || null,
-        lng: coords?.lng || null,
+        lat: authoritativeCoords?.lat || null,
+        lng: authoritativeCoords?.lng || null,
       });
       const nextAddress: SavedAddress = {
         id: remoteAddress.id,
@@ -2758,8 +2823,8 @@ function ClientHome({
         label: addressLabel.trim() || 'Dirección',
         line: address.trim(),
         city: addressCity.trim(),
-        lat: coords?.lat || null,
-        lng: coords?.lng || null,
+        lat: authoritativeCoords?.lat || null,
+        lng: authoritativeCoords?.lng || null,
       };
       const nextAddresses = [nextAddress, ...savedAddresses].slice(0, 5);
       setSavedAddresses(nextAddresses);
@@ -2776,8 +2841,13 @@ function ClientHome({
     setAddress(savedAddress.line);
     setAddressCity(savedAddress.city || profile.city || '');
     setAddressLabel(savedAddress.label);
+    setDetectedLocation(null);
+    setLocationConfirmed(true);
     if (savedAddress.lat != null && savedAddress.lng != null) {
       setCoords({ lat: savedAddress.lat, lng: savedAddress.lng });
+      setLocationAuthority('saved');
+    } else {
+      setLocationAuthority('manual');
     }
   }
 
@@ -2793,7 +2863,7 @@ function ClientHome({
       professionals: publicProfessionals,
       specialties,
       query: `${nextProblem}\n${description}`,
-      clientCoords: coords,
+      clientCoords: authoritativeCoords,
       mode,
       scheduledAt,
     })[0] || null;
@@ -2855,7 +2925,7 @@ function ClientHome({
     scrollToRequestForm();
   }
 
-  function nextRequestStep() {
+  async function nextRequestStep() {
     if (requestStep === 'need') {
       if (!description.trim()) {
         setError('Contanos qué necesitás resolver.');
@@ -2869,11 +2939,15 @@ function ClientHome({
       return;
     }
     if (requestStep === 'place') {
-      if (!address.trim() || !addressCity.trim()) {
-        setError('Completá la dirección y la ciudad del trabajo.');
+      if (!address.trim() || (!addressCity.trim() && locationAuthority !== 'gps')) {
+        setError('Completá la dirección y la ciudad del trabajo, o confirmá el GPS.');
         return;
       }
-      if (!coords && !locationId) {
+      let confirmedCoordinates = authoritativeCoords;
+      if (locationAuthority === 'manual' || !locationConfirmed) {
+        confirmedCoordinates = await confirmManualLocation();
+      }
+      if (!confirmedCoordinates && !locationId) {
         setError('Elegí la localidad del servicio o usá GPS.');
         return;
       }
@@ -2931,6 +3005,8 @@ function ClientHome({
     setRequiredSpecialty(specialties.find(s => s.id === lastOrder.required_specialty_id) || null);
     setCoords(lastOrder.client_lat != null && lastOrder.client_lng != null
       ? { lat: lastOrder.client_lat, lng: lastOrder.client_lng } : null);
+    setLocationAuthority(lastOrder.client_lat != null && lastOrder.client_lng != null ? 'saved' : 'manual');
+    setLocationConfirmed(true);
     const parsedAddress = splitStoredAddress(lastOrder.address, profile.city);
     setDescription(lastOrder.description.split('\n')[0] || `Necesito ayuda con ${lastService ? serviceDisplayName(lastService) : 'un servicio'}.`);
     setAddress(parsedAddress.line);
@@ -3083,15 +3159,15 @@ function ClientHome({
                   {detectedLocation.city && detectedLocation.label !== detectedLocation.city && <small>{detectedLocation.city}</small>}
                   <div className="v6-actions compact">
                     <button className="v6-primary" type="button" onClick={confirmDetectedPhoneLocation}>Usar esta ubicación</button>
-                    <button className="v6-secondary" type="button" onClick={() => { setDetectedLocation(null); manualLocationRef.current?.focus(); }}>Cambiar</button>
+                    <button className="v6-secondary" type="button" onClick={beginManualLocation}>Cambiar</button>
                   </div>
                 </div>
               )}
-              {coords && !detectedLocation && (
+              {locationConfirmed && !detectedLocation && (
                 <div className="v6-location-confirmation confirmed">
-                  <span>Ubicación confirmada</span>
-                  <strong>{formatAddress(address, addressCity) || coordinateFallback(coords.lat, coords.lng)}</strong>
-                  <button className="v6-link-button" type="button" onClick={() => { setCoords(null); manualLocationRef.current?.focus(); }}>Cambiar ubicación</button>
+                  <span>{locationAuthority === 'gps' ? 'Ubicación GPS confirmada' : 'Ubicación manual confirmada'}</span>
+                  <strong>{formatAddress(address, addressCity) || (authoritativeCoords ? coordinateFallback(authoritativeCoords.lat, authoritativeCoords.lng) : addressCity)}</strong>
+                  <button className="v6-link-button" type="button" onClick={beginManualLocation}>Cambiar ubicación</button>
                 </div>
               )}
               <div className="v6-field-grid-two">
@@ -3100,7 +3176,7 @@ function ClientHome({
                   <input
                     ref={manualLocationRef}
                     value={address}
-                    onChange={(event) => { setAddress(event.target.value); setDetectedLocation(null); setCoords(null); }}
+                    onChange={(event) => { setAddress(event.target.value); markManualLocation(); }}
                     placeholder="Calle, número, piso"
                     required
                   />
@@ -3109,14 +3185,14 @@ function ClientHome({
                   <span>Ciudad</span>
                   <input
                     value={addressCity}
-                    onChange={(event) => { setAddressCity(event.target.value); setLocationId(''); setDetectedLocation(null); setCoords(null); }}
+                    onChange={(event) => { setAddressCity(event.target.value); setLocationId(''); markManualLocation(); }}
                     placeholder="Ej: Mar del Plata"
                     required
                   />
                 </label>
               </div>
-              <MatchingLocation value={locationId} onChange={(id, name) => { setLocationId(id); setDetectedLocation(null); setCoords(null); if (name) setAddressCity(name); }} />
-              <button className="v6-link-button" type="button" onClick={() => manualLocationRef.current?.focus()}>Ingresar ubicación manualmente</button>
+              <MatchingLocation value={locationId} onChange={(id, name) => { markManualLocation(); setLocationId(id); if (name) setAddressCity(name); }} />
+              <button className="v6-link-button" type="button" onClick={beginManualLocation}>Ingresar ubicación manualmente</button>
               <details className="v6-inline-details">
                 <summary>Guardar esta dirección</summary>
                 <div className="v6-inline-details-body">
@@ -3278,7 +3354,7 @@ function ClientHome({
           <footer className="v6-request-actions">
             <button className="v6-secondary" type="button" onClick={previousRequestStep}>Atrás</button>
             {requestStep !== 'review' ? (
-              <button className="v6-primary" type="button" onClick={nextRequestStep}>Continuar</button>
+              <button className="v6-primary" type="button" disabled={confirmingLocation} onClick={() => void nextRequestStep()}>{confirmingLocation ? 'Confirmando ubicación...' : 'Continuar'}</button>
             ) : (
               <button className="v6-primary" type="submit" disabled={creatingOrder}>
                 {creatingOrder ? (editingOrder ? 'Guardando...' : 'Publicando...') : editingOrder ? 'Guardar y volver a buscar' : mode === 'quote' ? 'Publicar solicitud de presupuesto' : mode === 'scheduled' ? 'Enviar solicitud programada' : 'Buscar profesional ahora'}

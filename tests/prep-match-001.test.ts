@@ -38,7 +38,7 @@ describe('PREP-MATCH-001 integration contracts (SQL behavior covered by rollback
   });
   it('offers manual fallback and preserves coordinate zero', () => {
     expect(ui).toContain('if (!navigator.geolocation)');
-    expect(ui).toContain('lat: coords?.lat ?? null');
+    expect(ui).toContain('lat: authoritativeCoords?.lat ?? null');
     expect(ui).toContain('<MatchingLocation');
     expect(location).toContain('complete_order_location');
   });
