@@ -33,6 +33,8 @@ if (mode === 'prepare') {
     values('${a.id}',${name!=='unapproved'},array['Lun','Mar','Mie','Jue','Vie','Sab','Dom'],'00:00','23:59')
     on conflict(professional_id) do update set verified=excluded.verified,work_days=excluded.work_days,work_starts_at='00:00',work_ends_at='23:59';
     insert into public.professional_services(professional_id,service_id,price_from) select '${a.id}',id,1200 from public.services where slug='norm014-${run}';`);
+    sql.push(`insert into public.professional_service_locations(professional_id,location_id)
+    values('${a.id}','ar-ba-mar-del-plata') on conflict do nothing;`);
   }
   sql.push(`insert into public.professional_onboarding(professional_id,status) values('${actors.suspended.id}','suspended') on conflict(professional_id) do update set status='suspended'; commit;
   select id as service_id from public.services where slug='norm014-${run}';`);

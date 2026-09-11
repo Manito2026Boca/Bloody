@@ -5,9 +5,17 @@ import Image from 'next/image';
 import { MatchingLocation, ProfessionalCoverage, CompleteMatchingLocation } from './MatchingLocation';
 import { ProtectionAdminCase, ProtectionPanel } from './ProtectionManito';
 import { RecurringServicesPanel, RecurringAdminPanel } from './RecurringServicesPanel';
+import {
+  ExperienceSwitch,
+  ManitoBottomNavigation,
+  RequestProgress,
+  type ManitoExperience,
+  type ManitoTab,
+} from './ManitoUx';
 import { subscribeV6Complaints } from '../lib/v6ProtectionApi';
 import { subscribeV6OrderDetails } from '../lib/v6OrderRealtime';
 import {
+  ArrowLeft,
   BadgeCheck,
   Banknote,
   Bell,
@@ -19,7 +27,6 @@ import {
   CreditCard,
   Download,
   Heart,
-  Home,
   KeyRound,
   LocateFixed,
   LogOut,
@@ -173,12 +180,13 @@ import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 import { friendlyAuthError } from '../lib/authMessages';
 import { isRecoverableMissingProfileError } from '../lib/profileRecovery';
 
-type Tab = 'home' | 'search' | 'orders' | 'favorites' | 'profile' | 'account';
+type Tab = ManitoTab;
 type AuthMode = 'login' | 'signup' | 'reset';
 type AssignmentMode = 'auto' | 'manual';
 type PaymentMethod = ManitoPaymentMethod;
-type AppMode = 'client' | 'professional';
+type AppMode = ManitoExperience;
 type RecurrenceFrequency = 'weekly' | 'biweekly' | 'monthly';
+type RequestStep = 'need' | 'place' | 'mode' | 'resolution' | 'review';
 type ProfessionalOrderMatch = {
   order: V6Order;
   score: number;
@@ -209,6 +217,8 @@ type ProfessionalCandidate = {
 };
 
 const scheduledReservationDurationMinutes = 120;
+const requestSteps: readonly RequestStep[] = ['need', 'place', 'mode', 'resolution', 'review'];
+const requestStepLabels = ['Necesidad', 'Lugar', 'Modalidad', 'Resolución', 'Revisión'] as const;
 type ServiceGroupId =
   | 'all'
   | 'home'
@@ -537,6 +547,12 @@ function proposalAvailabilityText(proposal: V6OrderProposal) {
   return proposal.availability_label || 'A coordinar';
 }
 
+function proposalMaterialsText(proposal: V6OrderProposal) {
+  if (Number(proposal.materials_price) > 0) return `Materiales incluidos · ${money(proposal.materials_price)}`;
+  if (normalizeText(proposal.observation || '').includes('no incluye materiales')) return 'Materiales no incluidos';
+  return 'Materiales sin especificar';
+}
+
 function cityFromLocationLabel(value?: string | null) {
   const clean = (value || '').trim();
   if (!clean || clean.startsWith('GPS ')) return '';
@@ -598,10 +614,41 @@ function orderStatusText(order: V6Order, proposalsCount = 0) {
   if (order.status === 'waiting_quotes' || (order.status === 'open' && order.mode === 'quote')) {
     return proposalsCount > 0 ? 'Propuestas recibidas' : 'Esperando presupuestos';
   }
-  if (order.status === 'scheduled_open' || (order.status === 'open' && order.mode === 'scheduled')) return 'Esperando profesional';
+  if (order.status === 'scheduled_open' || (order.status === 'open' && order.mode === 'scheduled')) return 'Buscando profesional para el día elegido';
   if (order.status === 'matching_failed') return 'Sin profesional disponible';
   if (order.status === 'open' && order.mode === 'immediate') return 'Buscando ahora';
   return V6_STATUS_LABEL[order.status];
+}
+
+function orderNextStepText(order: V6Order, role: V6Role) {
+  if (order.status === 'open' && order.mode === 'immediate') return 'Ahora esperamos que un profesional disponible acepte.';
+  if (order.status === 'scheduled_open' || (order.status === 'open' && order.mode === 'scheduled')) {
+    return 'Ahora esperamos que un profesional confirme el día y horario.';
+  }
+  if (order.status === 'waiting_quotes' || (order.status === 'open' && order.mode === 'quote')) {
+    return 'Vas a poder comparar las propuestas cuando lleguen.';
+  }
+  if (order.status === 'matching_failed') return 'Podés reintentar la búsqueda o cambiar cómo querés avanzar.';
+  if (order.status === 'payment_pending') return role === 'client'
+    ? 'Revisá el importe y completá la acción de pago correspondiente.'
+    : 'Esperá la confirmación del pago antes de continuar.';
+  if (order.status === 'accepted') return role === 'client'
+    ? 'El profesional va a avisarte cuando salga hacia el domicilio.'
+    : 'Cuando salgas, marcá que estás en camino.';
+  if (order.status === 'en_camino') return role === 'client'
+    ? 'Podés escribirle por el chat mientras llega.'
+    : 'Al llegar, marcá tu llegada.';
+  if (order.status === 'en_sitio') return role === 'client'
+    ? 'Mostrale el PIN de inicio al profesional para comenzar.'
+    : 'Pedile al cliente el PIN de inicio.';
+  if (order.status === 'trabajando') return role === 'client'
+    ? 'Revisá cualquier adicional y el trabajo antes de compartir el PIN final.'
+    : 'Al terminar, cargá la evidencia requerida y pedí el PIN final.';
+  if (order.status === 'completed') return role === 'client'
+    ? 'Revisá el pago y calificá al profesional.'
+    : 'Revisá que el pago figure correctamente.';
+  if (order.status === 'cancelled') return 'El historial del servicio queda disponible en este trabajo.';
+  return 'Abrí el trabajo para ver el próximo paso.';
 }
 
 function cancellationReasonLabel(reason?: string | null) {
@@ -1750,10 +1797,7 @@ export default function ManitoV6App() {
             height={584}
             priority
           />
-          <p className="v6-live">
-            <CircleDot size={14} aria-hidden="true" /> Backend conectado
-          </p>
-          <h1>{profileLoading ? 'Cargando perfil...' : 'Cargando backend...'}</h1>
+          <h1>{profileLoading ? 'Preparando tu cuenta...' : 'Abriendo MANITO...'}</h1>
         </section>
       </main>
     );
@@ -1788,7 +1832,7 @@ export default function ManitoV6App() {
   return (
     <main className="v6-app">
       <header className="v6-top">
-        <div>
+        <div className="v6-top-brand">
           <Image
             className="v6-header-logo"
             src="/logo-main.jpg"
@@ -1797,48 +1841,31 @@ export default function ManitoV6App() {
             height={584}
             priority
           />
-          <p className="v6-kicker">Tu ubicación</p>
-          <button
-            className="v6-location"
-            type="button"
-            disabled={savingPhoneLocation}
-            onClick={usePhoneLocation}
-          >
-            <MapPin size={13} aria-hidden="true" /> {savingPhoneLocation ? 'Ubicando...' : currentLocation}
-          </button>
-          <div className="v6-mode-switch" aria-label="Modo de uso">
-            <button
-              type="button"
-              aria-pressed={appMode === 'client'}
-              onClick={() => {
-                setAppMode('client');
-                setTab('home');
-              }}
-            >
-              Cliente
-            </button>
-            <button
-              type="button"
-              aria-pressed={appMode === 'professional'}
-              onClick={() => {
-                setAppMode('professional');
-                setTab('home');
-              }}
-            >
-              Profesional
-            </button>
-          </div>
+          <span className="v6-header-location">
+            <small>Tu ubicación</small>
+            <span><MapPin size={13} aria-hidden="true" /> {currentLocation}</span>
+          </span>
         </div>
-        <button
-          className="v6-icon-button v6-bell-button"
-          type="button"
-          aria-label="Notificaciones"
-          aria-expanded={notificationsOpen}
-          onClick={toggleNotifications}
-        >
-          <Bell size={19} aria-hidden="true" />
-          {unreadNotifications > 0 && <span>{unreadNotifications}</span>}
-        </button>
+        <div className="v6-top-actions">
+          <ExperienceSwitch
+            experience={appMode}
+            canUseProfessional
+            onChange={(nextMode) => {
+              setAppMode(nextMode);
+              setTab('home');
+            }}
+          />
+          <button
+            className="v6-icon-button v6-bell-button"
+            type="button"
+            aria-label="Notificaciones"
+            aria-expanded={notificationsOpen}
+            onClick={toggleNotifications}
+          >
+            <Bell size={19} aria-hidden="true" />
+            {unreadNotifications > 0 && <span>{unreadNotifications}</span>}
+          </button>
+        </div>
       </header>
 
       <div className="v6-content">
@@ -1886,6 +1913,7 @@ export default function ManitoV6App() {
               setChatOrder={setChatOrder}
               setError={setError}
               setNotice={setNotice}
+              onNavigate={setTab}
             />
           ) : (
             <ClientHome
@@ -1932,6 +1960,21 @@ export default function ManitoV6App() {
           />
         )}
 
+        {tab === 'messages' && appMode === 'client' && (
+          <MessagesPanel
+            orders={clientOrders}
+            onOpenChat={setChatOrder}
+          />
+        )}
+
+        {tab === 'agenda' && appMode === 'professional' && (
+          <ProfessionalAgenda
+            profile={viewProfile}
+            orders={professionalOrders}
+            onOpenChat={setChatOrder}
+          />
+        )}
+
         {tab === 'profile' && (
           <ProfilePanel
             profile={profile}
@@ -1966,6 +2009,7 @@ export default function ManitoV6App() {
           <AccountPanel
             key={`${profile.id}:${profile.city || ''}:${profile.phone || ''}`}
             profile={profile}
+            experience={appMode}
             clientOrders={clientOrders}
             canInstall={Boolean(installPrompt) && !isStandalone}
             onInstall={installApp}
@@ -1979,35 +2023,7 @@ export default function ManitoV6App() {
         )}
       </div>
 
-      <nav className="v6-bottom" aria-label="Navegación principal">
-        <NavButton active={tab === 'home'} onClick={() => setTab('home')} icon={<Home size={18} />}>
-          Inicio
-        </NavButton>
-        <NavButton active={tab === 'search'} onClick={() => setTab('search')} icon={<Search size={18} />}>
-          Buscar
-        </NavButton>
-        <NavButton
-          active={tab === 'orders'}
-          onClick={() => setTab('orders')}
-          icon={<BriefcaseBusiness size={18} />}
-        >
-          {appMode === 'professional' ? 'Trabajos' : 'Pedidos'}
-        </NavButton>
-        <NavButton
-          active={tab === 'favorites'}
-          onClick={() => setTab('favorites')}
-          icon={<Heart size={18} />}
-        >
-          Favoritos
-        </NavButton>
-        <NavButton
-          active={tab === 'account'}
-          onClick={() => setTab('account')}
-          icon={<Settings size={18} />}
-        >
-          Cuenta
-        </NavButton>
-      </nav>
+      <ManitoBottomNavigation experience={appMode} activeTab={tab} onNavigate={setTab} />
 
       {chatOrder && (
         <ChatSheet
@@ -2303,9 +2319,11 @@ function ClientHome({
   const [locationId, setLocationId] = useState('');
   const [requiredSpecialty, setRequiredSpecialty] = useState<V6Specialty | null>(null);
   const requiredSpecialtyId = requiredSpecialty?.service_id === selectedService?.id ? requiredSpecialty?.id ?? null : null;
-  useEffect(() => { setRequiredSpecialty(current => current?.service_id === selectedService?.id ? current : null); }, [selectedService?.id]);
   const [eligibleResult, setEligibleResult] = useState<{ key: string; ids: string[] }>({ key: '', ids: [] });
   const [mode, setMode] = useState<V6Mode>('immediate');
+  const [modeChosen, setModeChosen] = useState(false);
+  const [requestStep, setRequestStep] = useState<RequestStep>('need');
+  const [showAllServices, setShowAllServices] = useState(false);
   const [scheduledAt, setScheduledAt] = useState('');
   const [repeatService, setRepeatService] = useState(false);
   const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceFrequency>('weekly');
@@ -2408,16 +2426,14 @@ function ClientHome({
     ? candidateProfessionals[0] || null : null;
   const photoNames = photoFiles.map((file) => file.name);
   const selectedPaymentProfile = paymentProfiles.find((payment) => payment.type === paymentMethod);
+  const activeClientOrder = clientOrders.find((order) => !['completed', 'cancelled'].includes(order.status)) || null;
+  const requestStepIndex = requestSteps.indexOf(requestStep);
 
   const scrollToRequestForm = useCallback(() => {
     window.requestAnimationFrame(() => {
       requestFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }, []);
-
-  useEffect(() => {
-    if (selectedService) scrollToRequestForm();
-  }, [scrollToRequestForm, selectedService]);
 
   useEffect(() => {
     let alive = true;
@@ -2460,8 +2476,18 @@ function ClientHome({
       setError('Elegí un servicio.');
       return;
     }
+    if (!modeChosen) {
+      setError('Elegí cómo querés avanzar.');
+      setRequestStep('mode');
+      return;
+    }
     if (!modeIsSupported) {
       setError(unsupportedModeMessage(selectedService, mode));
+      return;
+    }
+    if (selectedServiceSpecialties.length > 0 && !requiredSpecialtyId) {
+      setError('Elegí la especialidad que mejor describe el trabajo.');
+      setRequestStep('need');
       return;
     }
     if (!address.trim()) {
@@ -2577,6 +2603,8 @@ function ClientHome({
               : 'Pedido inmediato publicado. Un profesional disponible debe aceptarlo para confirmarlo.',
       );
       setPhotoFiles([]);
+      setModeChosen(false);
+      setRequestStep('need');
       onNavigate('orders');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo publicar.');
@@ -2679,6 +2707,8 @@ function ClientHome({
     const nextMode = serviceSupportsMode(service, mode) ? mode : firstSupportedMode(service);
     const label = serviceDisplayName(service);
     setSelectedService(service);
+    setRequiredSpecialty((current) => current?.service_id === service.id ? current : null);
+    setRequestStep('need');
     if (nextMode !== mode) setMode(nextMode);
     setProblemQuery(nextProblem);
     setDescription(nextProblem.trim() || `Necesito ayuda con ${label}.`);
@@ -2713,6 +2743,8 @@ function ClientHome({
   function chooseService(service: V6Service) {
     const nextMode = serviceSupportsMode(service, mode) ? mode : firstSupportedMode(service);
     setSelectedService(service);
+    setRequiredSpecialty((current) => current?.service_id === service.id ? current : null);
+    setRequestStep('need');
     if (nextMode !== mode) setMode(nextMode);
     if (!problemQuery.trim()) {
       setProblemQuery(serviceDisplayName(service));
@@ -2728,6 +2760,68 @@ function ClientHome({
         : `${serviceDisplayName(service)} seleccionado. Completá el pedido.`,
     );
     scrollToRequestForm();
+  }
+
+  function nextRequestStep() {
+    if (requestStep === 'need') {
+      if (!description.trim()) {
+        setError('Contanos qué necesitás resolver.');
+        return;
+      }
+      if (selectedServiceSpecialties.length > 0 && !requiredSpecialtyId) {
+        setError('Elegí la especialidad que mejor describe el trabajo.');
+        return;
+      }
+      setRequestStep('place');
+      return;
+    }
+    if (requestStep === 'place') {
+      if (!address.trim() || !addressCity.trim()) {
+        setError('Completá la dirección y la ciudad del trabajo.');
+        return;
+      }
+      if (!coords && !locationId) {
+        setError('Elegí la localidad del servicio o usá GPS.');
+        return;
+      }
+      setRequestStep('mode');
+      return;
+    }
+    if (requestStep === 'mode') {
+      if (!modeChosen) {
+        setError('Elegí cómo querés avanzar.');
+        return;
+      }
+      if (!selectedService || !serviceSupportsMode(selectedService, mode)) {
+        setError(selectedService ? unsupportedModeMessage(selectedService, mode) : 'Elegí un servicio para continuar.');
+        return;
+      }
+      setRequestStep('resolution');
+      return;
+    }
+    if (requestStep === 'resolution') {
+      if (mode === 'scheduled' && !scheduledAt) {
+        setError('Elegí día y horario para programar el servicio.');
+        return;
+      }
+      if (mode === 'scheduled' && new Date(scheduledAt).getTime() <= Date.now()) {
+        setError('Elegí una fecha futura para programar el servicio.');
+        return;
+      }
+      if (assignmentMode === 'manual' && mode !== 'quote' && !selectedProfessionalCandidate) {
+        setError('Elegí un profesional disponible o usá búsqueda automática.');
+        return;
+      }
+      setRequestStep('review');
+    }
+  }
+
+  function previousRequestStep() {
+    if (requestStepIndex <= 0) {
+      setSelectedService(null);
+      return;
+    }
+    setRequestStep(requestSteps[requestStepIndex - 1]);
   }
 
   function repeatLastOrder() {
@@ -2783,31 +2877,333 @@ function ClientHome({
     setNotice(message);
   }
 
+  if (selectedService) {
+    const modeOption = contractModeOptions.find((item) => item.id === mode);
+    const expectedNextStep = mode === 'quote'
+      ? 'Los profesionales compatibles podrán enviarte propuestas para comparar.'
+      : mode === 'scheduled'
+        ? 'La solicitud quedará pendiente hasta que un profesional confirme el horario.'
+        : 'MANITO buscará un profesional disponible para aceptar el trabajo.';
+
+    return (
+      <section className="v6-request-shell" ref={requestFormRef}>
+        <header className="v6-request-header">
+          <button className="v6-back-button" type="button" onClick={previousRequestStep} aria-label="Volver">
+            <ArrowLeft size={20} aria-hidden="true" />
+          </button>
+          <div>
+            <span>{serviceDisplayName(selectedService)}</span>
+            <strong>Nuevo trabajo</strong>
+          </div>
+        </header>
+
+        <RequestProgress steps={requestStepLabels} current={requestStepIndex} />
+
+        <form className="v6-request-form" onSubmit={createOrder}>
+          {requestStep === 'need' && (
+            <section className="v6-request-stage">
+              <div className="v6-stage-heading">
+                <span className="v6-stage-icon">{serviceIcon(selectedService.slug)}</span>
+                <div>
+                  <h1>¿Qué necesitás resolver?</h1>
+                  <p>Contanos lo necesario para que el profesional entienda el trabajo.</p>
+                </div>
+              </div>
+              <label className="v6-field">
+                <span>Descripción del problema</span>
+                <textarea
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Ej: pierde agua debajo de la pileta desde ayer"
+                  autoFocus
+                  required
+                />
+              </label>
+              {selectedServiceSpecialties.length > 0 && (
+                <div className="v6-specialty-panel compact">
+                  <div className="v6-section-head compact">
+                    <h2>Especialidad</h2>
+                    <span>Elegí una</span>
+                  </div>
+                  <div className="v6-chip-list">
+                    {selectedServiceSpecialties.map((specialty) => (
+                      <button
+                        type="button"
+                        key={specialty.id}
+                        aria-pressed={requiredSpecialtyId === specialty.id}
+                        onClick={() => setRequiredSpecialty(requiredSpecialtyId === specialty.id ? null : specialty)}
+                      >
+                        {specialty.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <label className="v6-upload-field">
+                <Camera size={20} aria-hidden="true" />
+                <span>
+                  <strong>Agregar fotos</strong>
+                  <small>Ayudan a entender el problema antes de ir.</small>
+                </span>
+                <input type="file" accept="image/*" multiple onChange={(event) => updatePhotos(event.target.files)} />
+              </label>
+              {photoNames.length > 0 && (
+                <div className="v6-file-list">
+                  {photoNames.map((name) => <span key={name}><Camera size={15} aria-hidden="true" /> {name}</span>)}
+                </div>
+              )}
+            </section>
+          )}
+
+          {requestStep === 'place' && (
+            <section className="v6-request-stage">
+              <div className="v6-stage-heading">
+                <span className="v6-stage-icon"><MapPin size={22} aria-hidden="true" /></span>
+                <div>
+                  <h1>¿Dónde es el trabajo?</h1>
+                  <p>Usá GPS o completá una ubicación manual válida.</p>
+                </div>
+              </div>
+              {savedAddresses.length > 0 && (
+                <label className="v6-field">
+                  <span>Dirección guardada</span>
+                  <select defaultValue="" onChange={(event) => chooseSavedAddress(event.target.value)}>
+                    <option value="" disabled>Elegir dirección</option>
+                    {savedAddresses.map((item) => (
+                      <option value={item.id} key={item.id}>{item.label} · {formatAddress(item.line, item.city)}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <button className="v6-location-action" type="button" onClick={captureLocation}>
+                <LocateFixed size={20} aria-hidden="true" />
+                <span>
+                  <strong>{coords ? 'Ubicación del teléfono lista' : 'Usar ubicación del teléfono'}</strong>
+                  <small>{coords ? 'Podés continuar o completar una referencia.' : 'Te vamos a pedir permiso en este paso.'}</small>
+                </span>
+              </button>
+              <div className="v6-field-grid-two">
+                <label className="v6-field">
+                  <span>Dirección</span>
+                  <input
+                    value={address}
+                    onChange={(event) => { setAddress(event.target.value); setCoords(null); }}
+                    placeholder="Calle, número, piso"
+                    required
+                  />
+                </label>
+                <label className="v6-field">
+                  <span>Ciudad</span>
+                  <input
+                    value={addressCity}
+                    onChange={(event) => { setAddressCity(event.target.value); setLocationId(''); setCoords(null); }}
+                    placeholder="Ej: Mar del Plata"
+                    required
+                  />
+                </label>
+              </div>
+              <MatchingLocation value={locationId} onChange={(id, name) => { setLocationId(id); setCoords(null); if (name) setAddressCity(name); }} />
+              <details className="v6-inline-details">
+                <summary>Guardar esta dirección</summary>
+                <div className="v6-inline-details-body">
+                  <label className="v6-field">
+                    <span>Nombre</span>
+                    <input value={addressLabel} onChange={(event) => setAddressLabel(event.target.value)} placeholder="Casa" />
+                  </label>
+                  <button className="v6-secondary" type="button" onClick={saveAddress}>Guardar dirección</button>
+                </div>
+              </details>
+            </section>
+          )}
+
+          {requestStep === 'mode' && (
+            <section className="v6-request-stage">
+              <div className="v6-stage-heading">
+                <span className="v6-stage-icon"><Clock size={22} aria-hidden="true" /></span>
+                <div>
+                  <h1>¿Cómo querés avanzar?</h1>
+                  <p>Elegí la opción que mejor se adapte a este trabajo.</p>
+                </div>
+              </div>
+              <div className="v6-mode-list">
+                {contractModeOptions.map((item) => {
+                  const supported = serviceSupportsMode(selectedService, item.id);
+                  return (
+                    <button
+                      type="button"
+                      className="v6-mode-row"
+                      aria-pressed={modeChosen && mode === item.id}
+                      aria-disabled={!supported}
+                      key={item.id}
+                      onClick={() => {
+                        if (!supported) {
+                          setNotice(unsupportedModeMessage(selectedService, item.id));
+                          return;
+                        }
+                        setMode(item.id);
+                        setModeChosen(true);
+                      }}
+                    >
+                      <span>{item.icon}</span>
+                      <span><strong>{item.title}</strong><small>{item.body}</small></span>
+                      <Check size={19} aria-hidden="true" />
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {requestStep === 'resolution' && (
+            <section className="v6-request-stage">
+              <div className="v6-stage-heading">
+                <span className="v6-stage-icon"><Users size={22} aria-hidden="true" /></span>
+                <div>
+                  <h1>{mode === 'quote' ? 'Prepará tu solicitud' : mode === 'scheduled' ? 'Elegí cuándo y quién' : 'Elegí cómo buscar'}</h1>
+                  <p>{modeOption?.body}</p>
+                </div>
+              </div>
+              {mode === 'scheduled' && (
+                <>
+                  <label className="v6-field">
+                    <span>Día y horario solicitado</span>
+                    <input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} required />
+                  </label>
+                  {canRepeatSelectedService && (
+                    <div className="v6-recurring-box">
+                      <label className="v6-toggle-row">
+                        <span><strong>Repetir este servicio</strong><small>Podés administrarlo después desde Trabajos.</small></span>
+                        <input type="checkbox" checked={repeatService} onChange={(event) => setRepeatService(event.target.checked)} />
+                      </label>
+                      {repeatService && (
+                        <div className="v6-choice-grid three">
+                          {recurrenceOptions.map((option) => (
+                            <button className="v6-choice" type="button" aria-pressed={recurrenceFrequency === option.id} key={option.id} onClick={() => setRecurrenceFrequency(option.id)}>
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+              {mode !== 'quote' ? (
+                <>
+                  <div className="v6-section-head compact"><h2>Asignación</h2><span>{candidateProfessionals.length} compatibles</span></div>
+                  <div className="v6-choice-grid">
+                    <button type="button" className="v6-choice" aria-pressed={effectiveAssignmentMode === 'auto'} onClick={() => setAssignmentMode('auto')}>
+                      <Users size={18} aria-hidden="true" /> Búsqueda automática
+                    </button>
+                    <button type="button" className="v6-choice" aria-pressed={effectiveAssignmentMode === 'manual'} disabled={!candidateProfessionals.length} onClick={() => setAssignmentMode('manual')}>
+                      <Star size={18} aria-hidden="true" /> Elegir profesional
+                    </button>
+                  </div>
+                  {effectiveAssignmentMode === 'manual' && (
+                    <div className="v6-pro-list">
+                      {candidateProfessionals.map((candidate) => (
+                        <button className="v6-pro-card" type="button" aria-pressed={selectedProfessionalCandidate?.professional.profile.id === candidate.professional.profile.id} key={candidate.professional.profile.id} onClick={() => setSelectedProfessionalId(candidate.professional.profile.id)}>
+                          <span className="v6-pro-avatar">{publicProfessionalName(candidate.professional).slice(0, 1)}</span>
+                          <span>
+                            <strong>{publicProfessionalName(candidate.professional)}</strong>
+                            <small>{candidate.professional.professional_profile?.rating_avg || 4.8} estrellas · {candidate.professional.professional_profile?.jobs_completed || 0} trabajos</small>
+                            <small>{candidate.distanceKm != null ? `${candidate.distanceKm.toFixed(1)} km` : candidate.professional.professional_profile?.work_city || 'Zona a confirmar'}</small>
+                          </span>
+                          {candidate.professional.professional_profile?.verified && <BadgeCheck size={18} aria-label="Identidad verificada" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {!candidateProfessionals.length && (
+                    <p className="v6-note">Podés publicar en automático. MANITO seguirá buscando profesionales compatibles.</p>
+                  )}
+                  <div className="v6-section-head compact"><h2>Medio de pago</h2><span>Preferencia para este trabajo</span></div>
+                  <div className="v6-choice-grid three">
+                    {paymentOptions.map((option) => (
+                      <button type="button" className="v6-choice" aria-pressed={paymentMethod === option.id} aria-disabled={option.disabled} key={option.id} onClick={() => option.disabled ? setNotice(option.detail) : setPaymentMethod(option.id)}>
+                        {option.icon}{option.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="v6-note">
+                  Publicás la necesidad sin contratar. Después vas a comparar alcance, materiales, disponibilidad y total antes de elegir.
+                </div>
+              )}
+            </section>
+          )}
+
+          {requestStep === 'review' && (
+            <section className="v6-request-stage">
+              <div className="v6-stage-heading">
+                <span className="v6-stage-icon"><Check size={22} aria-hidden="true" /></span>
+                <div>
+                  <h1>Revisá antes de publicar</h1>
+                  <p>Estos son los datos que recibirán los profesionales.</p>
+                </div>
+              </div>
+              <dl className="v6-review-list">
+                <div><dt>Servicio</dt><dd>{serviceDisplayName(selectedService)}</dd></div>
+                {requiredSpecialty && <div><dt>Especialidad</dt><dd>{requiredSpecialty.name}</dd></div>}
+                <div><dt>Necesidad</dt><dd>{description}</dd></div>
+                <div><dt>Ubicación</dt><dd>{formatAddress(address, addressCity)}</dd></div>
+                <div><dt>Modalidad</dt><dd>{modeOption?.title}</dd></div>
+                {mode === 'scheduled' && <div><dt>Horario solicitado</dt><dd>{shortDateTime(new Date(scheduledAt).toISOString())}</dd></div>}
+                {mode !== 'quote' && <div><dt>Asignación</dt><dd>{effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate ? publicProfessionalName(selectedProfessionalCandidate.professional) : 'Búsqueda automática'}</dd></div>}
+                <div><dt>{mode === 'quote' ? 'Precio' : 'Estimación'}</dt><dd>{mode === 'quote' ? 'A definir en las propuestas' : `${money(estimatedPrice)} · importe orientativo`}</dd></div>
+              </dl>
+              <div className="v6-next-step"><strong>Qué pasa después</strong><p>{expectedNextStep}</p></div>
+            </section>
+          )}
+
+          <footer className="v6-request-actions">
+            <button className="v6-secondary" type="button" onClick={previousRequestStep}>Atrás</button>
+            {requestStep !== 'review' ? (
+              <button className="v6-primary" type="button" onClick={nextRequestStep}>Continuar</button>
+            ) : (
+              <button className="v6-primary" type="submit" disabled={creatingOrder}>
+                {creatingOrder ? 'Publicando...' : mode === 'quote' ? 'Publicar solicitud de presupuesto' : mode === 'scheduled' ? 'Enviar solicitud programada' : 'Buscar profesional ahora'}
+              </button>
+            )}
+          </footer>
+        </form>
+      </section>
+    );
+  }
+
   return (
     <>
-      <section className="v6-hero">
-        <p className="v6-live">
-          <CircleDot size={14} aria-hidden="true" /> Backend conectado
-        </p>
-        <h1>Hola {profile.full_name || 'Jeremías'}, ¿qué necesitás resolver?</h1>
-        <p>Publicá un pedido real. Un profesional conectado desde otro dispositivo puede aceptarlo.</p>
-      </section>
+      {activeClientOrder && (
+        <section className="v6-focus-card">
+          <div className="v6-focus-card-head">
+            <span className="v6-order-icon">{serviceIcon(activeClientOrder.service?.slug || '')}</span>
+            <div>
+              <small>TRABAJO ACTIVO</small>
+              <h1>{orderStatusText(activeClientOrder)}</h1>
+              <p>{serviceDisplayName(activeClientOrder.service)} · {activeClientOrder.address}</p>
+            </div>
+          </div>
+          <div className="v6-next-step compact"><strong>Ahora</strong><p>{orderNextStepText(activeClientOrder, 'client')}</p></div>
+          <button className="v6-primary" type="button" onClick={() => onNavigate('orders')}>Ver trabajo</button>
+        </section>
+      )}
 
-      <AppointmentNotice
-        orders={clientOrders}
-        profile={profile}
-        setChatOrder={setChatOrder}
-      />
+      <section className="v6-home-intro">
+        <span>{activeClientOrder ? '¿Necesitás otra cosa?' : `Hola ${profile.full_name?.split(' ')[0] || ''}`}</span>
+        <h1>¿Qué necesitás resolver?</h1>
+        <p>Buscá un servicio o contanos qué está pasando.</p>
+      </section>
 
       <section className="v6-card v6-finder">
         <label className="v6-field">
-          <span>Buscar por profesión o describir problema</span>
+          <span>Servicio o problema</span>
           <div className="v6-search-box">
             <Search size={18} aria-hidden="true" />
             <textarea
               value={problemQuery}
               onChange={(event) => setProblemQuery(event.target.value)}
-              placeholder="Ej: pierde agua el baño, se cortó la luz, necesito pintar una pared"
+              placeholder="Ej: pierde agua debajo de la pileta"
             />
             <button
               className="v6-orange-button"
@@ -2815,7 +3211,7 @@ function ClientHome({
               disabled={!recommendedService}
               onClick={() => recommendedService && applyRecommendation(recommendedService)}
             >
-              Analizar
+              Continuar
             </button>
           </div>
         </label>
@@ -2864,7 +3260,7 @@ function ClientHome({
         )}
       </section>
 
-      <section className="v6-card v6-flow-card">
+      <section className="v6-card v6-flow-card v6-legacy-home-hidden">
         <div className="v6-flow-step active">
           <span>1</span>
           <strong>Elegís</strong>
@@ -2882,7 +3278,7 @@ function ClientHome({
         </div>
       </section>
 
-      <section className="v6-section v6-flat-section">
+      <section className="v6-section v6-flat-section v6-legacy-home-hidden">
         <div className="v6-section-head">
           <h2>¿Cómo lo necesitás?</h2>
           <span>elegí modalidad</span>
@@ -2917,7 +3313,7 @@ function ClientHome({
       <section className="v6-section">
         <div className="v6-section-head">
           <h2>Servicios</h2>
-          <span>{filteredServices.length} disponibles</span>
+          <span>{showAllServices ? `${filteredServices.length} disponibles` : 'Los más buscados'}</span>
         </div>
         <div className="v6-chip-row nowrap">
           {serviceGroups.map((group) => (
@@ -2935,11 +3331,11 @@ function ClientHome({
           ))}
         </div>
         <div className="v6-services">
-          {filteredServices.map((service) => (
+          {(showAllServices ? filteredServices : filteredServices.slice(0, 6)).map((service) => (
             <button
               className="v6-service"
               type="button"
-              aria-pressed={selectedService?.id === service.id}
+              aria-pressed={false}
               key={service.id}
               onClick={() => chooseService(service)}
             >
@@ -2949,6 +3345,11 @@ function ClientHome({
             </button>
           ))}
         </div>
+        {filteredServices.length > 6 && (
+          <button className="v6-text-link" type="button" onClick={() => setShowAllServices((current) => !current)}>
+            {showAllServices ? 'Ver menos servicios' : 'Ver todos los servicios'}
+          </button>
+        )}
       </section>
 
       {selectedService && (
@@ -3272,7 +3673,7 @@ function ClientHome({
         </section>
       )}
 
-      <section className="v6-card">
+      <section className="v6-card v6-legacy-home-hidden">
         <div className="v6-section-head">
           <h2>Atajos</h2>
           <span>acciones rápidas</span>
@@ -3332,7 +3733,7 @@ function ClientHome({
         </div>
       </section>
 
-      <section className="v6-section">
+      <section className="v6-section v6-legacy-home-hidden">
         <div className="v6-section-head">
           <h2>Pedidos recientes</h2>
           <span>Realtime</span>
@@ -3627,6 +4028,7 @@ function ProfessionalHome({
   setChatOrder,
   setError,
   setNotice,
+  onNavigate,
 }: {
   profile: V6Profile;
   services: V6Service[];
@@ -3642,8 +4044,10 @@ function ProfessionalHome({
   setChatOrder: (order: V6Order) => void;
   setError: (message: string) => void;
   setNotice: (message: string) => void;
+  onNavigate: (tab: Tab) => void;
 }) {
   const [professionalProfile, setProfessionalProfile] = useState<V6ProfessionalProfile | null>(null);
+  const [showAllOpportunities, setShowAllOpportunities] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -3745,28 +4149,47 @@ function ProfessionalHome({
   const netIncome = Math.max(0, grossIncome - commission);
   const completedJobs = activeOrders.filter((order) => order.status === 'completed').length;
   const proProgress = Math.min(100, completedJobs * 10 + proServices.length * 8);
+  const currentProfessionalOrders = activeOrders.filter((order) => !['completed', 'cancelled'].includes(order.status));
+  const focusOrder = [...currentProfessionalOrders].sort((left, right) => {
+    const priority: Record<string, number> = { trabajando: 0, en_sitio: 1, en_camino: 2, payment_pending: 3, accepted: 4 };
+    return (priority[left.status] ?? 9) - (priority[right.status] ?? 9) ||
+      new Date(appointmentDate(left)).getTime() - new Date(appointmentDate(right)).getTime();
+  })[0] || null;
 
   return (
     <>
       <section className="v6-available">
         <div>
-          <strong>{profile.is_available ? 'Estás disponible' : 'No estás recibiendo pedidos'}</strong>
-          <p>{profile.is_available ? 'MANITO muestra trabajos compatibles.' : 'Activa disponibilidad cuando quieras trabajar.'}</p>
+          <strong>{profile.is_available ? 'Disponible para pedidos Ahora' : 'Pedidos Ahora pausados'}</strong>
+          <p>{profile.is_available ? 'Podés recibir oportunidades inmediatas compatibles.' : 'Tus trabajos aceptados y tu agenda no cambian.'}</p>
         </div>
         <button className="v6-switch" type="button" aria-pressed={profile.is_available} onClick={toggleAvailable}>
           <span />
         </button>
       </section>
 
-      <AppointmentNotice
-        orders={activeOrders}
-        profile={profile}
-        setChatOrder={setChatOrder}
-      />
+      {focusOrder && (
+        <section className="v6-focus-card professional">
+          <div className="v6-focus-card-head">
+            <span className="v6-order-icon">{serviceIcon(focusOrder.service?.slug || '')}</span>
+            <div>
+              <small>{focusOrder.status === 'trabajando' ? 'TRABAJO EN CURSO' : 'PRÓXIMO TRABAJO'}</small>
+              <h1>{orderStatusText(focusOrder)}</h1>
+              <p>{serviceDisplayName(focusOrder.service)} · {focusOrder.address}</p>
+              {focusOrder.scheduled_at && <span>{shortDateTime(focusOrder.scheduled_at)}</span>}
+            </div>
+          </div>
+          <div className="v6-next-step compact"><strong>Ahora</strong><p>{orderNextStepText(focusOrder, 'professional')}</p></div>
+          <div className="v6-actions compact">
+            <button className="v6-primary" type="button" onClick={() => onNavigate('orders')}>Ver trabajo</button>
+            {focusOrder.professional_id && <button className="v6-secondary" type="button" onClick={() => setChatOrder(focusOrder)}>Abrir chat</button>}
+          </div>
+        </section>
+      )}
 
-      <section className="v6-card">
+      <section className="v6-card v6-professional-stats">
         <div className="v6-section-head">
-          <h2>Panel profesional</h2>
+          <h2>Resumen</h2>
           <span>MANITO PRO {proProgress}%</span>
         </div>
         <div className="v6-admin-grid">
@@ -3792,7 +4215,7 @@ function ProfessionalHome({
         </div>
       </section>
 
-      <section className="v6-card">
+      <section className="v6-card v6-legacy-home-hidden">
         <h2>Mis servicios</h2>
         <div className="v6-check-grid">
           {services.map((service) => (
@@ -3811,22 +4234,33 @@ function ProfessionalHome({
 
       <section className="v6-section">
         <div className="v6-section-head">
-          <h2>Pedidos disponibles</h2>
+          <h2>Oportunidades</h2>
           <span>{compatibleMatches.length} compatibles</span>
         </div>
-        {compatibleMatches.map((match) =>
+        {(showAllOpportunities ? compatibleMatches : compatibleMatches.slice(0, 3)).map((match) =>
             match.order.mode === 'quote' ? (
-              <div className="v6-match-card" key={match.order.id}>
-                <MatchSummary match={match} />
-                <OrderCard
-                  order={match.order}
-                  profile={profile}
-                  setOrders={() => undefined}
-                  setChatOrder={setChatOrder}
-                  setError={setError}
-                  setNotice={setNotice}
-                />
-              </div>
+              <details className="v6-opportunity-details" key={match.order.id}>
+                <summary>
+                  <span className="v6-order-icon">{serviceIcon(match.order.service?.slug || '')}</span>
+                  <span>
+                    <strong>{serviceDisplayName(match.order.service)}</strong>
+                    <small>{specialties.find((item) => item.id === match.order.required_specialty_id)?.name || 'Presupuesto solicitado'}</small>
+                    <small>{cityFromLocationLabel(match.order.address)} · {match.distanceKm != null ? `${match.distanceKm.toFixed(1)} km` : 'Distancia no disponible'}</small>
+                  </span>
+                  <b>Enviar presupuesto</b>
+                </summary>
+                <div className="v6-opportunity-details-body">
+                  <MatchSummary match={match} />
+                  <OrderCard
+                    order={match.order}
+                    profile={profile}
+                    setOrders={() => undefined}
+                    setChatOrder={setChatOrder}
+                    setError={setError}
+                    setNotice={setNotice}
+                  />
+                </div>
+              </details>
             ) : (
               <article className="v6-order" key={match.order.id}>
                 <div className="v6-order-top">
@@ -3834,7 +4268,8 @@ function ProfessionalHome({
                   <div>
                     <strong>{serviceDisplayName(match.order.service)}</strong>
                     <p>{match.order.description}</p>
-                    <small>Match {match.score}% · {V6_MODE_LABEL[match.order.mode]}</small>
+                    {match.order.required_specialty_id && <small>{specialties.find((item) => item.id === match.order.required_specialty_id)?.name}</small>}
+                    <small>{V6_MODE_LABEL[match.order.mode]} · {match.distanceKm != null ? `${match.distanceKm.toFixed(1)} km` : cityFromLocationLabel(match.order.address)}</small>
                     <small>
                       <MapPin size={13} aria-hidden="true" /> {match.order.address}
                     </small>
@@ -3860,6 +4295,11 @@ function ProfessionalHome({
               </article>
             ),
           )}
+        {compatibleMatches.length > 3 && (
+          <button className="v6-text-link" type="button" onClick={() => setShowAllOpportunities((current) => !current)}>
+            {showAllOpportunities ? 'Ver menos oportunidades' : `Ver todas (${compatibleMatches.length})`}
+          </button>
+        )}
         {!compatibleMatches.length && (
           <Empty
             title={profile.is_available ? 'No hay pedidos compatibles' : 'Sin solicitudes programadas o presupuestos'}
@@ -3868,7 +4308,7 @@ function ProfessionalHome({
         )}
       </section>
 
-      <section className="v6-section">
+      <section className="v6-section v6-legacy-home-hidden">
         <div className="v6-section-head">
           <h2>Trabajos activos</h2>
           <span>{activeOrders.length}</span>
@@ -3910,22 +4350,140 @@ function OrdersList(props: {
   setError: (message: string) => void;
   setNotice: (message: string) => void;
 }) {
+  const [filter, setFilter] = useState<'current' | 'proposals' | 'history'>('current');
+  const visibleOrders = props.orders.filter((order) => {
+    if (filter === 'history') return ['completed', 'cancelled'].includes(order.status);
+    if (filter === 'proposals') return order.mode === 'quote' && isOpenOpportunityStatus(order.status);
+    return !['completed', 'cancelled'].includes(order.status) && (
+      props.profile.role === 'client' || order.mode !== 'quote' || !isOpenOpportunityStatus(order.status)
+    );
+  });
+
   return (
     <>
-      <AppointmentNotice
-        orders={props.orders}
-        profile={props.profile}
-        setChatOrder={props.setChatOrder}
-      />
       <section className="v6-section">
         <div className="v6-section-head">
-          <h2>{props.profile.role === 'professional' ? 'Mis trabajos' : 'Mis pedidos'}</h2>
-          <span>{props.orders.length}</span>
+          <h1>{props.profile.role === 'professional' ? 'Trabajos' : 'Tus trabajos'}</h1>
+          <span>{visibleOrders.length}</span>
         </div>
-        {props.orders.map((order) => (
+        <div className="v6-filter-tabs" role="tablist" aria-label="Filtrar trabajos">
+          <button type="button" role="tab" aria-selected={filter === 'current'} onClick={() => setFilter('current')}>
+            {props.profile.role === 'professional' ? 'En curso' : 'Activos'}
+          </button>
+          {props.profile.role === 'professional' && (
+            <button type="button" role="tab" aria-selected={filter === 'proposals'} onClick={() => setFilter('proposals')}>Propuestas</button>
+          )}
+          <button type="button" role="tab" aria-selected={filter === 'history'} onClick={() => setFilter('history')}>Historial</button>
+        </div>
+        {visibleOrders.map((order) => (
           <OrderCard key={order.id} order={order} {...props} />
         ))}
-        {!props.orders.length && <Empty title="Todavía está vacío" body="Los pedidos aparecerán acá y se sincronizarán entre dispositivos." />}
+        {!visibleOrders.length && (
+          <Empty
+            title={filter === 'history' ? 'Todavía no hay historial' : filter === 'proposals' ? 'No tenés propuestas activas' : 'No tenés trabajos activos'}
+            body={props.profile.role === 'client' ? 'Cuando publiques una necesidad, vas a seguirla desde acá.' : 'Tus próximos trabajos aparecerán acá.'}
+          />
+        )}
+      </section>
+    </>
+  );
+}
+
+function MessagesPanel({
+  orders,
+  onOpenChat,
+}: {
+  orders: V6Order[];
+  onOpenChat: (order: V6Order) => void;
+}) {
+  const chatOrders = useMemo(
+    () => orders.filter((order) => Boolean(order.professional_id)),
+    [orders],
+  );
+  const [lastMessages, setLastMessages] = useState<Record<string, V6Message | null>>({});
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all(chatOrders.map(async (order) => {
+      const messages = await listV6Messages(order.id);
+      return [order.id, messages[messages.length - 1] || null] as const;
+    })).then((entries) => {
+      if (active) setLastMessages(Object.fromEntries(entries));
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [chatOrders]);
+
+  return (
+    <section className="v6-section v6-conversation-screen">
+      <div className="v6-section-head"><h1>Mensajes</h1><span>{chatOrders.length}</span></div>
+      <div className="v6-conversation-list">
+        {chatOrders.map((order) => {
+          const lastMessage = lastMessages[order.id];
+          return (
+            <button type="button" key={order.id} onClick={() => onOpenChat(order)}>
+              <span className="v6-pro-avatar">{(order.professional?.full_name || 'M').slice(0, 1)}</span>
+              <span>
+                <strong>{order.professional?.full_name || 'Profesional MANITO'}</strong>
+                <small>{serviceDisplayName(order.service)} · {orderStatusText(order)}</small>
+                <p>{lastMessage?.body || 'Abrí la conversación para coordinar este trabajo.'}</p>
+              </span>
+              <span className="v6-conversation-time">{lastMessage ? shortDateTime(lastMessage.created_at) : ''}</span>
+            </button>
+          );
+        })}
+      </div>
+      {!chatOrders.length && <Empty title="Todavía no hay conversaciones" body="El chat se habilita cuando un profesional queda asignado a tu trabajo." />}
+    </section>
+  );
+}
+
+function ProfessionalAgenda({
+  profile,
+  orders,
+  onOpenChat,
+}: {
+  profile: V6Profile;
+  orders: V6Order[];
+  onOpenChat: (order: V6Order) => void;
+}) {
+  const [professionalProfile, setProfessionalProfile] = useState<V6ProfessionalProfile | null>(null);
+  useEffect(() => {
+    let active = true;
+    void getV6ProfessionalProfile(profile.id).then((value) => {
+      if (active) setProfessionalProfile(value);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [profile.id]);
+
+  const scheduledOrders = [...orders]
+    .filter((order) => order.scheduled_at && !['completed', 'cancelled'].includes(order.status))
+    .sort((left, right) => new Date(left.scheduled_at || '').getTime() - new Date(right.scheduled_at || '').getTime());
+
+  return (
+    <>
+      <section className="v6-section v6-agenda-summary">
+        <div className="v6-section-head"><h1>Agenda</h1><span>{scheduledOrders.length} próximos</span></div>
+        <div className="v6-next-step compact">
+          <strong>Horario habitual</strong>
+          <p>
+            {professionalProfile?.work_days?.length ? professionalProfile.work_days.join(', ') : 'Días sin configurar'} · {' '}
+            {professionalProfile?.work_starts_at?.slice(0, 5) || '--:--'} a {professionalProfile?.work_ends_at?.slice(0, 5) || '--:--'}
+          </p>
+        </div>
+        <p className="v6-muted">La disponibilidad para pedidos Ahora se administra desde Hoy. Estos horarios organizan solicitudes programadas.</p>
+      </section>
+      <section className="v6-section">
+        <div className="v6-section-head"><h2>Próximos trabajos</h2><span>Por fecha</span></div>
+        <div className="v6-agenda-list">
+          {scheduledOrders.map((order) => (
+            <article key={order.id}>
+              <time>{shortDateTime(order.scheduled_at)}</time>
+              <div><strong>{serviceDisplayName(order.service)}</strong><p>{order.address}</p><small>{orderStatusText(order)}</small></div>
+              {order.professional_id && <button className="v6-secondary" type="button" onClick={() => onOpenChat(order)}>Chat</button>}
+            </article>
+          ))}
+        </div>
+        {!scheduledOrders.length && <Empty title="No tenés trabajos programados" body="Las próximas reservas confirmadas van a aparecer en esta agenda." />}
       </section>
     </>
   );
@@ -4479,7 +5037,20 @@ function OrderCard({
         </div>
         <b>{money(orderDisplayAmount(order))}</b>
       </div>
-      <StatusSteps status={order.status} />
+      <div className="v6-order-guidance">
+        <span>Próximo paso</span>
+        <p>{orderNextStepText(order, profile.role)}</p>
+        {clientPin && (
+          <strong className="v6-pin-callout"><KeyRound size={18} aria-hidden="true" /> {clientPin.label}: {clientPin.value}</strong>
+        )}
+        {profile.role === 'professional' && canProfessionalAdvanceOrder(order, profile.id) && (
+          <button className="v6-primary" type="button" onClick={advance}>{nextAction.label}</button>
+        )}
+      </div>
+      <details className="v6-inline-details v6-status-details">
+        <summary>Ver recorrido del trabajo</summary>
+        <StatusSteps status={order.status} />
+      </details>
       {order.status === 'cancelled' && (
         <p className="v6-alert">
           Servicio cancelado
@@ -4495,7 +5066,6 @@ function OrderCard({
         {order.recurring_plan_id && <span>Servicio recurrente</span>}
         {order.payment_method && <span>Pago {paymentLabel(order.payment_method)}</span>}
         {order.eta_minutes && <span>ETA {order.eta_minutes} min</span>}
-        {clientPin && <span>{clientPin.label} {clientPin.value}</span>}
       </div>
       {manualLabel && (showManualPendingNotice || showManualClientDecision || canRejectManualRequest) && (
         <section className="v6-payment-box action">
@@ -4559,6 +5129,8 @@ function OrderCard({
           </div>
         </section>
       )}
+      <details className="v6-inline-details v6-commercial-details">
+        <summary>Acuerdo, pago y Protección MANITO</summary>
       <section className="v6-payment-box">
         <div>
           <strong>
@@ -4611,6 +5183,7 @@ function OrderCard({
         </div>
       </section>}
       {order.status === 'completed' && <ProtectionPanel key={order.id} order={order} profile={profile} notify={setNotice} />}
+      </details>
       {canClientReportManualPayment && (
         <section className="v6-payment-box action">
           <div>
@@ -4684,6 +5257,10 @@ function OrderCard({
           )}
         </div>
       )}
+      {(photos.length > 0 || canUploadEvidence) && (
+        <details className="v6-inline-details v6-evidence-details">
+          <summary>Fotos y evidencia {photos.length > 0 ? `(${photos.length})` : ''}</summary>
+          <div className="v6-inline-details-body">
       {photos.length > 0 && (
         <div className="v6-evidence-groups">
           {(['before', 'during', 'after'] as const).map((stage) => (
@@ -4749,6 +5326,9 @@ function OrderCard({
           </button>
         </form>
       )}
+          </div>
+        </details>
+      )}
       {order.mode === 'quote' && proposals.length > 0 && (
         <div className="v6-quote-list">
           {proposals.map((proposal) => (
@@ -4764,15 +5344,20 @@ function OrderCard({
                 </div>
                 <b className={`v6-proposal-status ${proposal.status}`}>{proposalStatusLabel(proposal)}</b>
               </div>
-              <strong className="v6-quote-total">{money(proposalTotal(proposal))}</strong>
+              <div className="v6-quote-scope">
+                <span>Alcance</span>
+                <p>{proposal.observation || 'Sin aclaraciones adicionales sobre el alcance.'}</p>
+              </div>
               <div className="v6-quote-components">
                 <span>Mano de obra {money(proposal.labor_price)}</span>
-                <span>Materiales {money(proposal.materials_price)}</span>
+                <span>{proposalMaterialsText(proposal)}</span>
                 <span>Visita {money(proposal.visit_price)}</span>
-                {proposal.manito_fee > 0 && <span>Fee {money(proposal.manito_fee)}</span>}
+                <span>{proposal.manito_fee > 0 ? `Otros conceptos ${money(proposal.manito_fee)}` : 'Otros conceptos sin especificar'}</span>
               </div>
-              <p>{proposalAvailabilityText(proposal)} · {proposal.estimated_minutes || 'A definir'} min · válida hasta {shortDateTime(proposal.valid_until)}</p>
-              {proposal.observation && <p>{proposal.observation}</p>}
+              <div className="v6-quote-total-row"><span>Total propuesto</span><strong className="v6-quote-total">{money(proposalTotal(proposal))}</strong></div>
+              <p>Disponibilidad: {proposalAvailabilityText(proposal)}</p>
+              <p>Duración: {proposal.estimated_minutes ? `${proposal.estimated_minutes} min` : 'Sin especificar'}</p>
+              <p>Válida hasta: {shortDateTime(proposal.valid_until)}</p>
               {profile.role === 'client' && isOpenOpportunityStatus(order.status) && proposal.status === 'sent' && !proposalIsExpiredByClock(proposal) && (
                 <button className="v6-primary" type="button" onClick={() => acceptProposal(proposal.id)}>
                   Aceptar presupuesto
@@ -4937,12 +5522,6 @@ function OrderCard({
             Cancelar servicio
           </button>
         )}
-        {profile.role === 'professional' &&
-          canProfessionalAdvanceOrder(order, profile.id) && (
-            <button className="v6-primary" type="button" onClick={advance}>
-              {nextAction.label}
-            </button>
-          )}
       </div>
     </article>
   );
@@ -6000,6 +6579,7 @@ function ProfilePanel({
 
 function AccountPanel({
   profile,
+  experience,
   clientOrders,
   canInstall,
   onInstall,
@@ -6011,6 +6591,7 @@ function AccountPanel({
   setNotice,
 }: {
   profile: V6Profile;
+  experience: AppMode;
   clientOrders: V6Order[];
   canInstall: boolean;
   onInstall: () => void;
@@ -6206,10 +6787,12 @@ function AccountPanel({
         onClose={() => setShowRecurring(false)}
       />}
       <section className="v6-card v6-account-cta">
-        <h2>Tu cuenta de cliente</h2>
-        <p>Guardá direcciones, favoritos, pedidos recurrentes y datos de facturación.</p>
+        <h2>{experience === 'professional' ? 'Tu perfil profesional' : 'Tu cuenta de cliente'}</h2>
+        <p>{experience === 'professional'
+          ? 'Administrá servicios, especialidades, cobertura, documentación, horarios y tarifas.'
+          : 'Guardá direcciones, favoritos, pedidos recurrentes y datos de facturación.'}</p>
         <button className="v6-primary" type="button" onClick={onOpenProfile}>
-          Editar perfil
+          {experience === 'professional' ? 'Administrar perfil profesional' : 'Editar perfil'}
         </button>
       </section>
       <section className="v6-card">
@@ -6315,7 +6898,7 @@ function AccountPanel({
           </button>
         </div>
       </section>
-      <section className="v6-card v6-account-cta">
+      {experience === 'client' && <section className="v6-card v6-account-cta">
         <div className="v6-section-head compact">
           <h2>Referidos</h2>
           <span>crecé con MANITO</span>
@@ -6324,8 +6907,8 @@ function AccountPanel({
         <button className="v6-secondary" type="button" onClick={copyReferralCode}>
           {referralCode}
         </button>
-      </section>
-      <section className="v6-card">
+      </section>}
+      {experience === 'client' && <section className="v6-card">
         <div className="v6-section-head">
           <h2>Pagos</h2>
           <span>{paymentProfiles.length}</span>
@@ -6363,8 +6946,8 @@ function AccountPanel({
             </span>
           ))}
         </div>
-      </section>
-      <section className="v6-card">
+      </section>}
+      {experience === 'client' && <section className="v6-card">
         <h2>Beneficios</h2>
         <div className="v6-benefit-grid">
           <button type="button" onClick={copyReferralCode}>
@@ -6403,14 +6986,14 @@ function AccountPanel({
             </span>
           </button>
         </div>
-      </section>
-      <section className="v6-card v6-account-cta">
+      </section>}
+      {experience === 'client' && <section className="v6-card v6-account-cta">
         <h2>Trabaja con MANITO</h2>
         <p>Creá tu perfil profesional, mostrá qué hacés y empezá a recibir pedidos cuando tu cuenta sea aprobada.</p>
         <button className="v6-secondary" type="button" onClick={onOpenProfile}>
           Quiero ser profesional
         </button>
-      </section>
+      </section>}
       {profile.role === 'admin' && (
         <RecurringAdminPanel />
       )}
@@ -6943,24 +7526,5 @@ function Empty({ title, body }: { title: string; body: string }) {
       <strong>{title}</strong>
       <span>{body}</span>
     </div>
-  );
-}
-
-function NavButton({
-  active,
-  onClick,
-  icon,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <button className={active ? 'active' : ''} type="button" onClick={onClick}>
-      {icon}
-      {children}
-    </button>
   );
 }

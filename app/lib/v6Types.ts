@@ -556,14 +556,14 @@ export type V6Notification = {
 };
 
 export const V6_STATUS_LABEL: Record<V6OrderStatus, string> = {
-  open: 'Buscando',
-  scheduled_open: 'Programado',
+  open: 'Buscando profesional',
+  scheduled_open: 'Buscando profesional para el día elegido',
   waiting_quotes: 'Esperando presupuestos',
   payment_pending: 'Pago pendiente',
-  accepted: 'Confirmado',
-  en_camino: 'En camino',
-  en_sitio: 'En el lugar',
-  trabajando: 'Trabajando',
+  accepted: 'Profesional confirmado',
+  en_camino: 'Está en camino',
+  en_sitio: 'El profesional llegó',
+  trabajando: 'Trabajo en curso',
   completed: 'Finalizado',
   cancelled: 'Cancelado',
   matching_failed: 'Sin profesional disponible',
