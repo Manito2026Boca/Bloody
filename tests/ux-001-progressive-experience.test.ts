@@ -19,7 +19,7 @@ describe('UX-001 progressive experience', () => {
 
   it('starts the client experience from a need instead of a contracting mode', () => {
     expect(app).toContain('¿Qué necesitás resolver?');
-    expect(app).toContain("const [modeChosen, setModeChosen] = useState(false)");
+    expect(app).toContain("const [modeChosen, setModeChosen] = useState(Boolean(editingOrder))");
     expect(app).toContain("setError('Elegí cómo querés avanzar.')");
     expect(app).toContain('v6-legacy-home-hidden');
   });
@@ -33,11 +33,12 @@ describe('UX-001 progressive experience', () => {
     expect(app).not.toMatch(/function previousRequestStep\(\)[\s\S]{0,400}setDescription\(''\)/);
   });
 
-  it('requires structured specialty and asks for location only inside the request', () => {
+  it('requires structured specialty and requests GPS only inside the request', () => {
     expect(app).toContain("setError('Elegí la especialidad que mejor describe el trabajo.')");
     expect(app).toContain('<MatchingLocation value={locationId}');
     expect(app).toContain("requestStep === 'place'");
-    expect(app).not.toMatch(/className="v6-header-location"[^>]*onClick=/);
+    expect(app).toMatch(/className="v6-header-location"[^>]*onClick=/);
+    expect(app).toContain('Te pediremos permiso sólo ahora.');
   });
 
   it('surfaces the active work and its next action with human status labels', () => {

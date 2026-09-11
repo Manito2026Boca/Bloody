@@ -851,6 +851,42 @@ export async function retryV6ImmediateMatching(orderId: string) {
   fail(error);
 }
 
+export async function editV6UncontractedOrder(input: {
+  orderId: string;
+  locationId?: string | null;
+  requiredSpecialtyId?: number | null;
+  description: string;
+  address: string;
+  mode: V6Mode;
+  assignmentMode: V6AssignmentMode;
+  preferredProfessionalId?: string | null;
+  scheduledAt?: string | null;
+  estimatedDurationMinutes?: number | null;
+  paymentMethod?: V6PaymentMethod | null;
+  lat?: number | null;
+  lng?: number | null;
+}) {
+  const { data, error } = await getV6Supabase().rpc('edit_uncontracted_order', {
+    p_order_id: input.orderId,
+    p_data: {
+      location_id: input.locationId || null,
+      required_specialty_id: input.requiredSpecialtyId ?? null,
+      description: input.description,
+      address: input.address,
+      mode: input.mode,
+      assignment_mode: input.assignmentMode,
+      preferred_professional_id: input.assignmentMode === 'manual' ? input.preferredProfessionalId || null : null,
+      scheduled_at: input.mode === 'scheduled' ? input.scheduledAt || null : null,
+      estimated_duration_minutes: input.estimatedDurationMinutes ?? null,
+      payment_method: input.paymentMethod || null,
+      client_lat: input.lat ?? null,
+      client_lng: input.lng ?? null,
+    },
+  });
+  fail(error);
+  return data as V6Order;
+}
+
 export async function chooseV6ManualOrderProfessional(orderId: string, professionalId: string) {
   const { error } = await getV6Supabase().rpc('choose_manual_order_professional', {
     p_order_id: orderId,

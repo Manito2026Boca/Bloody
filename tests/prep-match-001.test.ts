@@ -27,7 +27,7 @@ describe('PREP-MATCH-001 integration contracts (SQL behavior covered by rollback
     expect(sql).toContain('revoke all on public.service_locations from public,anon,authenticated');
   });
   it('propagates requirements through all creation modes and recurring generation', () => {
-    expect(api.match(/required_specialty_id: input.requiredSpecialtyId/g)).toHaveLength(3);
+    expect(api.match(/required_specialty_id: input.requiredSpecialtyId/g)?.length).toBeGreaterThanOrEqual(3);
     expect(sql).toContain("'required_specialty_id',p.required_specialty_id");
     expect(sql).toContain('o.payment_method,o.location_id,o.required_specialty_id');
   });

@@ -22,6 +22,7 @@ import {
   BriefcaseBusiness,
   Camera,
   Check,
+  ChevronRight,
   CircleDot,
   Clock,
   CreditCard,
@@ -65,6 +66,7 @@ import {
   createV6Order,
   decideV6OrderExtra,
   disputeV6ManualPayment,
+  editV6UncontractedOrder,
   fallbackV6ManualOrderToAuto,
   getV6Profile,
   getV6MediaSignedUrl,
@@ -1450,6 +1452,8 @@ export default function ManitoV6App() {
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [savingPhoneLocation, setSavingPhoneLocation] = useState(false);
+  const [locationEditorOpen, setLocationEditorOpen] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<V6Order | null>(null);
   const [clientSelectedService, setClientSelectedService] = useState<V6Service | null>(null);
   const [clientProblemQuery, setClientProblemQuery] = useState('');
   const lastAuthUser = useRef<string | null>(null);
@@ -1768,13 +1772,13 @@ export default function ManitoV6App() {
       });
 
       setProfile(updated);
+      setLocationEditorOpen(false);
       setNotice(
         reverseLocation?.label
           ? `Ubicación actualizada: ${reverseLocation.label}.`
           : 'GPS actualizado. No pude leer la ciudad exacta, pero guardé las coordenadas.',
       );
     } catch (caught) {
-      setTab('account');
       setNotice(phoneLocationErrorMessage(caught));
     } finally {
       setSavingPhoneLocation(false);
@@ -1841,10 +1845,10 @@ export default function ManitoV6App() {
             height={584}
             priority
           />
-          <span className="v6-header-location">
+          <button className="v6-header-location" type="button" onClick={() => setLocationEditorOpen(true)}>
             <small>Tu ubicación</small>
             <span><MapPin size={13} aria-hidden="true" /> {currentLocation}</span>
-          </span>
+          </button>
         </div>
         <div className="v6-top-actions">
           <ExperienceSwitch
@@ -1931,6 +1935,8 @@ export default function ManitoV6App() {
               setError={setError}
               setNotice={setNotice}
               onNavigate={setTab}
+              editingOrder={editingOrder}
+              onEditingComplete={() => setEditingOrder(null)}
             />
           ))}
 
@@ -1957,6 +1963,13 @@ export default function ManitoV6App() {
             setChatOrder={setChatOrder}
             setError={setError}
             setNotice={setNotice}
+            onEditRequest={(order) => {
+              const service = services.find((item) => item.id === order.service_id) || null;
+              setEditingOrder(order);
+              setClientSelectedService(service);
+              setClientProblemQuery(service ? serviceDisplayName(service) : '');
+              setTab('home');
+            }}
           />
         )}
 
@@ -1972,6 +1985,7 @@ export default function ManitoV6App() {
             profile={viewProfile}
             orders={professionalOrders}
             onOpenChat={setChatOrder}
+            onConfigure={() => setTab('profile')}
           />
         )}
 
@@ -2030,6 +2044,27 @@ export default function ManitoV6App() {
           order={chatOrder}
           profile={profile}
           onClose={() => setChatOrder(null)}
+          setError={setError}
+        />
+      )}
+      {locationEditorOpen && (
+        <HeaderLocationSheet
+          profile={profile}
+          savingPhoneLocation={savingPhoneLocation}
+          onUsePhoneLocation={usePhoneLocation}
+          onClose={() => setLocationEditorOpen(false)}
+          onSave={async (city, detail) => {
+            const nextProfile = await updateV6Profile(profile.id, {
+              full_name: profile.full_name,
+              phone: profile.phone,
+              city: formatAddress(detail, city),
+              lat: null,
+              lng: null,
+            });
+            setProfile(nextProfile);
+            setLocationEditorOpen(false);
+            setNotice('Ubicación guardada.');
+          }}
           setError={setError}
         />
       )}
@@ -2297,6 +2332,8 @@ function ClientHome({
   setError,
   setNotice,
   onNavigate,
+  editingOrder,
+  onEditingComplete,
 }: {
   profile: V6Profile;
   services: V6Service[];
@@ -2312,34 +2349,53 @@ function ClientHome({
   setError: (message: string) => void;
   setNotice: (message: string) => void;
   onNavigate: (tab: Tab) => void;
+  editingOrder: V6Order | null;
+  onEditingComplete: () => void;
 }) {
-  const [description, setDescription] = useState('Necesito un plomero.');
-  const [address, setAddress] = useState('');
-  const [addressCity, setAddressCity] = useState(profile.city || '');
-  const [locationId, setLocationId] = useState('');
-  const [requiredSpecialty, setRequiredSpecialty] = useState<V6Specialty | null>(null);
+  const initialAddress = editingOrder ? splitStoredAddress(editingOrder.address, profile.city) : null;
+  const [description, setDescription] = useState(editingOrder?.description || 'Necesito un plomero.');
+  const [address, setAddress] = useState(initialAddress?.line || '');
+  const [addressCity, setAddressCity] = useState(initialAddress?.city || profile.city || '');
+  const [locationId, setLocationId] = useState(editingOrder?.location_id || '');
+  const [requiredSpecialty, setRequiredSpecialty] = useState<V6Specialty | null>(() =>
+    specialties.find((item) => item.id === editingOrder?.required_specialty_id) || null,
+  );
   const requiredSpecialtyId = requiredSpecialty?.service_id === selectedService?.id ? requiredSpecialty?.id ?? null : null;
   const [eligibleResult, setEligibleResult] = useState<{ key: string; ids: string[] }>({ key: '', ids: [] });
-  const [mode, setMode] = useState<V6Mode>('immediate');
-  const [modeChosen, setModeChosen] = useState(false);
+  const [mode, setMode] = useState<V6Mode>(editingOrder?.mode || 'immediate');
+  const [modeChosen, setModeChosen] = useState(Boolean(editingOrder));
   const [requestStep, setRequestStep] = useState<RequestStep>('need');
   const [showAllServices, setShowAllServices] = useState(false);
-  const [scheduledAt, setScheduledAt] = useState('');
+  const [scheduledAt, setScheduledAt] = useState(dateTimeInputValue(editingOrder?.scheduled_at));
   const [repeatService, setRepeatService] = useState(false);
   const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceFrequency>('weekly');
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(() =>
+    editingOrder?.client_lat != null && editingOrder?.client_lng != null
+      ? { lat: editingOrder.client_lat, lng: editingOrder.client_lng }
+      : null,
+  );
+  const [detectedLocation, setDetectedLocation] = useState<{
+    lat: number;
+    lng: number;
+    city: string | null;
+    label: string | null;
+  } | null>(null);
+  const [locating, setLocating] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>(() =>
     loadSavedAddresses(profile.id),
   );
   const [addressLabel, setAddressLabel] = useState('Casa');
-  const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>('auto');
-  const [selectedProfessionalId, setSelectedProfessionalId] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('wallet');
+  const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>(editingOrder?.assignment_mode === 'manual' ? 'manual' : 'auto');
+  const [selectedProfessionalId, setSelectedProfessionalId] = useState(editingOrder?.preferred_professional_id || '');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
+    editingOrder?.payment_method === 'cash' ? 'cash' : editingOrder?.payment_method === 'card' ? 'card' : 'wallet',
+  );
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [paymentProfiles, setPaymentProfiles] = useState<V6PaymentProfile[]>([]);
   const [serviceGroup, setServiceGroup] = useState<ServiceGroupId>('all');
   const [creatingOrder, setCreatingOrder] = useState(false);
   const requestFormRef = useRef<HTMLElement | null>(null);
+  const manualLocationRef = useRef<HTMLInputElement | null>(null);
   const selectedBasePrice = selectedService?.base_price ?? 0;
   const eligibilityKey = JSON.stringify({ service_id: selectedService?.id, mode,
     location_id: locationId || null, required_specialty_id: requiredSpecialtyId,
@@ -2524,7 +2580,7 @@ function ClientHome({
     try {
       const orderAddress = formatAddress(address, addressCity);
       const orderDescription = description.trim();
-      const createdOrder = await createV6Order({
+      const orderInput: Parameters<typeof createV6Order>[0] = {
         clientId: profile.id,
         serviceId: selectedService.id,
         locationId: locationId || null,
@@ -2545,10 +2601,27 @@ function ClientHome({
         estimatedPrice,
         lat: coords?.lat ?? null,
         lng: coords?.lng ?? null,
-      });
+      };
+      const createdOrder = editingOrder
+        ? await editV6UncontractedOrder({
+            orderId: editingOrder.id,
+            locationId: orderInput.locationId,
+            requiredSpecialtyId: orderInput.requiredSpecialtyId,
+            description: orderInput.description,
+            address: orderInput.address,
+            mode: orderInput.mode,
+            assignmentMode: orderInput.assignmentMode || 'auto',
+            preferredProfessionalId: orderInput.preferredProfessionalId,
+            paymentMethod: orderInput.paymentMethod,
+            scheduledAt: orderInput.scheduledAt,
+            estimatedDurationMinutes: orderInput.estimatedDurationMinutes,
+            lat: orderInput.lat,
+            lng: orderInput.lng,
+          })
+        : await createV6Order(orderInput);
       let recurringPlanCreated = false;
       let recurringPlanFailed = false;
-      if (mode === 'scheduled' && repeatService && canRepeatSelectedService) {
+      if (!editingOrder && mode === 'scheduled' && repeatService && canRepeatSelectedService) {
         try {
           await createV6RecurringServicePlan({
             sourceOrderId: createdOrder.id,
@@ -2590,7 +2663,9 @@ function ClientHome({
       }
       setOrders(await listV6Orders());
       setNotice(
-        recurringPlanFailed
+        editingOrder
+          ? 'Solicitud actualizada. MANITO volvió a buscar con los nuevos datos.'
+          : recurringPlanFailed
           ? 'El pedido se publicó, pero no pudimos crear la repetición. Podés reintentarlo desde Cuenta, en Mis servicios recurrentes.'
           : photoUploadFailed
           ? 'Pedido publicado. Algunas fotos no se pudieron subir; podés compartirlas por chat.'
@@ -2605,6 +2680,7 @@ function ClientHome({
       setPhotoFiles([]);
       setModeChosen(false);
       setRequestStep('need');
+      onEditingComplete();
       onNavigate('orders');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo publicar.');
@@ -2613,20 +2689,37 @@ function ClientHome({
     }
   }
 
-  function captureLocation() {
+  async function captureLocation() {
     if (!navigator.geolocation) {
       setError('Podés continuar eligiendo la localidad y escribiendo la dirección.');
+      manualLocationRef.current?.focus();
       return;
     }
-    navigator.geolocation.getCurrentPosition(
-      (position) =>
-        setCoords({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        }),
-      () => { setCoords(null); setError('No pudimos obtener tu ubicación. Elegí la localidad y escribí la dirección para continuar.'); },
-      { enableHighAccuracy: true, timeout: 10000 },
-    );
+    setLocating(true);
+    setDetectedLocation(null);
+    try {
+      const position = await requestPhonePosition();
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      const reverse = await reverseGeocodePhoneLocation(lat, lng).catch(() => null);
+      setDetectedLocation({ lat, lng, city: reverse?.city || null, label: reverse?.label || null });
+    } catch {
+      setCoords(null);
+      setError('No pudimos obtener tu ubicación. Ingresala manualmente para continuar.');
+      window.requestAnimationFrame(() => manualLocationRef.current?.focus());
+    } finally {
+      setLocating(false);
+    }
+  }
+
+  function confirmDetectedPhoneLocation() {
+    if (!detectedLocation) return;
+    setCoords({ lat: detectedLocation.lat, lng: detectedLocation.lng });
+    setLocationId('');
+    if (detectedLocation.city) setAddressCity(detectedLocation.city);
+    if (detectedLocation.label && !address.trim()) setAddress(detectedLocation.label);
+    setDetectedLocation(null);
+    setNotice('Ubicación confirmada para este trabajo.');
   }
 
   async function saveAddress() {
@@ -2818,6 +2911,7 @@ function ClientHome({
 
   function previousRequestStep() {
     if (requestStepIndex <= 0) {
+      if (editingOrder) onEditingComplete();
       setSelectedService(null);
       return;
     }
@@ -2893,7 +2987,7 @@ function ClientHome({
           </button>
           <div>
             <span>{serviceDisplayName(selectedService)}</span>
-            <strong>Nuevo trabajo</strong>
+            <strong>{editingOrder ? 'Editar solicitud' : 'Nuevo trabajo'}</strong>
           </div>
         </header>
 
@@ -2975,19 +3069,38 @@ function ClientHome({
                   </select>
                 </label>
               )}
-              <button className="v6-location-action" type="button" onClick={captureLocation}>
+              <button className="v6-location-action" type="button" onClick={captureLocation} disabled={locating}>
                 <LocateFixed size={20} aria-hidden="true" />
                 <span>
-                  <strong>{coords ? 'Ubicación del teléfono lista' : 'Usar ubicación del teléfono'}</strong>
-                  <small>{coords ? 'Podés continuar o completar una referencia.' : 'Te vamos a pedir permiso en este paso.'}</small>
+                  <strong>{locating ? 'Buscando tu ubicación...' : 'Usar ubicación del teléfono'}</strong>
+                  <small>Te vamos a pedir permiso en este paso.</small>
                 </span>
               </button>
+              {detectedLocation && (
+                <div className="v6-location-confirmation" role="status">
+                  <span>Ubicación detectada</span>
+                  <strong>{detectedLocation.label || detectedLocation.city || coordinateFallback(detectedLocation.lat, detectedLocation.lng)}</strong>
+                  {detectedLocation.city && detectedLocation.label !== detectedLocation.city && <small>{detectedLocation.city}</small>}
+                  <div className="v6-actions compact">
+                    <button className="v6-primary" type="button" onClick={confirmDetectedPhoneLocation}>Usar esta ubicación</button>
+                    <button className="v6-secondary" type="button" onClick={() => { setDetectedLocation(null); manualLocationRef.current?.focus(); }}>Cambiar</button>
+                  </div>
+                </div>
+              )}
+              {coords && !detectedLocation && (
+                <div className="v6-location-confirmation confirmed">
+                  <span>Ubicación confirmada</span>
+                  <strong>{formatAddress(address, addressCity) || coordinateFallback(coords.lat, coords.lng)}</strong>
+                  <button className="v6-link-button" type="button" onClick={() => { setCoords(null); manualLocationRef.current?.focus(); }}>Cambiar ubicación</button>
+                </div>
+              )}
               <div className="v6-field-grid-two">
                 <label className="v6-field">
                   <span>Dirección</span>
                   <input
+                    ref={manualLocationRef}
                     value={address}
-                    onChange={(event) => { setAddress(event.target.value); setCoords(null); }}
+                    onChange={(event) => { setAddress(event.target.value); setDetectedLocation(null); setCoords(null); }}
                     placeholder="Calle, número, piso"
                     required
                   />
@@ -2996,13 +3109,14 @@ function ClientHome({
                   <span>Ciudad</span>
                   <input
                     value={addressCity}
-                    onChange={(event) => { setAddressCity(event.target.value); setLocationId(''); setCoords(null); }}
+                    onChange={(event) => { setAddressCity(event.target.value); setLocationId(''); setDetectedLocation(null); setCoords(null); }}
                     placeholder="Ej: Mar del Plata"
                     required
                   />
                 </label>
               </div>
-              <MatchingLocation value={locationId} onChange={(id, name) => { setLocationId(id); setCoords(null); if (name) setAddressCity(name); }} />
+              <MatchingLocation value={locationId} onChange={(id, name) => { setLocationId(id); setDetectedLocation(null); setCoords(null); if (name) setAddressCity(name); }} />
+              <button className="v6-link-button" type="button" onClick={() => manualLocationRef.current?.focus()}>Ingresar ubicación manualmente</button>
               <details className="v6-inline-details">
                 <summary>Guardar esta dirección</summary>
                 <div className="v6-inline-details-body">
@@ -3115,7 +3229,11 @@ function ClientHome({
                     </div>
                   )}
                   {!candidateProfessionals.length && (
-                    <p className="v6-note">Podés publicar en automático. MANITO seguirá buscando profesionales compatibles.</p>
+                    <div className="v6-empty-inline">
+                      <strong>No encontramos profesionales compatibles con estos criterios.</strong>
+                      <p>Podés publicar en automático o cambiar ubicación, especialidad o fecha.</p>
+                      <button className="v6-secondary" type="button" onClick={() => setRequestStep('need')}>Editar búsqueda</button>
+                    </div>
                   )}
                   <div className="v6-section-head compact"><h2>Medio de pago</h2><span>Preferencia para este trabajo</span></div>
                   <div className="v6-choice-grid three">
@@ -3139,8 +3257,8 @@ function ClientHome({
               <div className="v6-stage-heading">
                 <span className="v6-stage-icon"><Check size={22} aria-hidden="true" /></span>
                 <div>
-                  <h1>Revisá antes de publicar</h1>
-                  <p>Estos son los datos que recibirán los profesionales.</p>
+                  <h1>{editingOrder ? 'Revisá los cambios' : 'Revisá antes de publicar'}</h1>
+                  <p>{editingOrder ? 'El pedido volverá a buscar con estos datos.' : 'Estos son los datos que recibirán los profesionales.'}</p>
                 </div>
               </div>
               <dl className="v6-review-list">
@@ -3163,7 +3281,7 @@ function ClientHome({
               <button className="v6-primary" type="button" onClick={nextRequestStep}>Continuar</button>
             ) : (
               <button className="v6-primary" type="submit" disabled={creatingOrder}>
-                {creatingOrder ? 'Publicando...' : mode === 'quote' ? 'Publicar solicitud de presupuesto' : mode === 'scheduled' ? 'Enviar solicitud programada' : 'Buscar profesional ahora'}
+                {creatingOrder ? (editingOrder ? 'Guardando...' : 'Publicando...') : editingOrder ? 'Guardar y volver a buscar' : mode === 'quote' ? 'Publicar solicitud de presupuesto' : mode === 'scheduled' ? 'Enviar solicitud programada' : 'Buscar profesional ahora'}
               </button>
             )}
           </footer>
@@ -4349,6 +4467,7 @@ function OrdersList(props: {
   setChatOrder: (order: V6Order) => void;
   setError: (message: string) => void;
   setNotice: (message: string) => void;
+  onEditRequest?: (order: V6Order) => void;
 }) {
   const [filter, setFilter] = useState<'current' | 'proposals' | 'history'>('current');
   const visibleOrders = props.orders.filter((order) => {
@@ -4441,17 +4560,20 @@ function ProfessionalAgenda({
   profile,
   orders,
   onOpenChat,
+  onConfigure,
 }: {
   profile: V6Profile;
   orders: V6Order[];
   onOpenChat: (order: V6Order) => void;
+  onConfigure: () => void;
 }) {
   const [professionalProfile, setProfessionalProfile] = useState<V6ProfessionalProfile | null>(null);
+  const [loadingProfessionalProfile, setLoadingProfessionalProfile] = useState(true);
   useEffect(() => {
     let active = true;
     void getV6ProfessionalProfile(profile.id).then((value) => {
       if (active) setProfessionalProfile(value);
-    }).catch(() => undefined);
+    }).catch(() => undefined).finally(() => { if (active) setLoadingProfessionalProfile(false); });
     return () => { active = false; };
   }, [profile.id]);
 
@@ -4463,13 +4585,21 @@ function ProfessionalAgenda({
     <>
       <section className="v6-section v6-agenda-summary">
         <div className="v6-section-head"><h1>Agenda</h1><span>{scheduledOrders.length} próximos</span></div>
-        <div className="v6-next-step compact">
-          <strong>Horario habitual</strong>
-          <p>
-            {professionalProfile?.work_days?.length ? professionalProfile.work_days.join(', ') : 'Días sin configurar'} · {' '}
-            {professionalProfile?.work_starts_at?.slice(0, 5) || '--:--'} a {professionalProfile?.work_ends_at?.slice(0, 5) || '--:--'}
-          </p>
-        </div>
+        {loadingProfessionalProfile ? (
+          <div className="v6-next-step compact"><strong>Cargando horario...</strong></div>
+        ) : professionalProfile?.work_days?.length && professionalProfile.work_starts_at && professionalProfile.work_ends_at ? (
+          <div className="v6-next-step compact">
+            <strong>Tu horario habitual</strong>
+            <p>{professionalProfile.work_days.join(', ')} · {professionalProfile.work_starts_at.slice(0, 5)} a {professionalProfile.work_ends_at.slice(0, 5)}</p>
+            <button className="v6-secondary" type="button" onClick={onConfigure}>Editar horarios</button>
+          </div>
+        ) : (
+          <div className="v6-empty-inline">
+            <strong>Todavía no configuraste tus horarios.</strong>
+            <p>Definí cuándo querés recibir trabajos programados.</p>
+            <button className="v6-primary" type="button" onClick={onConfigure}>Configurar horarios</button>
+          </div>
+        )}
         <p className="v6-muted">La disponibilidad para pedidos Ahora se administra desde Hoy. Estos horarios organizan solicitudes programadas.</p>
       </section>
       <section className="v6-section">
@@ -4497,6 +4627,7 @@ function OrderCard({
   setError,
   setNotice,
   publicProfessionals = [],
+  onEditRequest,
 }: {
   order: V6Order;
   profile: V6Profile;
@@ -4505,6 +4636,7 @@ function OrderCard({
   setError: (message: string) => void;
   setNotice: (message: string) => void;
   publicProfessionals?: V6PublicProfessional[];
+  onEditRequest?: (order: V6Order) => void;
 }) {
   const other = profile.role === 'client' ? order.professional : order.client;
   const nextAction = nextProfessionalOrderAction(order.status);
@@ -4540,6 +4672,8 @@ function OrderCard({
   const cancellationReasonOptions = profile.role === 'professional' ? professionalCancellationReasons : clientCancellationReasons;
   const [cancellationReason, setCancellationReason] = useState<V6CancellationReason>(cancellationReasonOptions[0].value);
   const [cancellationNote, setCancellationNote] = useState('');
+  const [retryingMatching, setRetryingMatching] = useState(false);
+  const retryingMatchingRef = useRef(false);
 
   useEffect(() => {
     if (cancellationReasonOptions.some((option) => option.value === cancellationReason)) return;
@@ -4778,12 +4912,21 @@ function OrderCard({
   }
 
   async function retryAutomaticSearch() {
+    if (retryingMatchingRef.current) return;
+    retryingMatchingRef.current = true;
+    setRetryingMatching(true);
+    setNotice('Buscando profesionales...');
     try {
       await retryV6ImmediateMatching(order.id);
-      setOrders(await listV6Orders());
-      setNotice('MANITO volvió a buscar profesionales disponibles.');
+      const nextOrders = await listV6Orders();
+      setOrders(nextOrders);
+      const refreshedOrder = nextOrders.find((item) => item.id === order.id);
+      setNotice(refreshedOrder?.professional_id ? 'Encontramos un profesional.' : 'La búsqueda terminó sin nuevos candidatos. Podés editar la solicitud.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo reintentar la búsqueda.');
+    } finally {
+      retryingMatchingRef.current = false;
+      setRetryingMatching(false);
     }
   }
 
@@ -5047,6 +5190,18 @@ function OrderCard({
           <button className="v6-primary" type="button" onClick={advance}>{nextAction.label}</button>
         )}
       </div>
+      {profile.role === 'client' && order.status === 'matching_failed' && (
+        <section className="v6-recovery-panel">
+          <strong>No encontramos profesionales disponibles.</strong>
+          <p>Podés volver a buscar con estos datos o cambiar la ubicación, especialidad y modalidad.</p>
+          <div className="v6-actions compact">
+            <button className="v6-primary" type="button" disabled={retryingMatching} onClick={retryAutomaticSearch}>
+              {retryingMatching ? 'Buscando profesionales...' : 'Reintentar búsqueda'}
+            </button>
+            <button className="v6-secondary" type="button" onClick={() => onEditRequest?.(order)}>Editar solicitud</button>
+          </div>
+        </section>
+      )}
       <details className="v6-inline-details v6-status-details">
         <summary>Ver recorrido del trabajo</summary>
         <StatusSteps status={order.status} />
@@ -5111,22 +5266,6 @@ function OrderCard({
               </button>
             </div>
           )}
-        </section>
-      )}
-      {profile.role === 'client' && order.status === 'matching_failed' && (
-        <section className="v6-payment-box action">
-          <div>
-            <strong>
-              <Search size={16} aria-hidden="true" /> No encontramos profesional disponible
-            </strong>
-            <span>Ahora</span>
-          </div>
-          <p>Podés reintentar la búsqueda, crear un pedido programado o pedir presupuestos desde Buscar.</p>
-          <div className="v6-actions compact">
-            <button className="v6-primary" type="button" onClick={retryAutomaticSearch}>
-              Reintentar búsqueda
-            </button>
-          </div>
         </section>
       )}
       <details className="v6-inline-details v6-commercial-details">
@@ -5585,6 +5724,10 @@ function ProfilePanel({
   const [savingPortfolio, setSavingPortfolio] = useState(false);
   const [submittingOnboarding, setSubmittingOnboarding] = useState(false);
   const [professionalServiceGroup, setProfessionalServiceGroup] = useState<ServiceGroupId>('home');
+  const [serviceSearch, setServiceSearch] = useState('');
+  const [showServiceCatalog, setShowServiceCatalog] = useState(false);
+  const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
+  const [savingCatalog, setSavingCatalog] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -5648,8 +5791,10 @@ function ProfilePanel({
     [proServices],
   );
   const visibleProfessionalServices = useMemo(
-    () => filterServicesByGroup(services, professionalServiceGroup),
-    [professionalServiceGroup, services],
+    () => filterServicesByGroup(services, professionalServiceGroup).filter((service) =>
+      `${serviceDisplayName(service)} ${service.slug}`.toLocaleLowerCase('es').includes(serviceSearch.trim().toLocaleLowerCase('es')),
+    ),
+    [professionalServiceGroup, serviceSearch, services],
   );
   const selectedSpecialtyIds = useMemo(
     () => new Set(proSpecialties.map((item) => item.specialty_id)),
@@ -5663,14 +5808,6 @@ function ProfilePanel({
       }, {}),
     [specialties],
   );
-  const selectedSpecialtyNames = useMemo(
-    () =>
-      proSpecialties
-        .map((item) => specialties.find((specialty) => specialty.id === item.specialty_id)?.name)
-        .filter((name): name is string => Boolean(name)),
-    [proSpecialties, specialties],
-  );
-
   const uploadedDocumentKinds = useMemo(
     () =>
       new Set(
@@ -5783,6 +5920,9 @@ function ProfilePanel({
   }
 
   async function toggleService(serviceId: number) {
+    if (savingCatalog) return;
+    const previousServices = proServices;
+    const previousSpecialties = proSpecialties;
     const current = new Set(proServices.map((item) => item.service_id));
     if (current.has(serviceId)) current.delete(serviceId);
     else current.add(serviceId);
@@ -5790,26 +5930,55 @@ function ProfilePanel({
     const nextSpecialtyIds = proSpecialties
       .filter((item) => current.has(item.service_id))
       .map((item) => item.specialty_id);
+    setProServices(nextServiceIds.map((id) => previousServices.find((item) => item.service_id === id) || {
+      professional_id: profile.id,
+      service_id: id,
+      price_from: services.find((item) => item.id === id)?.base_price || null,
+    }));
+    setProSpecialties(previousSpecialties.filter((item) => current.has(item.service_id)));
+    setSavingCatalog(true);
     try {
       const nextServices = await saveV6ProfessionalServices(profile.id, nextServiceIds, services, serviceRatesFor(nextServiceIds));
       setProServices(nextServices);
       setProSpecialties(await saveV6ProfessionalSpecialties(profile.id, nextSpecialtyIds, specialties));
+      if (current.has(serviceId)) {
+        setEditingServiceId(serviceId);
+        setShowServiceCatalog(false);
+      } else if (editingServiceId === serviceId) {
+        setEditingServiceId(null);
+      }
       setNotice('Servicios guardados.');
     } catch (caught) {
+      setProServices(previousServices);
+      setProSpecialties(previousSpecialties);
       setError(caught instanceof Error ? caught.message : 'No se guardaron servicios.');
+    } finally {
+      setSavingCatalog(false);
     }
   }
 
   async function toggleSpecialty(specialty: V6Specialty) {
-    if (!selectedServiceIds.has(specialty.service_id)) return;
+    if (!selectedServiceIds.has(specialty.service_id) || savingCatalog) return;
+    const previous = proSpecialties;
     const current = new Set(proSpecialties.map((item) => item.specialty_id));
     if (current.has(specialty.id)) current.delete(specialty.id);
     else current.add(specialty.id);
+    const next = [...current];
+    setProSpecialties(next.map((id) => previous.find((item) => item.specialty_id === id) || {
+      professional_id: profile.id,
+      service_id: specialties.find((item) => item.id === id)?.service_id || specialty.service_id,
+      specialty_id: id,
+      created_at: new Date().toISOString(),
+    }));
+    setSavingCatalog(true);
     try {
-      setProSpecialties(await saveV6ProfessionalSpecialties(profile.id, [...current], specialties));
+      setProSpecialties(await saveV6ProfessionalSpecialties(profile.id, next, specialties));
       setNotice('Especialidades guardadas.');
     } catch (caught) {
+      setProSpecialties(previous);
       setError(caught instanceof Error ? caught.message : 'No se guardaron especialidades.');
+    } finally {
+      setSavingCatalog(false);
     }
   }
 
@@ -5822,13 +5991,11 @@ function ProfilePanel({
   }
 
   const professionalSteps = [
-    'Servicios',
-    'Perfil público',
-    'Datos personales',
-    'Documentos',
-    'Portfolio',
-    'Zona y tarifas',
-    'Revisión',
+    'Sobre vos',
+    'Qué hacés',
+    'Dónde y cuándo',
+    'Perfil y documentación',
+    'Cobro y revisión',
   ];
 
   async function saveOnboardingProgress(nextStep: number) {
@@ -6130,98 +6297,70 @@ function ProfilePanel({
             </div>
       </section>
 
-      {professionalStep === 1 && (
+      {professionalStep === 2 && (
           <section className="v6-card">
             <h2>Servicios que ofrecés</h2>
             <p className="v6-help-text">
-              Elegí los rubros donde querés recibir pedidos. Después vas a poder definir zona, horarios y tarifas.
+              Agregá un rubro y elegí sólo las tareas que realizás.
             </p>
-            <div className="v6-chip-row nowrap">
-              {serviceGroups.map((group) => {
-                const groupCount =
-                  group.id === 'all'
-                    ? proServices.length
-                    : proServices.filter((item) => {
-                        const service = services.find((candidate) => candidate.id === item.service_id);
-                        return service ? group.slugs.includes(service.slug) : false;
-                      }).length;
-                return (
-                  <button
-                    type="button"
-                    key={group.id}
-                    aria-pressed={professionalServiceGroup === group.id}
-                    onClick={() => setProfessionalServiceGroup(group.id)}
-                  >
-                    {group.label}{groupCount ? ` · ${groupCount}` : ''}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="v6-check-grid v6-service-selector">
-              {visibleProfessionalServices.map((service) => (
-                <button
-                  className="v6-check-service"
-                  type="button"
-                  key={service.id}
-                  aria-pressed={selectedServiceIds.has(service.id)}
-                  onClick={() => toggleService(service.id)}
-                >
-                  <span>{serviceIcon(service.slug)}</span>
-                  <strong>{serviceDisplayName(service)}</strong>
-                  <small>Desde {money(visibleServiceRates[service.id] ? Number(visibleServiceRates[service.id]) : service.base_price)}</small>
-                </button>
-              ))}
-            </div>
-            {!visibleProfessionalServices.length && (
-              <p className="v6-muted">No hay rubros cargados para este grupo todavía.</p>
-            )}
             {proServices.length > 0 && (
-              <div className="v6-specialty-panel">
+              <div className="v6-selected-service-list">
                 <div className="v6-section-head compact">
-                  <h2>Especialidades</h2>
-                  <span>{selectedSpecialtyNames.length || 'opcional'}</span>
+                  <h3>Servicios seleccionados</h3>
+                  <span>{proServices.length}</span>
                 </div>
-                <p className="v6-help-text">
-                  Marcá las tareas que mejor hacés. MANITO las usa para recomendarte pedidos más compatibles.
-                </p>
                 {proServices.map((item) => {
                   const service = services.find((candidate) => candidate.id === item.service_id);
-                  const serviceSpecialties = specialtiesByService[item.service_id] || [];
-                  if (!service || !serviceSpecialties.length) return null;
+                  if (!service) return null;
+                  const count = proSpecialties.filter((specialty) => specialty.service_id === item.service_id).length;
                   return (
-                    <div className="v6-specialty-group" key={item.service_id}>
-                      <strong>{serviceDisplayName(service)}</strong>
-                      <div className="v6-chip-list">
-                        {serviceSpecialties.map((specialty) => (
-                          <button
-                            type="button"
-                            key={specialty.id}
-                            aria-pressed={selectedSpecialtyIds.has(specialty.id)}
-                            onClick={() => toggleSpecialty(specialty)}
-                          >
-                            {specialty.name}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                    <button className="v6-selected-service" type="button" key={item.service_id} onClick={() => setEditingServiceId(item.service_id)}>
+                      <span>{serviceIcon(service.slug)}</span>
+                      <span><strong>{serviceDisplayName(service)}</strong><small>{count ? `${count} especialidades seleccionadas` : 'Elegí tus especialidades'}</small></span>
+                      <ChevronRight size={18} aria-hidden="true" />
+                    </button>
                   );
                 })}
               </div>
             )}
-            <div className="v6-summary">
-              <span>
-                <BriefcaseBusiness size={17} aria-hidden="true" /> Servicios seleccionados
-              </span>
-              <small>
-                {proServices.length
-                  ? `${proServices.length} rubros · ${proSpecialties.length} especialidades`
-                  : 'Todavía no elegiste rubros'}
-              </small>
-            </div>
+            <button className="v6-secondary v6-add-service" type="button" onClick={() => { setShowServiceCatalog((value) => !value); setEditingServiceId(null); }}>
+              {showServiceCatalog ? 'Cerrar catálogo' : '+ Agregar servicio'}
+            </button>
+            {showServiceCatalog && (
+              <div className="v6-service-catalog">
+                <label className="v6-field"><span>Buscar servicio</span><input value={serviceSearch} onChange={(event) => setServiceSearch(event.target.value)} placeholder="Ej: plomería" /></label>
+                <div className="v6-chip-row nowrap">
+                  {serviceGroups.map((group) => <button type="button" key={group.id} aria-pressed={professionalServiceGroup === group.id} onClick={() => setProfessionalServiceGroup(group.id)}>{group.label}</button>)}
+                </div>
+                <div className="v6-service-catalog-list">
+                  {visibleProfessionalServices.filter((service) => !selectedServiceIds.has(service.id)).map((service) => (
+                    <button type="button" key={service.id} disabled={savingCatalog} onClick={() => void toggleService(service.id)}>
+                      <span>{serviceIcon(service.slug)}</span><strong>{serviceDisplayName(service)}</strong><span>Agregar</span>
+                    </button>
+                  ))}
+                </div>
+                {!visibleProfessionalServices.some((service) => !selectedServiceIds.has(service.id)) && <p className="v6-muted">No hay otros servicios con este filtro.</p>}
+              </div>
+            )}
+            {editingServiceId && (() => {
+              const service = services.find((item) => item.id === editingServiceId);
+              const serviceSpecialties = specialtiesByService[editingServiceId] || [];
+              if (!service) return null;
+              return (
+                <div className="v6-specialty-editor">
+                  <div className="v6-section-head compact"><div><h3>{serviceDisplayName(service)}</h3><span>Elegí las tareas que realizás</span></div><button className="v6-icon-button" type="button" onClick={() => setEditingServiceId(null)} aria-label="Cerrar">×</button></div>
+                  <div className="v6-chip-list">
+                    {serviceSpecialties.map((specialty) => <button type="button" key={specialty.id} disabled={savingCatalog} aria-pressed={selectedSpecialtyIds.has(specialty.id)} onClick={() => void toggleSpecialty(specialty)}>{specialty.name}</button>)}
+                  </div>
+                  <button className="v6-link-button danger" type="button" disabled={savingCatalog} onClick={() => void toggleService(editingServiceId)}>Quitar servicio</button>
+                </div>
+              );
+            })()}
+            {savingCatalog && <p className="v6-save-status" role="status">Guardando cambios...</p>}
           </section>
       )}
 
-      {professionalStep === 2 && (
+      {professionalStep === 1 && (
           <section className="v6-card">
             <h2>Perfil público</h2>
             <form className="v6-stack" onSubmit={saveProfessionalSurface}>
@@ -6257,7 +6396,7 @@ function ProfilePanel({
           </section>
       )}
 
-      {professionalStep === 3 && (
+      {professionalStep === 1 && (
       <section className="v6-card">
         <h2>Datos personales</h2>
         <form className="v6-stack" onSubmit={saveProfile}>
@@ -6350,7 +6489,7 @@ function ProfilePanel({
           </section>
       )}
 
-      {professionalStep === 5 && (
+      {professionalStep === 4 && (
           <section className="v6-card">
             <h2>Portfolio</h2>
             <form className="v6-stack" onSubmit={savePortfolio}>
@@ -6407,7 +6546,7 @@ function ProfilePanel({
           </section>
       )}
 
-      {professionalStep === 6 && (
+      {professionalStep === 3 && (
           <section className="v6-card">
             <h2>Zona, horarios y tarifas</h2>
             <ProfessionalCoverage professionalId={profile.id} />
@@ -6520,7 +6659,7 @@ function ProfilePanel({
             )}
             {!proServices.length && (
               <p className="v6-alert">
-                Primero elegí al menos un servicio en el paso 1 para poder cargar tarifas.
+                Primero elegí al menos un servicio en Qué hacés para poder cargar tarifas.
               </p>
             )}
             <div className="v6-summary">
@@ -6537,7 +6676,7 @@ function ProfilePanel({
           </section>
       )}
 
-      {professionalStep === 7 && (
+      {professionalStep === 5 && (
           <section className="v6-card">
             <h2>Revisión MANITO</h2>
             <div className="v6-summary">
@@ -6907,6 +7046,11 @@ function AccountPanel({
         <button className="v6-secondary" type="button" onClick={copyReferralCode}>
           {referralCode}
         </button>
+      </section>}
+      {experience === 'professional' && <section className="v6-card v6-account-cta">
+        <h2>Perfil profesional</h2>
+        <p>Administrá tus servicios, especialidades, cobertura, horarios y documentación.</p>
+        <button className="v6-secondary" type="button" onClick={onOpenProfile}>Editar perfil profesional</button>
       </section>}
       {experience === 'client' && <section className="v6-card">
         <div className="v6-section-head">
@@ -7458,6 +7602,66 @@ function ChatSheet({
           <button type="submit" aria-label="Enviar mensaje">
             <SendHorizontal size={18} aria-hidden="true" />
           </button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function HeaderLocationSheet({
+  profile,
+  savingPhoneLocation,
+  onUsePhoneLocation,
+  onClose,
+  onSave,
+  setError,
+}: {
+  profile: V6Profile;
+  savingPhoneLocation: boolean;
+  onUsePhoneLocation: () => Promise<void>;
+  onClose: () => void;
+  onSave: (city: string, detail: string) => Promise<void>;
+  setError: (message: string) => void;
+}) {
+  const initial = splitStoredAddress(profile.city || '', '');
+  const [city, setCity] = useState(initial.city || initial.line || '');
+  const [detail, setDetail] = useState(initial.city ? initial.line : '');
+  const [locationId, setLocationId] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!city.trim()) {
+      setError('Ingresá una ciudad para guardar la ubicación.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(city.trim(), detail.trim());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No pudimos guardar la ubicación.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="v6-modal" role="dialog" aria-modal="true" aria-label="Configurar ubicación">
+      <section className="v6-sheet v6-location-sheet">
+        <div className="v6-section-head">
+          <div><h2>Tu ubicación</h2><span>Se usa como punto de partida para tus pedidos.</span></div>
+          <button className="v6-icon-button" type="button" onClick={onClose} aria-label="Cerrar">×</button>
+        </div>
+        <button className="v6-location-action" type="button" disabled={savingPhoneLocation} onClick={() => void onUsePhoneLocation()}>
+          <LocateFixed size={20} aria-hidden="true" />
+          <span><strong>{savingPhoneLocation ? 'Buscando ubicación...' : 'Usar ubicación del teléfono'}</strong><small>Te pediremos permiso sólo ahora.</small></span>
+        </button>
+        <div className="v6-divider-label"><span>o ingresala manualmente</span></div>
+        <form className="v6-stack" onSubmit={submit}>
+          <MatchingLocation value={locationId} onChange={(id, name) => { setLocationId(id); if (name) setCity(name); }} />
+          <label className="v6-field"><span>Ciudad</span><input value={city} onChange={(event) => setCity(event.target.value)} placeholder="Ej: Mar del Plata" required /></label>
+          <label className="v6-field"><span>Barrio o referencia (opcional)</span><input value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="Ej: Constitución" /></label>
+          <button className="v6-primary" type="submit" disabled={saving}>{saving ? 'Guardando...' : 'Guardar ubicación'}</button>
         </form>
       </section>
     </div>

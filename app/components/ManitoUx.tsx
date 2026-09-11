@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Home,
   MessageCircle,
+  RefreshCw,
   Settings,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -79,24 +80,19 @@ export function ExperienceSwitch({
   canUseProfessional: boolean;
   onChange: (experience: ManitoExperience) => void;
 }) {
+  const nextExperience: ManitoExperience = experience === 'client' ? 'professional' : 'client';
+  const disabled = nextExperience === 'professional' && !canUseProfessional;
   return (
-    <div className="v6-experience-switch" aria-label="Cambiar experiencia">
-      <button
-        type="button"
-        aria-pressed={experience === 'client'}
-        onClick={() => onChange('client')}
-      >
-        Cliente
-      </button>
-      <button
-        type="button"
-        aria-pressed={experience === 'professional'}
-        aria-disabled={!canUseProfessional}
-        onClick={() => onChange('professional')}
-      >
-        Profesional
-      </button>
-    </div>
+    <button
+      className="v6-experience-switch"
+      type="button"
+      disabled={disabled}
+      aria-label={`Cambiar a experiencia ${nextExperience === 'client' ? 'Cliente' : 'Profesional'}`}
+      onClick={() => onChange(nextExperience)}
+    >
+      <RefreshCw size={14} aria-hidden="true" />
+      <span>{experience === 'client' ? 'Cliente' : 'Profesional'}</span>
+    </button>
   );
 }
 
