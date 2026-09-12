@@ -1823,10 +1823,10 @@ export default function ManitoV6App() {
         <section className="v6-card">
           <Image
             className="v6-logo-image v6-logo-image-compact"
-            src="/logo-main.jpg"
-            alt="MANITO - Tu ayuda de confianza"
-            width={560}
-            height={584}
+            src="/brand/manito-logo.svg"
+            alt="MANITO"
+            width={900}
+            height={256}
             priority
           />
           <h1>{profileLoading ? 'Preparando tu cuenta...' : 'Abriendo MANITO...'}</h1>
@@ -1867,10 +1867,10 @@ export default function ManitoV6App() {
         <div className="v6-top-brand">
           <Image
             className="v6-header-logo"
-            src="/logo-main.jpg"
-            alt="MANITO - Tu ayuda de confianza"
-            width={560}
-            height={584}
+            src="/brand/manito-mark-light.svg"
+            alt="MANITO"
+            width={256}
+            height={256}
             priority
           />
           <button className="v6-header-location" type="button" onClick={() => setLocationEditorOpen(true)}>
@@ -2119,10 +2119,10 @@ function SetupScreen({ onConnected }: { onConnected: () => void }) {
         </p>
         <Image
           className="v6-logo-image v6-logo-image-compact"
-          src="/logo-main.jpg"
-          alt="MANITO - Tu ayuda de confianza"
-          width={560}
-          height={584}
+          src="/brand/manito-logo.svg"
+          alt="MANITO"
+          width={900}
+          height={256}
           priority
         />
         <h1>Conectá MANITO con Supabase.</h1>
@@ -2249,10 +2249,10 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
       <section className="v6-card">
         <Image
           className="v6-logo-image"
-          src="/logo-main.jpg"
-          alt="MANITO - Tu ayuda de confianza"
-          width={560}
-          height={584}
+          src="/brand/manito-logo.svg"
+          alt="MANITO"
+          width={900}
+          height={256}
           priority
         />
         <h1>

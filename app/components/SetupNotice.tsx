@@ -7,10 +7,10 @@ export default function SetupNotice() {
       <section className="panel auth-panel" aria-labelledby="setup-title">
         <Image
           className="auth-logo"
-          src="/logo-main.jpg"
-          alt="MANITO - Tu ayuda de confianza"
-          width={560}
-          height={584}
+          src="/brand/manito-logo.svg"
+          alt="MANITO"
+          width={900}
+          height={256}
           priority
         />
         <p className="pill blue">

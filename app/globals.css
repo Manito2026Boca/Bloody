@@ -579,11 +579,9 @@ a {
 
 .auth-logo {
   display: block;
-  width: min(100%, 210px);
+  width: min(100%, 280px);
   height: auto;
   margin: 0 0 14px;
-  border-radius: 8px;
-  background: white;
   object-fit: contain;
 }
 
@@ -699,17 +697,16 @@ a {
   display: block;
   height: auto;
   max-width: 100%;
-  border-radius: 8px;
-  background: white;
   object-fit: contain;
 }
 
 .v6-header-logo {
-  width: 142px;
+  width: 46px;
+  height: 46px;
 }
 
 .v6-logo-image {
-  width: min(100%, 250px);
+  width: min(100%, 300px);
   margin: 0 0 14px;
 }
 
@@ -719,7 +716,7 @@ a {
 }
 
 .v6-logo-image-compact {
-  width: 178px;
+  width: 220px;
 }
 
 .v6-top p,
@@ -3047,7 +3044,8 @@ a.v6-evidence-link {
 }
 
 .v6-top .v6-header-logo {
-  width: 98px;
+  width: 44px;
+  height: 44px;
   flex: 0 0 auto;
 }
 
@@ -3891,7 +3889,8 @@ a.v6-evidence-link {
   }
 
   .v6-top .v6-header-logo {
-    width: 64px;
+    width: 38px;
+    height: 38px;
   }
 
   .v6-experience-switch {

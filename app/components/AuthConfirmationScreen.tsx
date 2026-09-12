@@ -213,10 +213,10 @@ export default function AuthConfirmationScreen({
       <section className="v6-card v6-confirm-card">
         <Image
           className="v6-logo-image v6-logo-image-center"
-          src="/logo-main.jpg"
-          alt="MANITO - Tu ayuda de confianza"
-          width={560}
-          height={584}
+          src="/brand/manito-logo.svg"
+          alt="MANITO"
+          width={900}
+          height={256}
           priority
         />
         <div className="v6-confirm-icon" aria-hidden="true">

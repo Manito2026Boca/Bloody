@@ -1,12 +1,14 @@
-const CACHE_NAME = 'manito-shell-v5';
+const CACHE_NAME = 'manito-shell-brand-v2';
 const CORE_ASSETS = [
   '/',
   '/manifest.webmanifest',
-  '/favicon.png',
-  '/logo-main.jpg',
-  '/logo-icon.png',
-  '/icon-192.png',
-  '/icon-512.png',
+  '/brand/manito-logo.svg',
+  '/brand/manito-mark-light.svg',
+  '/brand/manito-favicon.svg',
+  '/brand/manito-icon-192.png',
+  '/brand/manito-icon-512.png',
+  '/brand/manito-maskable-512.png',
+  '/brand/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (event) => {

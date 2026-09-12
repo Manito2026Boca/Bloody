@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 256" role="img" aria-labelledby="title">
+  <title id="title">MANITO</title>
+  <g>
+    <path fill="#073f3d" d="M52 20 102 66h52l50-46v75l26 31c-40-4-73 11-102 46-29-35-62-50-102-46l26-31V20Z"/>
+    <path fill="#fff" d="M32 124c42-4 76 9 96 42 20-33 54-46 96-42-38 17-69 38-96 67-27-29-58-50-96-67Z"/>
+    <path fill="#073f3d" d="M69 130c-40 22-48 78-4 111 6-42 25-73 59-94-18-11-36-17-55-17Zm59 60c28-31 60-45 96-42-5 47-39 88-90 94 16-20 15-37-6-52Z"/>
+    <path fill="#fb6a21" d="M132 242h89c-1-34-13-63-35-84l-54 84Z"/>
+    <path fill="#fff" d="m103 244 53-53c-5-18 0-37 14-51 14-14 35-19 53-12l-22 22 5 18 18 5 22-22c7 18 2 39-12 53-14 14-34 19-52 14l-26 26h-53Z"/>
+  </g>
+  <text x="274" y="174" fill="#073f3d" font-family="Arial, Helvetica, sans-serif" font-size="136" font-weight="900">MANITO</text>
+</svg>

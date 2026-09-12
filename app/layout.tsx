@@ -10,12 +10,12 @@ export const metadata: Metadata = {
   manifest: '/manifest.webmanifest',
   icons: {
     icon: [
-      { url: '/favicon.png', sizes: '64x64', type: 'image/png' },
-      { url: '/logo-icon.png', sizes: '512x512', type: 'image/png' },
-      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+      { url: '/brand/manito-favicon.svg', type: 'image/svg+xml' },
+      { url: '/brand/manito-favicon-64.png', sizes: '64x64', type: 'image/png' },
+      { url: '/brand/manito-icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/brand/manito-icon-512.png', sizes: '512x512', type: 'image/png' },
     ],
-    apple: [{ url: '/icon-192.png', sizes: '192x192', type: 'image/png' }],
+    apple: [{ url: '/brand/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
   },
   appleWebApp: {
     capable: true,
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     description:
       'Tu ayuda de confianza para resolver servicios con profesionales verificados.',
     type: 'website',
-    images: [{ url: '/logo-main.jpg', width: 560, height: 584, alt: 'MANITO - Tu ayuda de confianza' }],
+    images: [{ url: '/brand/manito-social.png', width: 1200, height: 630, alt: 'MANITO' }],
   },
 };
 
