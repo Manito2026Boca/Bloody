@@ -70,6 +70,7 @@ import {
   fallbackV6ManualOrderToAuto,
   getV6Profile,
   getV6MediaSignedUrl,
+  getV6MyCapabilities,
   getV6ProfessionalOnboarding,
   getV6ProfessionalPaymentAccount,
   getV6ProfessionalPayoutDetails,
@@ -1462,6 +1463,7 @@ export default function ManitoV6App() {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<V6Profile | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [services, setServices] = useState<V6Service[]>([]);
   const [specialties, setSpecialties] = useState<V6Specialty[]>([]);
   const [proServices, setProServices] = useState<V6ProfessionalService[]>([]);
@@ -1512,6 +1514,7 @@ export default function ManitoV6App() {
         nextProServices,
         nextProSpecialties,
         nextPublicProfessionals,
+        nextCapabilities,
       ] = await Promise.allSettled([
         listV6Services(),
         listV6Specialties(),
@@ -1520,6 +1523,7 @@ export default function ManitoV6App() {
         listV6ProfessionalServices(userId),
         listV6ProfessionalSpecialties(userId),
         listV6PublicProfessionals(),
+        getV6MyCapabilities(),
       ]);
 
       if (epoch !== dataLoadEpoch.current) return;
@@ -1532,6 +1536,7 @@ export default function ManitoV6App() {
       if (nextPublicProfessionals.status === 'fulfilled') {
         setPublicProfessionals(nextPublicProfessionals.value);
       }
+      setIsAdmin(nextCapabilities.status === 'fulfilled' && nextCapabilities.value.admin);
 
       const secondaryLoadFailed = [
         nextServices,
@@ -1541,6 +1546,7 @@ export default function ManitoV6App() {
         nextProServices,
         nextProSpecialties,
         nextPublicProfessionals,
+        nextCapabilities,
       ].some((result) => result.status === 'rejected');
 
       if (secondaryLoadFailed) {
@@ -1561,6 +1567,7 @@ export default function ManitoV6App() {
     }
     setSession(null);
     setProfile(null);
+    setIsAdmin(false);
     setOrders([]);
     setNotifications([]);
     setProServices([]);
@@ -1619,6 +1626,7 @@ export default function ManitoV6App() {
           dataLoadEpoch.current++;
           setProfileLoading(false);
           setProfile(null);
+          setIsAdmin(false);
           setOrders([]);
           setNotifications([]);
           setProServices([]);
@@ -2061,6 +2069,7 @@ export default function ManitoV6App() {
             onOpenProfile={() => setTab('profile')}
             savingPhoneLocation={savingPhoneLocation}
             setNotice={setNotice}
+            isAdmin={isAdmin}
           />
         )}
       </div>
@@ -6804,6 +6813,7 @@ function AccountPanel({
   onOpenProfile,
   savingPhoneLocation,
   setNotice,
+  isAdmin,
 }: {
   profile: V6Profile;
   experience: AppMode;
@@ -6816,6 +6826,7 @@ function AccountPanel({
   onOpenProfile: () => void;
   savingPhoneLocation: boolean;
   setNotice: (message: string) => void;
+  isAdmin: boolean;
 }) {
   const [locationCity, setLocationCity] = useState(cityFromLocationLabel(profile.city) || profile.city || '');
   const [locationDetail, setLocationDetail] = useState(detailFromLocationLabel(profile.city));
@@ -7214,6 +7225,13 @@ function AccountPanel({
           Quiero ser profesional
         </button>
       </section>}
+      {isAdmin && (
+        <section className="v6-card v6-account-cta">
+          <h2>Administración MANITO</h2>
+          <p>Revisá altas profesionales, documentación y casos que necesitan intervención.</p>
+          <a className="v6-primary" href="/admin">Abrir panel administrativo</a>
+        </section>
+      )}
       {profile.role === 'admin' && (
         <RecurringAdminPanel />
       )}
@@ -7244,7 +7262,7 @@ function AccountPanel({
   );
 }
 
-function AdminReviewWorkbench({
+export function AdminReviewWorkbench({
   reviews,
   complaints,
   settings,

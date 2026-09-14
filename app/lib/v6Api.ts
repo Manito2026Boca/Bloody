@@ -186,6 +186,13 @@ export async function getV6Profile(userId: string) {
   return data as V6Profile;
 }
 
+export async function getV6MyCapabilities() {
+  const { data, error } = await getV6Supabase().rpc('get_my_manito_capabilities');
+  fail(error);
+  const capabilities = (data || {}) as { admin?: boolean };
+  return { admin: capabilities.admin === true };
+}
+
 export async function completeV6Profile(input: {
   fullName: string;
   role: V6Role;
