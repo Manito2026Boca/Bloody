@@ -30,7 +30,7 @@ async function login(page, email) {
     await auth.goto(baseUrl, { waitUntil: 'networkidle' });
     const authLogo = auth.locator('img[alt="MANITO"]').first();
     await authLogo.waitFor();
-    assert.match(await authLogo.getAttribute('src'), /brand%2Fmanito-logo\.svg|brand\/manito-logo\.svg/);
+    assert.match(await authLogo.getAttribute('src'), /brand%2Fmanito-reference-horizontal\.png|brand\/manito-reference-horizontal\.png/);
     await assertNoOverflow(auth, 'auth-390');
     await auth.screenshot({ path: resolve(output, 'auth-390.png') });
     await authContext.close();
@@ -43,7 +43,7 @@ async function login(page, email) {
       await login(page, 'cliente.qa1@qa.manito.invalid');
       const header = page.locator('.v6-top');
       const mark = header.locator('img[alt="MANITO"]');
-      assert.match(await mark.getAttribute('src'), /brand%2Fmanito-mark-light\.svg|brand\/manito-mark-light\.svg/);
+      assert.match(await mark.getAttribute('src'), /brand%2Fmanito-reference-app-icon\.png|brand\/manito-reference-app-icon\.png/);
       const box = await mark.boundingBox();
       assert(box && box.width <= 46 && box.height <= 46, `header mark too large at ${viewport.width}`);
       if (viewport.width <= 390) {
@@ -66,7 +66,7 @@ async function login(page, email) {
     }
     await pro.getByText('Disponible para pedidos Ahora', { exact: true }).waitFor();
     const proMark = pro.locator('.v6-top img[alt="MANITO"]');
-    assert.match(await proMark.getAttribute('src'), /brand%2Fmanito-mark-light\.svg|brand\/manito-mark-light\.svg/);
+    assert.match(await proMark.getAttribute('src'), /brand%2Fmanito-reference-app-icon\.png|brand\/manito-reference-app-icon\.png/);
     await assertNoOverflow(pro, 'professional-390');
     await pro.screenshot({ path: resolve(output, 'professional-390.png') });
     await proContext.close();

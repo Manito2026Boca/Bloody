@@ -1,10 +1,10 @@
-const CACHE_NAME = 'manito-shell-brand-v2';
+const CACHE_NAME = 'manito-shell-brand-reference-v1';
 const CORE_ASSETS = [
   '/',
   '/manifest.webmanifest',
-  '/brand/manito-logo.svg',
-  '/brand/manito-mark-light.svg',
-  '/brand/manito-favicon.svg',
+  '/brand/manito-reference-horizontal.png',
+  '/brand/manito-reference-app-icon.png',
+  '/brand/manito-favicon-64.png',
   '/brand/manito-icon-192.png',
   '/brand/manito-icon-512.png',
   '/brand/manito-maskable-512.png',

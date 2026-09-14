@@ -1,41 +1,38 @@
-# BRAND-002 IMPLEMENTATION REPORT
+# BRAND-002 REFERENCE REVISION REPORT
 
 ## 1. Logo seleccionado
 
-Se implementó el sistema basado en la referencia aprobada: zorro geométrico con llave integrada, verde petróleo como color principal y naranja como acento. La estética caricaturesca anterior deja de aparecer en el producto activo.
+Se reemplazó la reconstrucción anterior por recortes exactos de la lámina aprobada. No se redibujó el símbolo ni se alteraron sus colores.
 
 ## 2. Variantes creadas
 
-- Logo horizontal principal.
-- Logo horizontal claro para fondos oscuros.
-- Isotipo principal.
-- Isotipo claro para el header.
-- App icon con contenedor de bordes redondeados.
-- Favicon simplificado para tamaños pequeños.
+- Logo horizontal superior para acceso y pantallas de marca.
+- App icon inferior para instalación, favicon y header compacto.
+- Isotipo independiente y composición vertical, preservados para usos futuros.
 
 ## 3. Assets creados/reemplazados
 
-Los SVG de marca viven en `public/brand`. Los PNG derivados cubren 64, 180, 192 y 512 px, además de una variante maskable y una imagen social 1200x630. `scripts/generate-brand-assets.cjs` permite regenerarlos desde los SVG fuente.
+La lámina original se conserva sin cambios en `public/brand/source`. `scripts/extract-brand-reference.ps1` reproduce los encuadres aprobados y genera los tamaños técnicos de 64, 180, 192 y 512 px. La familia reconstruida anterior se conserva en `public/brand/archive/brand-002-reconstructed`.
 
 ## 4. Cambios en header
 
-El header mobile utiliza el isotipo claro de 38 px sobre verde petróleo. En pantallas mayores mide 44 px. La ubicación, el cambio de experiencia y las notificaciones conservan su funcionamiento y ganan espacio horizontal y vertical.
+El header utiliza el app icon exacto de la referencia a 38 px en mobile y 44 px en pantallas mayores. La ubicación, el cambio de experiencia y las notificaciones conservan su funcionamiento.
 
 ## 5. Cambios PWA/favicon
 
-El manifest usa iconos dedicados `any` de 192/512 px y un maskable de 512 px. Next metadata apunta al favicon SVG, fallback PNG, Apple touch icon y nueva imagen Open Graph.
+El manifest usa derivados fieles del app icon en 192/512 px y un maskable de 512 px. Next metadata apunta al favicon PNG, Apple touch icon y logo horizontal de referencia para Open Graph.
 
 ## 6. Referencias antiguas eliminadas
 
-Acceso, confirmación, carga, configuración, header, metadata, manifest y caché offline apuntan exclusivamente a `public/brand`. Los archivos históricos permanecen sin referencias activas.
+Acceso, confirmación, carga, configuración, header, metadata, manifest y caché offline apuntan exclusivamente a los recortes aprobados. Los assets anteriores quedan archivados sin referencias activas.
 
 ## 7. Responsive
 
-El logo no se estira ni genera overflow. Se validaron acceso, header Cliente y header Profesional en 360x800 y 390x844, más la composición desktop en 1280x844.
+Los recortes conservan su proporción y no generan overflow. Se validan acceso, header Cliente y header Profesional en 360x800 y 390x844, más desktop en 1280x844.
 
 ## 8. Validación
 
-La suite comprueba archivos, dimensiones PNG, referencias activas, manifest, favicon y versionado de caché. Browser QA comprueba render, tamaño físico del header, ausencia de overflow y disponibilidad HTTP de todos los iconos PWA.
+La suite comprueba fuente original, archivo histórico, dimensiones PNG, referencias activas, manifest, favicon y versionado de caché. Browser QA comprueba render, tamaño físico del header, ausencia de overflow y disponibilidad HTTP de los iconos PWA.
 
 ## 9. Archivos modificados
 
@@ -49,6 +46,7 @@ La suite comprueba archivos, dimensiones PNG, referencias activas, manifest, fav
 - `public/sw.js`
 - `scripts/brand002-browser.cjs`
 - `scripts/generate-brand-assets.cjs`
+- `scripts/extract-brand-reference.ps1`
 - `tests/brand-002.test.ts`
 
 ## 10. Commit
@@ -61,6 +59,6 @@ El despliegue se realiza después de la validación final sobre el mismo commit 
 
 ## 12. Deuda menor restante
 
-Los assets viejos se conservan como históricos no referenciados. Pueden eliminarse en una limpieza futura sin impacto visible ni funcional.
+La lámina fuente es JPG y contiene una textura muy leve propia de la imagen aprobada. Se conserva deliberadamente para respetar el pedido de no modificar el diseño.
 
 BRAND-002: READY FOR VISUAL REVIEW

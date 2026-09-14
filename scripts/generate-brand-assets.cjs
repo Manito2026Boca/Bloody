@@ -3,7 +3,7 @@ const { resolve } = require('node:path');
 const { chromium } = require('playwright');
 
 const root = resolve(__dirname, '..');
-const brand = resolve(root, 'public', 'brand');
+const brand = resolve(root, 'public', 'brand', 'archive', 'brand-002-reconstructed');
 
 function svgDataUrl(file) {
   const svg = readFileSync(resolve(brand, file), 'utf8');

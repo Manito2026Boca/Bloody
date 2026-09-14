@@ -1,17 +1,17 @@
 @import 'tailwindcss';
 
 :root {
-  --green-900: #0c322c;
-  --green-800: #0f4b3f;
-  --green-700: #14634f;
-  --orange-600: #f4742a;
+  --green-900: #003f3d;
+  --green-800: #07514d;
+  --green-700: #14645b;
+  --orange-600: #ff6b1f;
   --orange-100: #fff0e5;
-  --paper: #fffdfa;
-  --sand: #f5efe4;
-  --mist: #e9f4f0;
-  --ink: #17211f;
-  --muted: #66706d;
-  --line: #ded8cf;
+  --paper: #fffaf0;
+  --sand: #f8f3e8;
+  --mist: #edf5f1;
+  --ink: #14211f;
+  --muted: #626d69;
+  --line: #ddd7cc;
   --blue: #2f6f9f;
   --red: #c94a35;
   --shadow: 0 20px 60px rgb(15 75 63 / 12%);
@@ -703,6 +703,7 @@ a {
 .v6-header-logo {
   width: 46px;
   height: 46px;
+  border-radius: 11px;
 }
 
 .v6-logo-image {

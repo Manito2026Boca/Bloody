@@ -1823,10 +1823,10 @@ export default function ManitoV6App() {
         <section className="v6-card">
           <Image
             className="v6-logo-image v6-logo-image-compact"
-            src="/brand/manito-logo.svg"
+            src="/brand/manito-reference-horizontal.png"
             alt="MANITO"
-            width={900}
-            height={256}
+            width={980}
+            height={280}
             priority
           />
           <h1>{profileLoading ? 'Preparando tu cuenta...' : 'Abriendo MANITO...'}</h1>
@@ -1867,10 +1867,10 @@ export default function ManitoV6App() {
         <div className="v6-top-brand">
           <Image
             className="v6-header-logo"
-            src="/brand/manito-mark-light.svg"
+            src="/brand/manito-reference-app-icon.png"
             alt="MANITO"
-            width={256}
-            height={256}
+            width={225}
+            height={225}
             priority
           />
           <button className="v6-header-location" type="button" onClick={() => setLocationEditorOpen(true)}>
@@ -2119,10 +2119,10 @@ function SetupScreen({ onConnected }: { onConnected: () => void }) {
         </p>
         <Image
           className="v6-logo-image v6-logo-image-compact"
-          src="/brand/manito-logo.svg"
+          src="/brand/manito-reference-horizontal.png"
           alt="MANITO"
-          width={900}
-          height={256}
+          width={980}
+          height={280}
           priority
         />
         <h1>Conectá MANITO con Supabase.</h1>
@@ -2249,10 +2249,10 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
       <section className="v6-card">
         <Image
           className="v6-logo-image"
-          src="/brand/manito-logo.svg"
+          src="/brand/manito-reference-horizontal.png"
           alt="MANITO"
-          width={900}
-          height={256}
+          width={980}
+          height={280}
           priority
         />
         <h1>

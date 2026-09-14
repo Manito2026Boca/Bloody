@@ -10,7 +10,17 @@ const manifest = JSON.parse(readFileSync('public/manifest.webmanifest', 'utf8'))
 };
 const worker = readFileSync('public/sw.js', 'utf8');
 
-const oldAssets = ['/logo-main.jpg', '/logo-icon.png', '/icon-192.png', '/icon-512.png', '/favicon.png'];
+const oldAssets = [
+  '/logo-main.jpg',
+  '/logo-icon.png',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/favicon.png',
+  '/brand/manito-logo.svg',
+  '/brand/manito-mark-light.svg',
+  '/brand/manito-favicon.svg',
+  '/brand/manito-social.png',
+];
 const activeBranding = [app, confirmation, setup, layout, JSON.stringify(manifest), worker].join('\n');
 
 function pngSize(path: string) {
@@ -21,25 +31,29 @@ function pngSize(path: string) {
 describe('BRAND-002 asset contracts', () => {
   it('ships the complete production brand family', () => {
     for (const path of [
-      'public/brand/manito-logo.svg',
-      'public/brand/manito-logo-light.svg',
-      'public/brand/manito-mark.svg',
-      'public/brand/manito-mark-light.svg',
-      'public/brand/manito-favicon.svg',
+      'public/brand/source/manito-brand-reference.jpg',
+      'public/brand/manito-reference-horizontal.png',
+      'public/brand/manito-reference-mark.png',
+      'public/brand/manito-reference-stacked.png',
+      'public/brand/manito-reference-app-icon.png',
       'public/brand/manito-favicon-64.png',
       'public/brand/manito-icon-192.png',
       'public/brand/manito-icon-512.png',
       'public/brand/manito-maskable-512.png',
       'public/brand/apple-touch-icon.png',
-      'public/brand/manito-social.png',
+    ]) expect(existsSync(path), path).toBe(true);
+    for (const path of [
+      'public/brand/archive/brand-002-reconstructed/manito-logo.svg',
+      'public/brand/archive/brand-002-reconstructed/manito-mark.svg',
+      'public/brand/archive/brand-002-reconstructed/manito-app-icon.svg',
     ]) expect(existsSync(path), path).toBe(true);
   });
 
-  it('uses the horizontal logo for auth and the light mark for the app header', () => {
-    expect(app).toContain('src="/brand/manito-mark-light.svg"');
-    expect(app).toContain('src="/brand/manito-logo.svg"');
-    expect(confirmation).toContain('src="/brand/manito-logo.svg"');
-    expect(setup).toContain('src="/brand/manito-logo.svg"');
+  it('uses exact crops from the approved reference for auth and the app header', () => {
+    expect(app).toContain('src="/brand/manito-reference-app-icon.png"');
+    expect(app).toContain('src="/brand/manito-reference-horizontal.png"');
+    expect(confirmation).toContain('src="/brand/manito-reference-horizontal.png"');
+    expect(setup).toContain('src="/brand/manito-reference-horizontal.png"');
   });
 
   it('does not expose legacy logo paths from active product surfaces', () => {
@@ -52,7 +66,7 @@ describe('BRAND-002 asset contracts', () => {
       expect.objectContaining({ src: '/brand/manito-icon-512.png', sizes: '512x512', purpose: 'any' }),
       expect.objectContaining({ src: '/brand/manito-maskable-512.png', sizes: '512x512', purpose: 'maskable' }),
     ]));
-    expect(layout).toContain('/brand/manito-favicon.svg');
+    expect(layout).toContain('/brand/manito-favicon-64.png');
     expect(layout).toContain('/brand/apple-touch-icon.png');
     expect(pngSize('public/brand/manito-favicon-64.png')).toEqual({ width: 64, height: 64 });
     expect(pngSize('public/brand/apple-touch-icon.png')).toEqual({ width: 180, height: 180 });
@@ -62,9 +76,9 @@ describe('BRAND-002 asset contracts', () => {
   });
 
   it('invalidates the old PWA shell and precaches only new brand assets', () => {
-    expect(worker).toContain("const CACHE_NAME = 'manito-shell-brand-v2'");
-    expect(worker).toContain('/brand/manito-logo.svg');
-    expect(worker).toContain('/brand/manito-mark-light.svg');
+    expect(worker).toContain("const CACHE_NAME = 'manito-shell-brand-reference-v1'");
+    expect(worker).toContain('/brand/manito-reference-horizontal.png');
+    expect(worker).toContain('/brand/manito-reference-app-icon.png');
     for (const path of oldAssets) expect(worker).not.toContain(path);
   });
 });
