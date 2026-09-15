@@ -154,6 +154,7 @@ import type {
   V6AdminReviewStatus,
   V6AdminSetting,
   V6CancellationReason,
+  V6ClientAddress,
   V6Message,
   V6Mode,
   V6Notification,
@@ -212,6 +213,7 @@ type SavedAddress = {
   city: string | null;
   lat: number | null;
   lng: number | null;
+  isDefault: boolean;
 };
 type ProfessionalCandidate = {
   professional: V6PublicProfessional;
@@ -650,7 +652,9 @@ function orderNextStepText(order: V6Order, role: V6Role) {
     : 'Pedile al cliente el PIN de inicio.';
   if (order.status === 'trabajando') return role === 'client'
     ? 'Revisá cualquier adicional y el trabajo antes de compartir el PIN final.'
-    : 'Al terminar, cargá la evidencia requerida y pedí el PIN final.';
+    : order.service?.requires_completion_evidence
+      ? 'Al terminar, cargá la evidencia requerida y pedí el PIN final.'
+      : 'Al terminar, pedí al cliente el PIN final.';
   if (order.status === 'completed') return role === 'client'
     ? 'Revisá el pago y calificá al profesional.'
     : 'Revisá que el pago figure correctamente.';
@@ -1303,7 +1307,10 @@ function loadSavedAddresses(profileId: string): SavedAddress[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = window.localStorage.getItem(savedAddressesKey(profileId));
-    return raw ? (JSON.parse(raw) as SavedAddress[]) : [];
+    return raw ? (JSON.parse(raw) as SavedAddress[]).map((item, index) => ({
+      ...item,
+      isDefault: item.isDefault ?? index === 0,
+    })) : [];
   } catch {
     return [];
   }
@@ -1471,6 +1478,7 @@ export default function ManitoV6App() {
   const [publicProfessionals, setPublicProfessionals] = useState<V6PublicProfessional[]>([]);
   const [orders, setOrders] = useState<V6Order[]>([]);
   const [notifications, setNotifications] = useState<V6Notification[]>([]);
+  const [clientAddresses, setClientAddresses] = useState<V6ClientAddress[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('home');
   const [appMode, setAppMode] = useState<AppMode>('client');
@@ -1486,6 +1494,7 @@ export default function ManitoV6App() {
   const [editingOrder, setEditingOrder] = useState<V6Order | null>(null);
   const [clientSelectedService, setClientSelectedService] = useState<V6Service | null>(null);
   const [clientProblemQuery, setClientProblemQuery] = useState('');
+  const [focusedOrderId, setFocusedOrderId] = useState<string | null>(null);
   const lastAuthUser = useRef<string | null>(null);
   const dataLoadEpoch = useRef(0);
 
@@ -1515,6 +1524,7 @@ export default function ManitoV6App() {
         nextProSpecialties,
         nextPublicProfessionals,
         nextCapabilities,
+        nextClientAddresses,
       ] = await Promise.allSettled([
         listV6Services(),
         listV6Specialties(),
@@ -1524,6 +1534,7 @@ export default function ManitoV6App() {
         listV6ProfessionalSpecialties(userId),
         listV6PublicProfessionals(),
         getV6MyCapabilities(),
+        listV6ClientAddresses(userId),
       ]);
 
       if (epoch !== dataLoadEpoch.current) return;
@@ -1537,6 +1548,7 @@ export default function ManitoV6App() {
         setPublicProfessionals(nextPublicProfessionals.value);
       }
       setIsAdmin(nextCapabilities.status === 'fulfilled' && nextCapabilities.value.admin);
+      if (nextClientAddresses.status === 'fulfilled') setClientAddresses(nextClientAddresses.value);
 
       const secondaryLoadFailed = [
         nextServices,
@@ -1547,6 +1559,7 @@ export default function ManitoV6App() {
         nextProSpecialties,
         nextPublicProfessionals,
         nextCapabilities,
+        nextClientAddresses,
       ].some((result) => result.status === 'rejected');
 
       if (secondaryLoadFailed) {
@@ -1573,6 +1586,16 @@ export default function ManitoV6App() {
     setProServices([]);
     setProSpecialties([]);
     setPublicProfessionals([]);
+    setClientAddresses([]);
+    setChatOrder(null);
+    setNotificationsOpen(false);
+    setLocationEditorOpen(false);
+    setEditingOrder(null);
+    setClientSelectedService(null);
+    setClientProblemQuery('');
+    setFocusedOrderId(null);
+    setTab('home');
+    setAppMode('client');
     setError(null);
     setNotice('Listo. Activá fecha y hora automática si vuelve a pasar, y entrá de nuevo.');
   }, []);
@@ -1614,6 +1637,29 @@ export default function ManitoV6App() {
 
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, nextSession) => {
+        const nextUserId = nextSession?.user.id || null;
+        const userChanged = lastAuthUser.current !== nextUserId;
+        if (userChanged) {
+          dataLoadEpoch.current++;
+          setProfileLoading(Boolean(nextUserId));
+          setProfile(null);
+          setOrders([]);
+          setNotifications([]);
+          setClientAddresses([]);
+          setProServices([]);
+          setProSpecialties([]);
+          setPublicProfessionals([]);
+          setChatOrder(null);
+          setNotificationsOpen(false);
+          setLocationEditorOpen(false);
+          setEditingOrder(null);
+          setClientSelectedService(null);
+          setClientProblemQuery('');
+          setFocusedOrderId(null);
+          setTab('home');
+          setAppMode('client');
+          void supabase.removeAllChannels();
+        }
         setSession(nextSession);
         if (nextSession?.user.id) {
           if (lastAuthUser.current === nextSession.user.id && _event !== 'USER_UPDATED') return;
@@ -1632,6 +1678,7 @@ export default function ManitoV6App() {
           setProServices([]);
           setProSpecialties([]);
           setPublicProfessionals([]);
+          setClientAddresses([]);
         }
       },
     );
@@ -1706,6 +1753,15 @@ export default function ManitoV6App() {
   }, [error]);
 
   useEffect(() => {
+    if (tab !== 'orders' || !focusedOrderId) return;
+    const timer = window.setTimeout(() => {
+      document.querySelector(`[data-order-id="${focusedOrderId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setFocusedOrderId(null);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [focusedOrderId, tab, orders]);
+
+  useEffect(() => {
     if ('serviceWorker' in navigator) {
       void navigator.serviceWorker.register('/sw.js');
     }
@@ -1761,6 +1817,19 @@ export default function ManitoV6App() {
       (order) => isOpenOpportunityStatus(order.status) && serviceIds.has(String(order.service_id)),
     );
   }, [orders, proServices]);
+  const pendingDirectRequests = useMemo(
+    () => matchingOrders.filter((order) =>
+      order.assignment_mode === 'manual' &&
+      order.manual_response_status === 'pending' &&
+      order.manual_requested_professional_id === profile?.id &&
+      !manualRequestIsExpiredByClock(order)),
+    [matchingOrders, profile?.id],
+  );
+  const professionalWorkOrders = useMemo(() => {
+    const merged = new Map<string, V6Order>();
+    for (const order of [...professionalOrders, ...pendingDirectRequests]) merged.set(order.id, order);
+    return [...merged.values()];
+  }, [pendingDirectRequests, professionalOrders]);
   const unreadNotifications = useMemo(
     () => notifications.filter((item) => !item.read_at).length,
     [notifications],
@@ -1785,7 +1854,7 @@ export default function ManitoV6App() {
     setProfile(nextProfile);
   }
 
-  async function usePhoneLocation() {
+  async function handlePhoneLocation() {
     if (!profile || savingPhoneLocation) return;
 
     setSavingPhoneLocation(true);
@@ -1795,19 +1864,19 @@ export default function ManitoV6App() {
       const lat = position.coords.latitude;
       const lng = position.coords.longitude;
       const reverseLocation = await reverseGeocodePhoneLocation(lat, lng).catch(() => null);
-      const nextCity =
-        reverseLocation?.label ||
-        reverseLocation?.city ||
-        (profile.city && profile.city !== 'Ubicación actual' ? profile.city : coordinateFallback(lat, lng));
-      const updated = await updateV6Profile(profile.id, {
-        full_name: profile.full_name,
-        phone: profile.phone,
+      const currentDefault = clientAddresses.find((item) => item.is_default) || null;
+      const nextCity = reverseLocation?.city || cityFromLocationLabel(profile.city) || 'Ubicación actual';
+      await upsertV6ClientAddress({
+        id: currentDefault?.id,
+        clientId: profile.id,
+        label: currentDefault?.label || 'Casa',
+        line: reverseLocation?.label || coordinateFallback(lat, lng),
         city: nextCity,
         lat,
         lng,
+        isDefault: true,
       });
-
-      setProfile(updated);
+      setClientAddresses(await listV6ClientAddresses(profile.id));
       setLocationEditorOpen(false);
       setNotice(
         reverseLocation?.label
@@ -1866,8 +1935,11 @@ export default function ManitoV6App() {
 
   const viewProfile = { ...profile, role: appMode } as V6Profile;
   const activeOrders =
-    appMode === 'professional' ? professionalOrders : clientOrders;
-  const currentLocation = headerLocation(profile);
+    appMode === 'professional' ? professionalWorkOrders : clientOrders;
+  const defaultClientAddress = clientAddresses.find((item) => item.is_default) || clientAddresses[0] || null;
+  const currentLocation = defaultClientAddress
+    ? `${defaultClientAddress.label} · ${defaultClientAddress.line}`
+    : headerLocation(profile);
 
   return (
     <main className={`v6-app ${tab === 'home' && appMode === 'client' && clientSelectedService ? 'v6-request-active' : ''}`}>
@@ -1915,13 +1987,10 @@ export default function ManitoV6App() {
             onClose={() => setNotificationsOpen(false)}
             onOpenOrder={(orderId) => {
               const order = orders.find((item) => item.id === orderId);
-              if (order) {
-                setChatOrder(order);
-                setNotificationsOpen(false);
-              } else {
-                setTab('orders');
-                setNotificationsOpen(false);
-              }
+              if (order?.manual_requested_professional_id === profile.id && !order.professional_id) setAppMode('professional');
+              setFocusedOrderId(orderId);
+              setTab('orders');
+              setNotificationsOpen(false);
             }}
           />
         )}
@@ -1973,6 +2042,8 @@ export default function ManitoV6App() {
               onNavigate={setTab}
               editingOrder={editingOrder}
               onEditingComplete={() => setEditingOrder(null)}
+              accountAddresses={clientAddresses}
+              onAddressesChange={setClientAddresses}
             />
           ))}
 
@@ -2063,13 +2134,15 @@ export default function ManitoV6App() {
             clientOrders={clientOrders}
             canInstall={Boolean(installPrompt) && !isStandalone}
             onInstall={installApp}
-            onUsePhoneLocation={usePhoneLocation}
+            onUsePhoneLocation={handlePhoneLocation}
             onNavigate={setTab}
             onProfileChange={setProfile}
             onOpenProfile={() => setTab('profile')}
             savingPhoneLocation={savingPhoneLocation}
             setNotice={setNotice}
             isAdmin={isAdmin}
+            addresses={clientAddresses}
+            onAddressesChange={setClientAddresses}
           />
         )}
       </div>
@@ -2086,21 +2159,24 @@ export default function ManitoV6App() {
       )}
       {locationEditorOpen && (
         <HeaderLocationSheet
-          profile={profile}
+          addresses={clientAddresses}
           savingPhoneLocation={savingPhoneLocation}
-          onUsePhoneLocation={usePhoneLocation}
+          onUsePhoneLocation={async () => {
+            await handlePhoneLocation();
+          }}
           onClose={() => setLocationEditorOpen(false)}
-          onSave={async (city, detail) => {
-            const nextProfile = await updateV6Profile(profile.id, {
-              full_name: profile.full_name,
-              phone: profile.phone,
-              city: formatAddress(detail, city),
-              lat: null,
-              lng: null,
+          onSave={async (input) => {
+            const geocoded = await geocodeManualLocation(input.line, input.city).catch(() => null);
+            await upsertV6ClientAddress({
+              ...input,
+              clientId: profile.id,
+              lat: geocoded?.lat ?? null,
+              lng: geocoded?.lng ?? null,
+              isDefault: true,
             });
-            setProfile(nextProfile);
+            setClientAddresses(await listV6ClientAddresses(profile.id));
             setLocationEditorOpen(false);
-            setNotice('Ubicación guardada.');
+            setNotice(geocoded ? 'Dirección predeterminada guardada.' : 'Dirección guardada. Confirmá la localidad al crear el pedido.');
           }}
           setError={setError}
         />
@@ -2371,6 +2447,8 @@ function ClientHome({
   onNavigate,
   editingOrder,
   onEditingComplete,
+  accountAddresses,
+  onAddressesChange,
 }: {
   profile: V6Profile;
   services: V6Service[];
@@ -2388,11 +2466,14 @@ function ClientHome({
   onNavigate: (tab: Tab) => void;
   editingOrder: V6Order | null;
   onEditingComplete: () => void;
+  accountAddresses: V6ClientAddress[];
+  onAddressesChange: (addresses: V6ClientAddress[]) => void;
 }) {
   const initialAddress = editingOrder ? splitStoredAddress(editingOrder.address, profile.city) : null;
+  const defaultAddress = accountAddresses.find((item) => item.is_default) || accountAddresses[0] || null;
   const [description, setDescription] = useState(editingOrder?.description || 'Necesito un plomero.');
-  const [address, setAddress] = useState(initialAddress?.line || '');
-  const [addressCity, setAddressCity] = useState(initialAddress?.city || profile.city || '');
+  const [address, setAddress] = useState(initialAddress?.line || defaultAddress?.line || '');
+  const [addressCity, setAddressCity] = useState(initialAddress?.city || defaultAddress?.city || cityFromLocationLabel(profile.city) || '');
   const [locationId, setLocationId] = useState(editingOrder?.location_id || '');
   const [requiredSpecialty, setRequiredSpecialty] = useState<V6Specialty | null>(() =>
     specialties.find((item) => item.id === editingOrder?.required_specialty_id) || null,
@@ -2409,7 +2490,9 @@ function ClientHome({
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(() =>
     editingOrder?.client_lat != null && editingOrder?.client_lng != null
       ? { lat: editingOrder.client_lat, lng: editingOrder.client_lng }
-      : null,
+      : defaultAddress?.lat != null && defaultAddress?.lng != null
+        ? { lat: defaultAddress.lat, lng: defaultAddress.lng }
+        : null,
   );
   const [detectedLocation, setDetectedLocation] = useState<{
     lat: number;
@@ -2418,14 +2501,20 @@ function ClientHome({
     label: string | null;
   } | null>(null);
   const [locationAuthority, setLocationAuthority] = useState<RequestLocationAuthority | null>(() =>
-    editingOrder ? (editingOrder.client_lat != null && editingOrder.client_lng != null ? 'gps' : 'manual') : null,
+    editingOrder
+      ? (editingOrder.client_lat != null && editingOrder.client_lng != null ? 'gps' : 'manual')
+      : defaultAddress ? (defaultAddress.lat != null && defaultAddress.lng != null ? 'saved' : 'manual') : null,
   );
-  const [locationConfirmed, setLocationConfirmed] = useState(Boolean(editingOrder));
+  const [locationConfirmed, setLocationConfirmed] = useState(Boolean(editingOrder || defaultAddress));
   const [locating, setLocating] = useState(false);
   const [confirmingLocation, setConfirmingLocation] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>(() =>
-    loadSavedAddresses(profile.id),
+    accountAddresses.length
+      ? accountAddresses.map((item) => ({ ...item, isDefault: item.is_default }))
+      : loadSavedAddresses(profile.id),
   );
+  const accountAddressHydrated = useRef(Boolean(editingOrder || defaultAddress));
+  const hydratedEditingOrderId = useRef<string | null>(editingOrder?.id || null);
   const [addressLabel, setAddressLabel] = useState('Casa');
   const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>(editingOrder?.assignment_mode === 'manual' ? 'manual' : 'auto');
   const [selectedProfessionalId, setSelectedProfessionalId] = useState(editingOrder?.preferred_professional_id || '');
@@ -2534,24 +2623,30 @@ function ClientHome({
     });
   }, []);
 
+  function applyDefaultOrderAddress() {
+    const nextDefault = accountAddresses.find((item) => item.is_default) || accountAddresses[0] || null;
+    if (!nextDefault) return;
+    setAddress(nextDefault.line);
+    setAddressCity(nextDefault.city || cityFromLocationLabel(profile.city) || '');
+    setAddressLabel(nextDefault.label);
+    setLocationId('');
+    setDetectedLocation(null);
+    setLocationConfirmed(true);
+    if (nextDefault.lat != null && nextDefault.lng != null) {
+      setCoords({ lat: nextDefault.lat, lng: nextDefault.lng });
+      setLocationAuthority('saved');
+    } else {
+      setCoords(null);
+      setLocationAuthority('manual');
+    }
+    accountAddressHydrated.current = true;
+  }
+
   useEffect(() => {
     let alive = true;
-    Promise.all([
-      listV6ClientAddresses(profile.id),
-      listV6PaymentProfiles(profile.id),
-    ])
-      .then(([remoteAddresses, remotePaymentProfiles]) => {
+    listV6PaymentProfiles(profile.id)
+      .then((remotePaymentProfiles) => {
         if (!alive) return;
-        if (remoteAddresses.length) {
-          setSavedAddresses(remoteAddresses.map((item) => ({
-            id: item.id,
-            label: item.label,
-            line: item.line,
-            city: item.city,
-            lat: item.lat,
-            lng: item.lng,
-          })));
-        }
         const nextPaymentProfiles = uniquePaymentProfiles(remotePaymentProfiles);
         setPaymentProfiles(nextPaymentProfiles);
         const preferredPayment =
@@ -2567,6 +2662,47 @@ function ClientHome({
       alive = false;
     };
   }, [profile.id]);
+
+  useEffect(() => {
+    if (!accountAddresses.length) return;
+    setSavedAddresses(accountAddresses.map((item) => ({ ...item, isDefault: item.is_default })));
+    if (editingOrder || accountAddressHydrated.current) return;
+    applyDefaultOrderAddress();
+  }, [accountAddresses, editingOrder, profile.city]);
+
+  useEffect(() => {
+    if (!editingOrder || hydratedEditingOrderId.current === editingOrder.id) return;
+    const parsedAddress = splitStoredAddress(editingOrder.address, profile.city);
+    setDescription(editingOrder.description);
+    setAddress(parsedAddress.line);
+    setAddressCity(parsedAddress.city);
+    setAddressLabel('Trabajo');
+    setLocationId(editingOrder.location_id || '');
+    setRequiredSpecialty(specialties.find((item) => item.id === editingOrder.required_specialty_id) || null);
+    setMode(editingOrder.mode);
+    setModeChosen(true);
+    setScheduledAt(dateTimeInputValue(editingOrder.scheduled_at));
+    setAssignmentMode(editingOrder.assignment_mode === 'manual' ? 'manual' : 'auto');
+    setSelectedProfessionalId(editingOrder.preferred_professional_id || '');
+    setPaymentMethod(
+      editingOrder.payment_method === 'cash'
+        ? 'cash'
+        : editingOrder.payment_method === 'card'
+          ? 'card'
+          : 'wallet',
+    );
+    setDetectedLocation(null);
+    setLocationConfirmed(true);
+    if (editingOrder.client_lat != null && editingOrder.client_lng != null) {
+      setCoords({ lat: editingOrder.client_lat, lng: editingOrder.client_lng });
+      setLocationAuthority('gps');
+    } else {
+      setCoords(null);
+      setLocationAuthority('manual');
+    }
+    setRequestStep('need');
+    hydratedEditingOrderId.current = editingOrder.id;
+  }, [editingOrder, profile.city, specialties]);
 
   async function createOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2813,6 +2949,7 @@ function ClientHome({
         city: addressCity.trim(),
         lat: authoritativeCoords?.lat || null,
         lng: authoritativeCoords?.lng || null,
+        isDefault: savedAddresses.length === 0,
       });
       const nextAddress: SavedAddress = {
         id: remoteAddress.id,
@@ -2821,24 +2958,15 @@ function ClientHome({
         city: remoteAddress.city,
         lat: remoteAddress.lat,
         lng: remoteAddress.lng,
+        isDefault: remoteAddress.is_default,
       };
       const nextAddresses = [nextAddress, ...savedAddresses.filter((item) => item.id !== nextAddress.id)].slice(0, 5);
       setSavedAddresses(nextAddresses);
+      onAddressesChange(await listV6ClientAddresses(profile.id));
       window.localStorage.setItem(savedAddressesKey(profile.id), JSON.stringify(nextAddresses));
       setNotice('Dirección guardada en tu cuenta.');
-    } catch {
-      const nextAddress: SavedAddress = {
-        id: makeClientId('addr'),
-        label: addressLabel.trim() || 'Dirección',
-        line: address.trim(),
-        city: addressCity.trim(),
-        lat: authoritativeCoords?.lat || null,
-        lng: authoritativeCoords?.lng || null,
-      };
-      const nextAddresses = [nextAddress, ...savedAddresses].slice(0, 5);
-      setSavedAddresses(nextAddresses);
-      window.localStorage.setItem(savedAddressesKey(profile.id), JSON.stringify(nextAddresses));
-      setNotice('Dirección guardada en este dispositivo.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No pudimos guardar la dirección en tu cuenta.');
     }
   }
 
@@ -2877,6 +3005,7 @@ function ClientHome({
       scheduledAt,
     })[0] || null;
     const nextMode = serviceSupportsMode(service, mode) ? mode : firstSupportedMode(service);
+    if (!editingOrder) applyDefaultOrderAddress();
     const label = serviceDisplayName(service);
     setSelectedService(service);
     setRequiredSpecialty((current) => current?.service_id === service.id ? current : null);
@@ -2914,6 +3043,7 @@ function ClientHome({
 
   function chooseService(service: V6Service) {
     const nextMode = serviceSupportsMode(service, mode) ? mode : firstSupportedMode(service);
+    if (!editingOrder) applyDefaultOrderAddress();
     setSelectedService(service);
     setRequiredSpecialty((current) => current?.service_id === service.id ? current : null);
     setRequestStep('need');
@@ -3143,24 +3273,39 @@ function ClientHome({
                   <p>Usá GPS o completá una ubicación manual válida.</p>
                 </div>
               </div>
-              {savedAddresses.length > 0 && (
+              <div className="v6-location-options" role="group" aria-label="Elegir ubicación del trabajo">
+                {defaultAddress && (
+                  <button className="v6-location-action" type="button" aria-pressed={locationAuthority === 'saved' && address === defaultAddress.line} onClick={() => chooseSavedAddress(defaultAddress.id)}>
+                    <MapPin size={20} aria-hidden="true" />
+                    <span><strong>{defaultAddress.label}</strong><small>{formatAddress(defaultAddress.line, defaultAddress.city)}</small></span>
+                    <Check size={18} aria-hidden="true" />
+                  </button>
+                )}
+                <button className="v6-location-action" type="button" aria-pressed={locationAuthority === 'gps'} onClick={captureLocation} disabled={locating}>
+                  <LocateFixed size={20} aria-hidden="true" />
+                  <span>
+                    <strong>{locating ? 'Buscando tu ubicación...' : 'Usar mi ubicación actual'}</strong>
+                    <small>Te vamos a pedir permiso en este paso.</small>
+                  </span>
+                  <Check size={18} aria-hidden="true" />
+                </button>
+                <button className="v6-location-action" type="button" aria-pressed={locationAuthority === 'manual' || locationAuthority === 'manual_geocoded'} onClick={beginManualLocation}>
+                  <MapPin size={20} aria-hidden="true" />
+                  <span><strong>Ingresar ubicación manualmente</strong><small>Ingresá calle, número y ciudad.</small></span>
+                  <Check size={18} aria-hidden="true" />
+                </button>
+              </div>
+              {savedAddresses.length > 1 && (
                 <label className="v6-field">
-                  <span>Dirección guardada</span>
-                  <select defaultValue="" onChange={(event) => chooseSavedAddress(event.target.value)}>
-                    <option value="" disabled>Elegir dirección</option>
+                  <span>Otras direcciones guardadas</span>
+                  <select value={savedAddresses.find((item) => item.line === address && item.city === addressCity)?.id || ''} onChange={(event) => chooseSavedAddress(event.target.value)}>
+                    <option value="">Elegir dirección</option>
                     {savedAddresses.map((item) => (
                       <option value={item.id} key={item.id}>{item.label} · {formatAddress(item.line, item.city)}</option>
                     ))}
                   </select>
                 </label>
               )}
-              <button className="v6-location-action" type="button" onClick={captureLocation} disabled={locating}>
-                <LocateFixed size={20} aria-hidden="true" />
-                <span>
-                  <strong>{locating ? 'Buscando tu ubicación...' : 'Usar ubicación del teléfono'}</strong>
-                  <small>Te vamos a pedir permiso en este paso.</small>
-                </span>
-              </button>
               {detectedLocation && (
                 <div className="v6-location-confirmation" role="status">
                   <span>Ubicación detectada</span>
@@ -3174,7 +3319,7 @@ function ClientHome({
               )}
               {locationConfirmed && !detectedLocation && (
                 <div className="v6-location-confirmation confirmed">
-                  <span>{locationAuthority === 'gps' ? 'Ubicación GPS confirmada' : 'Ubicación manual confirmada'}</span>
+                  <span>{locationAuthority === 'gps' ? 'Ubicación GPS confirmada' : locationAuthority === 'saved' ? 'Dirección guardada seleccionada' : 'Ubicación manual confirmada'}</span>
                   <strong>{formatAddress(address, addressCity) || (authoritativeCoords ? coordinateFallback(authoritativeCoords.lat, authoritativeCoords.lng) : addressCity)}</strong>
                   <button className="v6-link-button" type="button" onClick={beginManualLocation}>Cambiar ubicación</button>
                 </div>
@@ -3201,7 +3346,6 @@ function ClientHome({
                 </label>
               </div>
               <MatchingLocation value={locationId} onChange={(id, name) => { markManualLocation(); setLocationId(id); if (name) setAddressCity(name); }} />
-              <button className="v6-link-button" type="button" onClick={beginManualLocation}>Ingresar ubicación manualmente</button>
               <details className="v6-inline-details">
                 <summary>Guardar esta dirección</summary>
                 <div className="v6-inline-details-body">
@@ -4283,6 +4427,8 @@ function ProfessionalHome({
         .sort((a, b) => b.score - a.score),
     [matchingOrders, proServices, proSpecialties, professionalProfile, profile, specialties],
   );
+  const directRequests = compatibleMatches.filter((match) => manualRequestCanBeRejectedBy(match.order, profile));
+  const regularOpportunities = compatibleMatches.filter((match) => !manualRequestCanBeRejectedBy(match.order, profile));
 
   async function toggleAvailable() {
     try {
@@ -4313,8 +4459,9 @@ function ProfessionalHome({
   async function accept(orderId: string) {
     try {
       const acceptedOrder = await acceptV6Order(orderId);
-      setOrders(await listV6Orders());
-      setChatOrder(acceptedOrder);
+      const refreshedOrders = await listV6Orders();
+      setOrders(refreshedOrders);
+      setChatOrder(refreshedOrders.find((order) => order.id === acceptedOrder.id) || acceptedOrder);
       setNotice('Trabajo aceptado. Usá el chat del pedido para coordinar con el cliente.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'El pedido ya no está disponible.');
@@ -4370,6 +4517,35 @@ function ProfessionalHome({
           <span />
         </button>
       </section>
+
+      {directRequests.length > 0 && (
+        <section className="v6-section v6-direct-requests" aria-label="Solicitudes directas pendientes">
+          <div className="v6-section-head"><div><small>NECESITA TU RESPUESTA</small><h2>Solicitud directa</h2></div><span>{directRequests.length}</span></div>
+          {directRequests.map(({ order, distanceKm }) => (
+            <article className="v6-direct-request" key={order.id} data-order-id={order.id}>
+              <div className="v6-order-top">
+                <span className="v6-order-icon">{serviceIcon(order.service?.slug || '')}</span>
+                <div>
+                  <strong>{serviceDisplayName(order.service)}</strong>
+                  <p>{specialties.find((item) => item.id === order.required_specialty_id)?.name || 'Especialidad general'}</p>
+                  <small>{V6_MODE_LABEL[order.mode]} · {cityFromLocationLabel(order.address)}{distanceKm != null ? ` · ${distanceKm.toFixed(1)} km` : ''}</small>
+                </div>
+                <b>{money(orderEstimatedAmount(order))}</b>
+              </div>
+              <div className="v6-direct-request-detail">
+                <p>{order.description}</p>
+                <span>{order.scheduled_at ? shortDateTime(order.scheduled_at) : 'Lo antes posible'}</span>
+                <span>Importe estimado: {money(orderEstimatedAmount(order))}</span>
+                {order.manual_response_deadline_at && <span>Respondé antes de {shortDateTime(order.manual_response_deadline_at)}</span>}
+              </div>
+              <div className="v6-actions compact">
+                <button className="v6-secondary" type="button" onClick={() => rejectManual(order.id)}>Rechazar</button>
+                <button className="v6-primary" type="button" onClick={() => accept(order.id)}>Aceptar trabajo</button>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
 
       {focusOrder && (
         <section className="v6-focus-card professional">
@@ -4438,9 +4614,9 @@ function ProfessionalHome({
       <section className="v6-section">
         <div className="v6-section-head">
           <h2>Oportunidades</h2>
-          <span>{compatibleMatches.length} compatibles</span>
+          <span>{regularOpportunities.length} compatibles</span>
         </div>
-        {(showAllOpportunities ? compatibleMatches : compatibleMatches.slice(0, 3)).map((match) =>
+        {(showAllOpportunities ? regularOpportunities : regularOpportunities.slice(0, 3)).map((match) =>
             match.order.mode === 'quote' ? (
               <details className="v6-opportunity-details" key={match.order.id}>
                 <summary>
@@ -4498,12 +4674,12 @@ function ProfessionalHome({
               </article>
             ),
           )}
-        {compatibleMatches.length > 3 && (
+        {regularOpportunities.length > 3 && (
           <button className="v6-text-link" type="button" onClick={() => setShowAllOpportunities((current) => !current)}>
-            {showAllOpportunities ? 'Ver menos oportunidades' : `Ver todas (${compatibleMatches.length})`}
+            {showAllOpportunities ? 'Ver menos oportunidades' : `Ver todas (${regularOpportunities.length})`}
           </button>
         )}
-        {!compatibleMatches.length && (
+        {!regularOpportunities.length && !directRequests.length && (
           <Empty
             title={profile.is_available ? 'No hay pedidos compatibles' : 'Sin solicitudes programadas o presupuestos'}
             body={profile.is_available ? 'Cuando un cliente publique un servicio dentro de tu zona y horario aparecerá acá.' : 'Activá Disponible para ver pedidos inmediatos. Los presupuestos y programados aparecen aunque no estés disponible ahora.'}
@@ -4555,13 +4731,28 @@ function OrdersList(props: {
   onEditRequest?: (order: V6Order) => void;
 }) {
   const [filter, setFilter] = useState<'current' | 'proposals' | 'history'>('current');
+  const pendingDirect = props.profile.role === 'professional'
+    ? props.orders.filter((order) => manualRequestCanBeRejectedBy(order, props.profile))
+    : [];
   const visibleOrders = props.orders.filter((order) => {
+    if (pendingDirect.some((pending) => pending.id === order.id)) return false;
     if (filter === 'history') return ['completed', 'cancelled'].includes(order.status);
     if (filter === 'proposals') return order.mode === 'quote' && isOpenOpportunityStatus(order.status);
     return !['completed', 'cancelled'].includes(order.status) && (
       props.profile.role === 'client' || order.mode !== 'quote' || !isOpenOpportunityStatus(order.status)
     );
   });
+
+  async function respondToDirect(orderId: string, accept: boolean) {
+    try {
+      if (accept) await acceptV6Order(orderId);
+      else await rejectV6ManualOrderRequest(orderId, 'no_disponible');
+      props.setOrders(await listV6Orders());
+      props.setNotice(accept ? 'Trabajo aceptado.' : 'Solicitud rechazada.');
+    } catch (caught) {
+      props.setError(caught instanceof Error ? caught.message : 'No pudimos responder la solicitud.');
+    }
+  }
 
   return (
     <>
@@ -4579,6 +4770,20 @@ function OrdersList(props: {
           )}
           <button type="button" role="tab" aria-selected={filter === 'history'} onClick={() => setFilter('history')}>Historial</button>
         </div>
+        {filter === 'current' && pendingDirect.length > 0 && (
+          <div className="v6-direct-requests compact">
+            <strong>NECESITAN RESPUESTA</strong>
+            {pendingDirect.map((order) => (
+              <article className="v6-direct-request" key={order.id} data-order-id={order.id}>
+                <div><strong>{serviceDisplayName(order.service)}</strong><p>{order.description}</p><small>{cityFromLocationLabel(order.address)} · {V6_MODE_LABEL[order.mode]}</small></div>
+                <div className="v6-actions compact">
+                  <button className="v6-secondary" type="button" onClick={() => void respondToDirect(order.id, false)}>Rechazar</button>
+                  <button className="v6-primary" type="button" onClick={() => void respondToDirect(order.id, true)}>Aceptar trabajo</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
         {visibleOrders.map((order) => (
           <OrderCard key={order.id} order={order} {...props} />
         ))}
@@ -4746,6 +4951,8 @@ function OrderCard({
   const extraRequestInFlight = useRef(false);
   const advancingOrder = useRef(false);
   const [pinActionError, setPinActionError] = useState<string | null>(null);
+  const [pinEntryOpen, setPinEntryOpen] = useState(false);
+  const [pinValue, setPinValue] = useState('');
   const pinErrorElement = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     if (pinActionError) pinErrorElement.current?.scrollIntoView({ block: 'nearest' });
@@ -4906,26 +5113,35 @@ function OrderCard({
   }, [profile.id, profile.role, proposals]);
 
   async function advance() {
+    const needsPin = nextAction.kind === 'start_with_pin' || nextAction.kind === 'complete_with_pin';
+    if (needsPin && !pinEntryOpen) {
+      setPinValue('');
+      setPinActionError(null);
+      setPinEntryOpen(true);
+      return;
+    }
+    if (needsPin && !/^\d{4}$/.test(pinValue)) {
+      setPinActionError('Ingresá el PIN de 4 números que te muestra el cliente.');
+      return;
+    }
     if (advancingOrder.current) return;
     advancingOrder.current = true;
     setPinActionError(null);
     try {
       if (nextAction.kind === 'start_with_pin') {
-        const pin = window.prompt(nextAction.prompt);
-        if (!pin) return;
-        await startV6Order(order.id, pin);
+        await startV6Order(order.id, pinValue);
       } else if (nextAction.kind === 'complete_with_pin') {
         if (order.service?.requires_completion_evidence && !photos.some((photo) => photo.stage === 'after')) {
           setError('Agregá al menos una foto del trabajo terminado antes de finalizar.');
           return;
         }
-        const pin = window.prompt(nextAction.prompt);
-        if (!pin) return;
-        await completeTrackedV6Order(order.id, pin);
+        await completeTrackedV6Order(order.id, pinValue);
       } else {
         await advanceV6Order(order.id);
       }
       setOrders(await listV6Orders());
+      setPinEntryOpen(false);
+      setPinValue('');
       setNotice('Estado actualizado.');
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'No se pudo avanzar.';
@@ -5273,6 +5489,27 @@ function OrderCard({
         )}
         {profile.role === 'professional' && canProfessionalAdvanceOrder(order, profile.id) && (
           <button className="v6-primary" type="button" onClick={advance}>{nextAction.label}</button>
+        )}
+        {profile.role === 'professional' && pinEntryOpen && (nextAction.kind === 'start_with_pin' || nextAction.kind === 'complete_with_pin') && (
+          <form className="v6-pin-entry" onSubmit={(event) => { event.preventDefault(); void advance(); }}>
+            <label className="v6-field">
+              <span>{nextAction.kind === 'start_with_pin' ? 'PIN de inicio' : 'PIN de finalización'}</span>
+              <input
+                value={pinValue}
+                onChange={(event) => setPinValue(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]{4}"
+                maxLength={4}
+                placeholder="4 números"
+                autoFocus
+              />
+            </label>
+            <div className="v6-actions compact">
+              <button className="v6-primary" type="submit">Validar PIN</button>
+              <button className="v6-secondary" type="button" onClick={() => { setPinEntryOpen(false); setPinValue(''); setPinActionError(null); }}>Cancelar</button>
+            </div>
+          </form>
         )}
       </div>
       {profile.role === 'client' && order.status === 'matching_failed' && (
@@ -6814,6 +7051,8 @@ function AccountPanel({
   savingPhoneLocation,
   setNotice,
   isAdmin,
+  addresses,
+  onAddressesChange,
 }: {
   profile: V6Profile;
   experience: AppMode;
@@ -6827,9 +7066,14 @@ function AccountPanel({
   savingPhoneLocation: boolean;
   setNotice: (message: string) => void;
   isAdmin: boolean;
+  addresses: V6ClientAddress[];
+  onAddressesChange: (addresses: V6ClientAddress[]) => void;
 }) {
-  const [locationCity, setLocationCity] = useState(cityFromLocationLabel(profile.city) || profile.city || '');
-  const [locationDetail, setLocationDetail] = useState(detailFromLocationLabel(profile.city));
+  const defaultAddress = addresses.find((item) => item.is_default) || addresses[0] || null;
+  const [addressId, setAddressId] = useState(defaultAddress?.id || '');
+  const [addressLabel, setAddressLabel] = useState(defaultAddress?.label || 'Casa');
+  const [addressLine, setAddressLine] = useState(defaultAddress?.line || '');
+  const [addressCity, setAddressCity] = useState(defaultAddress?.city || cityFromLocationLabel(profile.city) || '');
   const [locationPhone, setLocationPhone] = useState(profile.phone || '');
   const [savingLocation, setSavingLocation] = useState(false);
   const [accountType, setAccountType] = useState<V6UserSecurityPreferences['account_type']>('particular');
@@ -6847,6 +7091,15 @@ function AccountPanel({
     .replace(/[^a-z0-9]+/g, '')
     .slice(0, 6)
     .toUpperCase() || 'AMIGO'}`;
+
+  useEffect(() => {
+    const nextDefault = addresses.find((item) => item.is_default) || addresses[0] || null;
+    if (!nextDefault) return;
+    setAddressId(nextDefault.id);
+    setAddressLabel(nextDefault.label);
+    setAddressLine(nextDefault.line);
+    setAddressCity(nextDefault.city || '');
+  }, [addresses]);
 
   useEffect(() => {
     let alive = true;
@@ -6916,24 +7169,62 @@ function AccountPanel({
   async function saveLocation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (savingLocation) return;
-    if (!locationCity.trim()) {
-      setNotice('Escribí tu ciudad.');
+    if (!addressLine.trim() || !addressCity.trim()) {
+      setNotice('Escribí dirección y ciudad.');
       return;
     }
     setSavingLocation(true);
     try {
-      const nextLocation = composeProfileLocation(locationCity, locationDetail);
-      const updated = await updateV6Profile(profile.id, {
-        full_name: profile.full_name,
-        phone: locationPhone.trim() || null,
-        city: nextLocation,
+      const geocoded = await geocodeManualLocation(addressLine.trim(), addressCity.trim()).catch(() => null);
+      await upsertV6ClientAddress({
+        id: addressId || undefined,
+        clientId: profile.id,
+        label: addressLabel.trim() || 'Casa',
+        line: addressLine.trim(),
+        city: addressCity.trim(),
+        lat: geocoded?.lat ?? null,
+        lng: geocoded?.lng ?? null,
+        isDefault: true,
       });
-      onProfileChange(updated);
-      setNotice('Ubicación principal actualizada.');
+      if (locationPhone.trim() !== (profile.phone || '')) {
+        onProfileChange(await updateV6Profile(profile.id, {
+          full_name: profile.full_name,
+          phone: locationPhone.trim() || null,
+          city: profile.city,
+        }));
+      }
+      onAddressesChange(await listV6ClientAddresses(profile.id));
+      setNotice('Dirección predeterminada actualizada.');
     } catch (caught) {
       setNotice(caught instanceof Error ? caught.message : 'No se pudo guardar la ubicación.');
     } finally {
       setSavingLocation(false);
+    }
+  }
+
+  function editAddress(item?: V6ClientAddress) {
+    setAddressId(item?.id || '');
+    setAddressLabel(item?.label || (addresses.length ? 'Otro' : 'Casa'));
+    setAddressLine(item?.line || '');
+    setAddressCity(item?.city || cityFromLocationLabel(profile.city) || '');
+  }
+
+  async function makeDefaultAddress(item: V6ClientAddress) {
+    try {
+      await upsertV6ClientAddress({
+        id: item.id,
+        clientId: profile.id,
+        label: item.label,
+        line: item.line,
+        city: item.city,
+        lat: item.lat,
+        lng: item.lng,
+        isDefault: true,
+      });
+      onAddressesChange(await listV6ClientAddresses(profile.id));
+      setNotice(`${item.label} es ahora tu dirección predeterminada.`);
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : 'No pudimos cambiar la dirección predeterminada.');
     }
   }
 
@@ -7021,34 +7312,31 @@ function AccountPanel({
           {experience === 'professional' ? 'Administrar perfil profesional' : 'Editar perfil'}
         </button>
       </section>
-      <section className="v6-card">
-        <h2>Ubicación principal</h2>
-        <p className="v6-muted">
-          MANITO usa la ciudad para mostrarla arriba y el GPS para ordenar profesionales cercanos.
-        </p>
-        {profile.lat != null && profile.lng != null && (
-          <p className="v6-note">
-            GPS guardado. Arriba se muestra {profile.city || 'tu ubicación actual'}.
-          </p>
-        )}
+      {experience === 'client' && <section className="v6-card v6-address-manager">
+        <div className="v6-section-head">
+          <div><h2>Direcciones</h2><span>{addresses.length ? `${addresses.length} guardadas` : 'configurá una'}</span></div>
+          <button className="v6-secondary" type="button" onClick={() => editAddress()}>Agregar</button>
+        </div>
+        <p className="v6-muted">La predeterminada se propone al crear un pedido. Cada trabajo conserva su propia ubicación.</p>
+        <div className="v6-address-list">
+          {addresses.map((item) => (
+            <article key={item.id} className={item.is_default ? 'default' : ''}>
+              <MapPin size={18} aria-hidden="true" />
+              <div><strong>{item.label}</strong><span>{item.line}</span><small>{item.city}</small></div>
+              <div>
+                <button className="v6-link-button" type="button" onClick={() => editAddress(item)}>Editar</button>
+                {!item.is_default && <button className="v6-link-button" type="button" onClick={() => void makeDefaultAddress(item)}>Usar por defecto</button>}
+              </div>
+            </article>
+          ))}
+        </div>
+        {!addresses.length && <div className="v6-empty-inline"><strong>Todavía no guardaste una dirección.</strong><p>Agregá Casa o usá el GPS para empezar.</p></div>}
         <form className="v6-stack" onSubmit={saveLocation}>
-          <label className="v6-field">
-            <span>Ciudad</span>
-            <input
-              value={locationCity}
-              onChange={(event) => setLocationCity(event.target.value)}
-              placeholder="Ej: Mar del Plata"
-              required
-            />
-          </label>
-          <label className="v6-field">
-            <span>Barrio, zona o referencia</span>
-            <input
-              value={locationDetail}
-              onChange={(event) => setLocationDetail(event.target.value)}
-              placeholder="Ej: Güemes, Centro, Av. Independencia"
-            />
-          </label>
+          <div className="v6-field-grid-two">
+            <label className="v6-field"><span>Nombre</span><input value={addressLabel} onChange={(event) => setAddressLabel(event.target.value)} placeholder="Casa" required /></label>
+            <label className="v6-field"><span>Ciudad</span><input value={addressCity} onChange={(event) => setAddressCity(event.target.value)} placeholder="Mar del Plata" required /></label>
+          </div>
+          <label className="v6-field"><span>Dirección</span><input value={addressLine} onChange={(event) => setAddressLine(event.target.value)} placeholder="Calle, número, piso" required /></label>
           <label className="v6-field">
             <span>Teléfono</span>
             <input
@@ -7066,15 +7354,12 @@ function AccountPanel({
             >
               <LocateFixed size={16} aria-hidden="true" /> {savingPhoneLocation ? 'Buscando...' : 'Usar GPS'}
             </button>
-            <button className="v6-secondary" type="submit" disabled={savingLocation}>
-              {savingLocation ? 'Guardando...' : 'Guardar ciudad'}
+            <button className="v6-primary" type="submit" disabled={savingLocation}>
+              {savingLocation ? 'Guardando...' : 'Guardar como predeterminada'}
             </button>
           </div>
         </form>
-        <p className="v6-help-text">
-          Para una dirección exacta por pedido, cargá calle, número y ciudad cuando pedís el servicio.
-        </p>
-      </section>
+      </section>}
       <section className="v6-card">
         <h2>Datos de cuenta</h2>
         <div className="v6-stack">
@@ -7703,35 +7988,35 @@ function ChatSheet({
 }
 
 function HeaderLocationSheet({
-  profile,
+  addresses,
   savingPhoneLocation,
   onUsePhoneLocation,
   onClose,
   onSave,
   setError,
 }: {
-  profile: V6Profile;
+  addresses: V6ClientAddress[];
   savingPhoneLocation: boolean;
   onUsePhoneLocation: () => Promise<void>;
   onClose: () => void;
-  onSave: (city: string, detail: string) => Promise<void>;
+  onSave: (input: { id?: string; label: string; line: string; city: string; lat: null; lng: null }) => Promise<void>;
   setError: (message: string) => void;
 }) {
-  const initial = splitStoredAddress(profile.city || '', '');
-  const [city, setCity] = useState(initial.city || initial.line || '');
-  const [detail, setDetail] = useState(initial.city ? initial.line : '');
-  const [locationId, setLocationId] = useState('');
+  const current = addresses.find((item) => item.is_default) || addresses[0] || null;
+  const [label, setLabel] = useState(current?.label || 'Casa');
+  const [city, setCity] = useState(current?.city || '');
+  const [line, setLine] = useState(current?.line || '');
   const [saving, setSaving] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!city.trim()) {
-      setError('Ingresá una ciudad para guardar la ubicación.');
+    if (!city.trim() || !line.trim()) {
+      setError('Ingresá dirección y ciudad.');
       return;
     }
     setSaving(true);
     try {
-      await onSave(city.trim(), detail.trim());
+      await onSave({ id: current?.id, label: label.trim() || 'Casa', line: line.trim(), city: city.trim(), lat: null, lng: null });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No pudimos guardar la ubicación.');
     } finally {
@@ -7743,7 +8028,7 @@ function HeaderLocationSheet({
     <div className="v6-modal" role="dialog" aria-modal="true" aria-label="Configurar ubicación">
       <section className="v6-sheet v6-location-sheet">
         <div className="v6-section-head">
-          <div><h2>Tu ubicación</h2><span>Se usa como punto de partida para tus pedidos.</span></div>
+          <div><h2>Dirección predeterminada</h2><span>La proponemos al crear un pedido, pero siempre podés cambiarla.</span></div>
           <button className="v6-icon-button" type="button" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
         <button className="v6-location-action" type="button" disabled={savingPhoneLocation} onClick={() => void onUsePhoneLocation()}>
@@ -7752,10 +8037,10 @@ function HeaderLocationSheet({
         </button>
         <div className="v6-divider-label"><span>o ingresala manualmente</span></div>
         <form className="v6-stack" onSubmit={submit}>
-          <MatchingLocation value={locationId} onChange={(id, name) => { setLocationId(id); if (name) setCity(name); }} />
+          <label className="v6-field"><span>Nombre</span><input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Casa" required /></label>
+          <label className="v6-field"><span>Dirección</span><input value={line} onChange={(event) => setLine(event.target.value)} placeholder="Calle y número" required /></label>
           <label className="v6-field"><span>Ciudad</span><input value={city} onChange={(event) => setCity(event.target.value)} placeholder="Ej: Mar del Plata" required /></label>
-          <label className="v6-field"><span>Barrio o referencia (opcional)</span><input value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="Ej: Constitución" /></label>
-          <button className="v6-primary" type="submit" disabled={saving}>{saving ? 'Guardando...' : 'Guardar ubicación'}</button>
+          <button className="v6-primary" type="submit" disabled={saving}>{saving ? 'Guardando...' : 'Guardar como predeterminada'}</button>
         </form>
       </section>
     </div>

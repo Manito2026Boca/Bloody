@@ -3130,6 +3130,91 @@ a.v6-evidence-link {
   overflow-wrap: anywhere;
 }
 
+.v6-location-options,
+.v6-address-list,
+.v6-direct-requests,
+.v6-direct-request-detail {
+  display: grid;
+  min-width: 0;
+  gap: 9px;
+}
+
+.v6-location-options .v6-location-action {
+  grid-template-columns: 22px minmax(0, 1fr) 18px;
+  min-height: 68px;
+  align-items: center;
+}
+
+.v6-location-options .v6-location-action > svg:last-child {
+  opacity: 0;
+}
+
+.v6-location-options .v6-location-action[aria-pressed='true'] {
+  border-color: var(--orange-600);
+  background: #fff4ea;
+}
+
+.v6-location-options .v6-location-action[aria-pressed='true'] > svg:last-child {
+  opacity: 1;
+  color: var(--orange-600);
+}
+
+.v6-address-list article {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px;
+}
+
+.v6-address-list article.default {
+  border-color: #b8d9cb;
+  background: var(--mist);
+}
+
+.v6-address-list article > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.v6-address-list article span,
+.v6-address-list article small,
+.v6-direct-request-detail span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.v6-address-list article > div:last-child {
+  justify-items: end;
+}
+
+.v6-direct-requests > .v6-section-head small,
+.v6-direct-requests.compact > strong {
+  color: var(--orange-600);
+  font-size: 0.7rem;
+  letter-spacing: 0;
+}
+
+.v6-direct-request {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  border: 1px solid #efae76;
+  border-radius: 8px;
+  background: #fffaf5;
+  padding: 14px;
+}
+
+.v6-direct-request p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .v6-link-button {
   width: fit-content;
   border: 0;
@@ -3795,6 +3880,20 @@ a.v6-evidence-link {
   padding: 12px;
 }
 
+.v6-pin-entry {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.v6-pin-entry input {
+  max-width: 180px;
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
 .v6-pin-callout strong {
   color: #843b19;
 }
@@ -3910,6 +4009,23 @@ a.v6-evidence-link {
 
   .v6-request-stage {
     padding: 14px;
+  }
+
+  .v6-location-options .v6-location-action {
+    width: 100%;
+    min-height: 72px;
+    padding: 11px;
+  }
+
+  .v6-address-list article {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .v6-address-list article > div:last-child {
+    grid-column: 2;
+    grid-auto-flow: column;
+    justify-content: start;
+    justify-items: start;
   }
 
   .v6-order-top {

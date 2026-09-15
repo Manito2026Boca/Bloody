@@ -42,6 +42,12 @@ function fail(error: { message: string } | null) {
   if (error) throw new Error(error.message);
 }
 
+function singleRpcRow<T>(data: T | T[] | null, fallbackMessage: string): T {
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error(fallbackMessage);
+  return row;
+}
+
 function isMissingV5Table(error: { message: string; code?: string } | null) {
   if (!error) return false;
   return (
@@ -403,6 +409,7 @@ export async function listV6ClientAddresses(userId: string) {
     .from('client_addresses')
     .select('*')
     .eq('client_id', userId)
+    .order('is_default', { ascending: false })
     .order('created_at', { ascending: false });
   if (isMissingV5Table(error)) return [];
   fail(error);
@@ -419,20 +426,17 @@ export async function upsertV6ClientAddress(input: {
   lng: number | null;
   isDefault?: boolean;
 }) {
-  const { data, error } = await getV6Supabase()
-    .from('client_addresses')
-    .upsert({
+  const { data, error } = await getV6Supabase().rpc('upsert_client_address', {
+    p_data: {
       id: input.id,
-      client_id: input.clientId,
       label: input.label,
       line: input.line,
       city: input.city || null,
       lat: input.lat,
       lng: input.lng,
       is_default: Boolean(input.isDefault),
-    })
-    .select('*')
-    .single();
+    },
+  });
   fail(error);
   return data as V6ClientAddress;
 }
@@ -810,7 +814,7 @@ export async function acceptV6Proposal(proposalId: string) {
     p_proposal_id: proposalId,
   });
   fail(error);
-  return data as V6Order;
+  return singleRpcRow(data as V6Order | V6Order[] | null, 'No se pudo confirmar el presupuesto aceptado.');
 }
 
 export async function acceptV6Order(orderId: string) {
@@ -818,7 +822,7 @@ export async function acceptV6Order(orderId: string) {
     p_order_id: orderId,
   });
   fail(error);
-  return data as V6Order;
+  return singleRpcRow(data as V6Order | V6Order[] | null, 'No se pudo confirmar el trabajo aceptado.');
 }
 
 export async function rejectV6ManualOrderRequest(orderId: string, reason?: string | null) {
@@ -914,7 +918,7 @@ export async function confirmV6OrderPayment(orderId: string) {
     p_order_id: orderId,
   });
   fail(error);
-  return data as V6Order;
+  return singleRpcRow(data as V6Order | V6Order[] | null, 'No se pudo confirmar el pago.');
 }
 
 export async function reportV6OrderPayment(orderId: string, receiptPath?: string | null) {
@@ -945,7 +949,7 @@ export async function advanceV6Order(orderId: string) {
     p_order_id: orderId,
   });
   fail(error);
-  return data as V6Order;
+  return singleRpcRow(data as V6Order | V6Order[] | null, 'No se pudo actualizar el trabajo.');
 }
 
 export async function startV6Order(orderId: string, pin: string) {
@@ -973,7 +977,7 @@ export async function cancelV6Order(orderId: string, reason: string, note?: stri
     p_note: note || null,
   });
   fail(error);
-  return data as V6Order;
+  return singleRpcRow(data as V6Order | V6Order[] | null, 'No se pudo cancelar el trabajo.');
 }
 
 export async function listV6OrderExtras(orderId: string) {
