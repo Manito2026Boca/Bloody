@@ -3301,6 +3301,33 @@ a.v6-evidence-link {
   line-height: 1.45;
 }
 
+.v6-install-banner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  padding: 9px 10px;
+}
+
+.v6-install-banner > svg { color: var(--green-900); }
+.v6-install-banner > span { display: grid; min-width: 0; gap: 1px; }
+.v6-install-banner strong { color: var(--green-900); font-size: 0.84rem; }
+.v6-install-banner small { color: var(--muted); font-size: 0.72rem; }
+.v6-install-banner .v6-primary { width: auto; min-height: 38px; padding: 8px 12px; }
+.v6-install-banner .v6-text-button { padding: 7px 4px; font-size: 0.72rem; white-space: nowrap; }
+
+.v6-install-guide ol {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding-left: 24px;
+  color: var(--ink);
+  line-height: 1.45;
+}
+
 .v6-focus-card {
   display: grid;
   gap: 12px;
@@ -4050,6 +4077,15 @@ a.v6-evidence-link {
   .v6-sheet { max-height: calc(100dvh - 20px); overflow-y: auto; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
 
   .v6-actions.compact { grid-template-columns: minmax(0, 1fr); }
+
+  .v6-install-banner {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .v6-install-banner .v6-text-button {
+    grid-column: 2 / -1;
+    justify-self: end;
+  }
 
   .v6-chip-row.nowrap { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
 

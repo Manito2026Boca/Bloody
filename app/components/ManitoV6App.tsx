@@ -187,6 +187,13 @@ import {
   authoritativeRequestCoordinates,
   type RequestLocationAuthority,
 } from '../lib/requestLocation';
+import {
+  detectPwaInstallPlatform,
+  pwaInstallDismissed,
+  pwaInstallDismissUntil,
+  PWA_INSTALL_DISMISS_KEY,
+  type PwaInstallPlatform,
+} from '../lib/pwaInstall';
 
 type Tab = ManitoTab;
 type AuthMode = 'login' | 'signup' | 'reset';
@@ -1489,6 +1496,9 @@ export default function ManitoV6App() {
   const [chatOrder, setChatOrder] = useState<V6Order | null>(null);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [installPlatform, setInstallPlatform] = useState<PwaInstallPlatform>('desktop');
+  const [installDismissed, setInstallDismissed] = useState(true);
+  const [iosInstallGuideOpen, setIosInstallGuideOpen] = useState(false);
   const [savingPhoneLocation, setSavingPhoneLocation] = useState(false);
   const [locationEditorOpen, setLocationEditorOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<V6Order | null>(null);
@@ -1503,6 +1513,8 @@ export default function ManitoV6App() {
     setConfigured(ready);
     if (!ready) setLoading(false);
     setIsStandalone(isInstalledDisplayMode());
+    setInstallPlatform(detectPwaInstallPlatform(window.navigator.userAgent, window.navigator.maxTouchPoints));
+    setInstallDismissed(pwaInstallDismissed(window.localStorage.getItem(PWA_INSTALL_DISMISS_KEY)));
   }, []);
 
   const loadData = useCallback(async (user: Session['user']) => {
@@ -1794,12 +1806,33 @@ export default function ManitoV6App() {
       const choice = await installPrompt.userChoice;
       if (choice.outcome === 'accepted') {
         setNotice('MANITO instalado.');
+      } else if (choice.outcome === 'dismissed') {
+        window.localStorage.setItem(PWA_INSTALL_DISMISS_KEY, pwaInstallDismissUntil());
+        setInstallDismissed(true);
       }
       setInstallPrompt(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo instalar.');
     }
   }, [installPrompt]);
+
+  const dismissInstallOffer = useCallback(() => {
+    window.localStorage.setItem(PWA_INSTALL_DISMISS_KEY, pwaInstallDismissUntil());
+    setInstallDismissed(true);
+    setIosInstallGuideOpen(false);
+  }, []);
+
+  const openInstallExperience = useCallback(() => {
+    if (installPlatform === 'ios') {
+      setIosInstallGuideOpen(true);
+      return;
+    }
+    void installApp();
+  }, [installApp, installPlatform]);
+
+  const canOfferInstall = !isStandalone && !installDismissed && (
+    Boolean(installPrompt) || installPlatform === 'ios'
+  );
 
   const clientOrders = useMemo(
     () => orders.filter((order) => order.client_id === profile?.id),
@@ -2005,6 +2038,10 @@ export default function ManitoV6App() {
           </button>
         )}
 
+        {tab === 'home' && canOfferInstall && (
+          <PwaInstallBanner onInstall={openInstallExperience} onDismiss={dismissInstallOffer} />
+        )}
+
         {tab === 'home' &&
           (appMode === 'professional' ? (
             <ProfessionalHome
@@ -2132,8 +2169,8 @@ export default function ManitoV6App() {
             profile={profile}
             experience={appMode}
             clientOrders={clientOrders}
-            canInstall={Boolean(installPrompt) && !isStandalone}
-            onInstall={installApp}
+            canInstall={canOfferInstall}
+            onInstall={openInstallExperience}
             onUsePhoneLocation={handlePhoneLocation}
             onNavigate={setTab}
             onProfileChange={setProfile}
@@ -2181,6 +2218,7 @@ export default function ManitoV6App() {
           setError={setError}
         />
       )}
+      {iosInstallGuideOpen && <IosInstallGuide onClose={dismissInstallOffer} />}
     </main>
   );
 }
@@ -2427,6 +2465,36 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         </form>
       </section>
     </main>
+  );
+}
+
+function PwaInstallBanner({ onInstall, onDismiss }: { onInstall: () => void; onDismiss: () => void }) {
+  return (
+    <aside className="v6-install-banner" aria-label="Instalar MANITO">
+      <Download size={19} aria-hidden="true" />
+      <span><strong>Instalá MANITO</strong><small>Accedé más rápido desde tu teléfono.</small></span>
+      <button className="v6-primary" type="button" onClick={onInstall}>Instalar</button>
+      <button className="v6-text-button" type="button" onClick={onDismiss}>Ahora no</button>
+    </aside>
+  );
+}
+
+function IosInstallGuide({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="v6-modal" role="dialog" aria-modal="true" aria-label="Instalar MANITO en iPhone">
+      <section className="v6-sheet v6-install-guide">
+        <div className="v6-section-head">
+          <div><h2>Instalá MANITO en tu iPhone</h2><span>Safari permite agregarla como una app.</span></div>
+          <button className="v6-icon-button" type="button" onClick={onClose} aria-label="Cerrar">×</button>
+        </div>
+        <ol>
+          <li>Tocá <strong>Compartir</strong> en Safari.</li>
+          <li>Elegí <strong>Añadir a pantalla de inicio</strong>.</li>
+          <li>Confirmá con <strong>Añadir</strong>.</li>
+        </ol>
+        <button className="v6-primary" type="button" onClick={onClose}>Entendido</button>
+      </section>
+    </div>
   );
 }
 
