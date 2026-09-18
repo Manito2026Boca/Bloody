@@ -18,7 +18,8 @@ export type ManitoTab =
   | 'account'
   | 'profile'
   | 'favorites'
-  | 'search';
+  | 'search'
+  | 'notifications';
 
 export type ManitoExperience = 'client' | 'professional';
 

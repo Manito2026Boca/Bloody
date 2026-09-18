@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { MatchingLocation, ProfessionalCoverage, CompleteMatchingLocation } from './MatchingLocation';
 import { ProtectionAdminCase, ProtectionPanel } from './ProtectionManito';
 import { RecurringServicesPanel, RecurringAdminPanel } from './RecurringServicesPanel';
+import { NotificationHistory, NotificationQuickPanel } from './NotificationCenter';
 import {
   ExperienceSwitch,
   ManitoBottomNavigation,
@@ -95,6 +96,7 @@ import {
   listV6ProfessionalSpecialties,
   listV6Services,
   listV6Specialties,
+  markV6NotificationRead,
   markV6NotificationsRead,
   removeV6MediaFiles,
   removeV6Channel,
@@ -1485,6 +1487,9 @@ export default function ManitoV6App() {
   const [publicProfessionals, setPublicProfessionals] = useState<V6PublicProfessional[]>([]);
   const [orders, setOrders] = useState<V6Order[]>([]);
   const [notifications, setNotifications] = useState<V6Notification[]>([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [notificationRefreshKey, setNotificationRefreshKey] = useState(0);
+  const [notificationBusy, setNotificationBusy] = useState(false);
   const [clientAddresses, setClientAddresses] = useState<V6ClientAddress[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('home');
@@ -1541,7 +1546,7 @@ export default function ManitoV6App() {
         listV6Services(),
         listV6Specialties(),
         listV6Orders(),
-        listV6Notifications(userId),
+        listV6Notifications(),
         listV6ProfessionalServices(userId),
         listV6ProfessionalSpecialties(userId),
         listV6PublicProfessionals(),
@@ -1553,7 +1558,10 @@ export default function ManitoV6App() {
       if (nextServices.status === 'fulfilled') setServices(nextServices.value);
       if (nextSpecialties.status === 'fulfilled') setSpecialties(nextSpecialties.value);
       if (nextOrders.status === 'fulfilled') setOrders(nextOrders.value);
-      if (nextNotifications.status === 'fulfilled') setNotifications(nextNotifications.value);
+      if (nextNotifications.status === 'fulfilled') {
+        setNotifications(nextNotifications.value.items);
+        setUnreadNotificationCount(nextNotifications.value.unreadCount);
+      }
       if (nextProServices.status === 'fulfilled') setProServices(nextProServices.value);
       if (nextProSpecialties.status === 'fulfilled') setProSpecialties(nextProSpecialties.value);
       if (nextPublicProfessionals.status === 'fulfilled') {
@@ -1595,6 +1603,7 @@ export default function ManitoV6App() {
     setIsAdmin(false);
     setOrders([]);
     setNotifications([]);
+    setUnreadNotificationCount(0);
     setProServices([]);
     setProSpecialties([]);
     setPublicProfessionals([]);
@@ -1657,6 +1666,7 @@ export default function ManitoV6App() {
           setProfile(null);
           setOrders([]);
           setNotifications([]);
+          setUnreadNotificationCount(0);
           setClientAddresses([]);
           setProServices([]);
           setProSpecialties([]);
@@ -1687,6 +1697,7 @@ export default function ManitoV6App() {
           setIsAdmin(false);
           setOrders([]);
           setNotifications([]);
+          setUnreadNotificationCount(0);
           setProServices([]);
           setProSpecialties([]);
           setPublicProfessionals([]);
@@ -1709,11 +1720,15 @@ export default function ManitoV6App() {
       refreshing = true;
       try {
         const [nextOrders, nextNotifications] = await Promise.allSettled([
-          listV6Orders(), listV6Notifications(profile.id),
+          listV6Orders(), listV6Notifications(),
         ]);
         if (!alive) return;
         if (nextOrders.status === 'fulfilled') setOrders(nextOrders.value);
-        if (nextNotifications.status === 'fulfilled') setNotifications(nextNotifications.value);
+        if (nextNotifications.status === 'fulfilled') {
+          setNotifications(nextNotifications.value.items);
+          setUnreadNotificationCount(nextNotifications.value.unreadCount);
+          setNotificationRefreshKey((value) => value + 1);
+        }
         if (nextOrders.status === 'rejected' || nextNotifications.status === 'rejected') {
           setNotice('No pudimos actualizar todos los datos. Revisá tu conexión.');
         }
@@ -1863,22 +1878,58 @@ export default function ManitoV6App() {
     for (const order of [...professionalOrders, ...pendingDirectRequests]) merged.set(order.id, order);
     return [...merged.values()];
   }, [pendingDirectRequests, professionalOrders]);
-  const unreadNotifications = useMemo(
-    () => notifications.filter((item) => !item.read_at).length,
-    [notifications],
-  );
+  async function refreshNotificationCenter() {
+    const next = await listV6Notifications();
+    setNotifications(next.items);
+    setUnreadNotificationCount(next.unreadCount);
+    setNotificationRefreshKey((value) => value + 1);
+  }
 
-  async function toggleNotifications() {
-    const nextOpen = !notificationsOpen;
-    setNotificationsOpen(nextOpen);
-    if (nextOpen && profile && unreadNotifications > 0) {
-      try {
-        await markV6NotificationsRead(profile.id);
-        setNotifications(await listV6Notifications(profile.id));
-      } catch {
-        // Notifications should never block the main app flow.
-      }
+  function toggleNotifications() {
+    setNotificationsOpen((open) => !open);
+  }
+
+  async function markAllNotificationsRead() {
+    if (!unreadNotificationCount || notificationBusy) return;
+    const readAt = new Date().toISOString();
+    setNotificationBusy(true);
+    setNotifications((current) => current.map((item) => ({ ...item, read_at: item.read_at || readAt })));
+    setUnreadNotificationCount(0);
+    try {
+      await markV6NotificationsRead();
+      setNotificationRefreshKey((value) => value + 1);
+    } catch {
+      await refreshNotificationCenter();
+      setError('No pudimos marcar las notificaciones como leídas.');
+    } finally {
+      setNotificationBusy(false);
     }
+  }
+
+  async function openNotification(item: V6Notification) {
+    if (!item.read_at) {
+      const readAt = new Date().toISOString();
+      setNotifications((current) => current.map((entry) => entry.id === item.id ? { ...entry, read_at: readAt } : entry));
+      setUnreadNotificationCount((count) => Math.max(0, count - 1));
+      void markV6NotificationRead(item.id).catch(() => { void refreshNotificationCenter(); });
+    }
+
+    setNotificationsOpen(false);
+    if (!item.order_id) return;
+    const order = orders.find((entry) => entry.id === item.order_id);
+    if (!order) {
+      setNotice('Este aviso ya no tiene un trabajo disponible.');
+      return;
+    }
+    const professionalDestination = order.professional_id === profile?.id
+      || order.manual_requested_professional_id === profile?.id;
+    setAppMode(professionalDestination ? 'professional' : 'client');
+    if (item.action_key === 'open_chat') {
+      setChatOrder(order);
+      return;
+    }
+    setFocusedOrderId(order.id);
+    setTab('orders');
   }
 
   async function refreshProfile() {
@@ -2008,23 +2059,21 @@ export default function ManitoV6App() {
             onClick={toggleNotifications}
           >
             <Bell size={19} aria-hidden="true" />
-            {unreadNotifications > 0 && <span>{unreadNotifications}</span>}
+            {unreadNotificationCount > 0 && <span>{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}
           </button>
         </div>
       </header>
 
       <div className="v6-content">
         {notificationsOpen && (
-          <NotificationPanel
+          <NotificationQuickPanel
             notifications={notifications}
+            unreadCount={unreadNotificationCount}
+            busy={notificationBusy}
             onClose={() => setNotificationsOpen(false)}
-            onOpenOrder={(orderId) => {
-              const order = orders.find((item) => item.id === orderId);
-              if (order?.manual_requested_professional_id === profile.id && !order.professional_id) setAppMode('professional');
-              setFocusedOrderId(orderId);
-              setTab('orders');
-              setNotificationsOpen(false);
-            }}
+            onOpen={(item) => { void openNotification(item); }}
+            onMarkAllRead={() => { void markAllNotificationsRead(); }}
+            onViewAll={() => { setNotificationsOpen(false); setTab('notifications'); }}
           />
         )}
         {notice && (
@@ -2114,6 +2163,15 @@ export default function ManitoV6App() {
               setClientProblemQuery(service ? serviceDisplayName(service) : '');
               setTab('home');
             }}
+          />
+        )}
+
+        {tab === 'notifications' && (
+          <NotificationHistory
+            refreshKey={notificationRefreshKey}
+            onBack={() => setTab('home')}
+            onOpen={(item) => { void openNotification(item); }}
+            onChanged={() => { void refreshNotificationCenter(); }}
           />
         )}
 
@@ -5558,6 +5616,7 @@ function OrderCard({
         {profile.role === 'professional' && canProfessionalAdvanceOrder(order, profile.id) && (
           <button className="v6-primary" type="button" onClick={advance}>{nextAction.label}</button>
         )}
+
         {profile.role === 'professional' && pinEntryOpen && (nextAction.kind === 'start_with_pin' || nextAction.kind === 'complete_with_pin') && (
           <form className="v6-pin-entry" onSubmit={(event) => { event.preventDefault(); void advance(); }}>
             <label className="v6-field">
@@ -8112,47 +8171,6 @@ function HeaderLocationSheet({
         </form>
       </section>
     </div>
-  );
-}
-
-function NotificationPanel({
-  notifications,
-  onClose,
-  onOpenOrder,
-}: {
-  notifications: V6Notification[];
-  onClose: () => void;
-  onOpenOrder: (orderId: string) => void;
-}) {
-  return (
-    <section className="v6-notification-panel">
-      <div className="v6-section-head compact">
-        <div>
-          <h2>Notificaciones</h2>
-          <span>{notifications.length ? `${notifications.length} recientes` : 'sin avisos'}</span>
-        </div>
-        <button className="v6-icon-button" type="button" onClick={onClose} aria-label="Cerrar notificaciones">
-          ×
-        </button>
-      </div>
-      <div className="v6-notification-list">
-        {notifications.map((item) => (
-          <button
-            className={item.read_at ? 'read' : ''}
-            type="button"
-            key={item.id}
-            onClick={() => item.order_id && onOpenOrder(item.order_id)}
-          >
-            <strong>{item.title}</strong>
-            {item.body && <span>{item.body}</span>}
-            <small>{shortDate(item.created_at)}</small>
-          </button>
-        ))}
-        {!notifications.length && (
-          <Empty title="Todo tranquilo" body="Acá van a aparecer presupuestos, chats, pagos y cambios de estado." />
-        )}
-      </div>
-    </section>
   );
 }
 

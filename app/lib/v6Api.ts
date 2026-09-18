@@ -15,6 +15,7 @@ import type {
   V6Message,
   V6Mode,
   V6Notification,
+  V6NotificationPage,
   V6Order,
   V6OrderExtra,
   V6OrderPhoto,
@@ -1119,26 +1120,61 @@ export async function listV6Messages(orderId: string) {
   return (data || []) as V6Message[];
 }
 
-export async function listV6Notifications(userId: string) {
-  const { data, error } = await getV6Supabase()
-    .from('notifications')
-    .select('*')
-    .eq('recipient_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(30);
-  if (isMissingV5Table(error)) return [];
-  fail(error);
-  return (data || []) as V6Notification[];
+function notificationPage(value: unknown): V6NotificationPage {
+  const page = (value || {}) as {
+    items?: V6Notification[];
+    total?: number;
+    unread_count?: number;
+  };
+  return {
+    items: Array.isArray(page.items) ? page.items : [],
+    total: Number(page.total || 0),
+    unreadCount: Number(page.unread_count || 0),
+  };
 }
 
-export async function markV6NotificationsRead(userId: string) {
-  const { error } = await getV6Supabase()
-    .from('notifications')
-    .update({ read_at: new Date().toISOString() })
-    .eq('recipient_id', userId)
-    .is('read_at', null);
-  if (isMissingV5Table(error)) return;
+export async function listV6Notifications(limit = 8) {
+  const { data, error } = await getV6Supabase().rpc('list_notifications', {
+    p_view: 'center',
+    p_limit: limit,
+    p_offset: 0,
+  });
+  if (isMissingV5Table(error)) return { items: [], total: 0, unreadCount: 0 };
   fail(error);
+  return notificationPage(data);
+}
+
+export async function listV6NotificationHistory(offset = 0, limit = 20) {
+  const { data, error } = await getV6Supabase().rpc('list_notifications', {
+    p_view: 'history',
+    p_limit: limit,
+    p_offset: offset,
+  });
+  if (isMissingV5Table(error)) return { items: [], total: 0, unreadCount: 0 };
+  fail(error);
+  return notificationPage(data);
+}
+
+export async function markV6NotificationRead(notificationId: string) {
+  const { data, error } = await getV6Supabase().rpc('mark_notification_read', {
+    p_notification_id: notificationId,
+  });
+  fail(error);
+  return data as string;
+}
+
+export async function markV6NotificationsRead() {
+  const { data, error } = await getV6Supabase().rpc('mark_all_notifications_read');
+  fail(error);
+  return Number(data || 0);
+}
+
+export async function archiveV6Notification(notificationId: string) {
+  const { data, error } = await getV6Supabase().rpc('archive_notification', {
+    p_notification_id: notificationId,
+  });
+  fail(error);
+  return data as string;
 }
 
 export async function sendV6Message(orderId: string, senderId: string, body: string) {

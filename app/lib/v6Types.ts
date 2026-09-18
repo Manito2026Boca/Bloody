@@ -588,11 +588,32 @@ export type V6Notification = {
     | 'extra_requested'
     | 'message_received'
     | 'payment_status'
-    | 'appointment';
+    | 'appointment'
+    | 'manual_request'
+    | 'manual_request_expired'
+    | 'manual_request_rejected'
+    | 'manual_request_auto'
+    | 'complaint_opened'
+    | 'complaint_awaiting_professional'
+    | 'complaint_response'
+    | 'complaint_resolved';
   title: string;
   body: string;
   read_at: string | null;
+  archived_at: string | null;
+  action_key: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  metadata: Record<string, unknown>;
+  dedupe_key: string | null;
+  action_pending: boolean;
   created_at: string;
+};
+
+export type V6NotificationPage = {
+  items: V6Notification[];
+  total: number;
+  unreadCount: number;
 };
 
 export const V6_STATUS_LABEL: Record<V6OrderStatus, string> = {

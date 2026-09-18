@@ -55,9 +55,11 @@ describe('UX-001R final refinement', () => {
   });
 
   it('makes direct-request notifications navigate to the owning work item', () => {
-    expect(app).toContain('setFocusedOrderId(orderId)');
+    expect(app).toContain('async function openNotification(item: V6Notification)');
+    expect(app).toContain("order.manual_requested_professional_id === profile?.id");
+    expect(app).toContain('setFocusedOrderId(order.id)');
     expect(app).toContain('data-order-id={order.id}');
-    expect(app).toContain("setAppMode('professional')");
+    expect(app).toContain("setAppMode(professionalDestination ? 'professional' : 'client')");
   });
 
   it('clears identity-bound state and realtime channels when the account changes', () => {
