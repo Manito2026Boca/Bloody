@@ -2,6 +2,7 @@
 
 import type { Session } from '@supabase/supabase-js';
 import Image from 'next/image';
+import { AgreementSummary } from './AgreementSummary';
 import { MatchingLocation, ProfessionalCoverage, CompleteMatchingLocation } from './MatchingLocation';
 import { ProtectionAdminCase, ProtectionPanel } from './ProtectionManito';
 import { RecurringServicesPanel, RecurringAdminPanel } from './RecurringServicesPanel';
@@ -523,6 +524,10 @@ function money(value: number | null | undefined) {
   }).format(value);
 }
 
+function estimatedMoney(value: number | null | undefined) {
+  return value != null && value > 0 ? money(value) : 'A definir';
+}
+
 function shortDate(value: string) {
   return new Intl.DateTimeFormat('es-AR', {
     day: '2-digit',
@@ -560,6 +565,10 @@ function proposalStatusLabel(proposal: V6OrderProposal) {
   return 'Vigente';
 }
 
+function proposalStatusClass(proposal: V6OrderProposal) {
+  return proposalIsExpiredByClock(proposal) ? 'expired' : proposal.status;
+}
+
 function proposalAvailabilityText(proposal: V6OrderProposal) {
   if (proposal.available_from) return `Desde ${shortDate(proposal.available_from)}`;
   return proposal.availability_label || 'A coordinar';
@@ -569,6 +578,16 @@ function proposalMaterialsText(proposal: V6OrderProposal) {
   if (Number(proposal.materials_price) > 0) return `Materiales incluidos · ${money(proposal.materials_price)}`;
   if (normalizeText(proposal.observation || '').includes('no incluye materiales')) return 'Materiales no incluidos';
   return 'Materiales sin especificar';
+}
+
+function proposalComponentText(value: number | null | undefined) {
+  return value != null && value > 0 ? money(value) : 'Sin importe indicado';
+}
+
+function extraStatusLabel(status: V6OrderExtra['status']) {
+  if (status === 'approved') return 'Aprobado';
+  if (status === 'rejected') return 'Rechazado';
+  return 'Pendiente de decisión';
 }
 
 function cityFromLocationLabel(value?: string | null) {
@@ -3624,7 +3643,7 @@ function ClientHome({
                 <div><dt>Modalidad</dt><dd>{modeOption?.title}</dd></div>
                 {mode === 'scheduled' && <div><dt>Horario solicitado</dt><dd>{shortDateTime(new Date(scheduledAt).toISOString())}</dd></div>}
                 {mode !== 'quote' && <div><dt>Asignación</dt><dd>{effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate ? publicProfessionalName(selectedProfessionalCandidate.professional) : 'Búsqueda automática'}</dd></div>}
-                <div><dt>{mode === 'quote' ? 'Precio' : 'Estimación'}</dt><dd>{mode === 'quote' ? 'A definir en las propuestas' : `${money(estimatedPrice)} · importe orientativo`}</dd></div>
+                <div><dt>{mode === 'quote' ? 'Precio' : 'Estimación'}</dt><dd>{mode === 'quote' ? 'A definir en las propuestas' : `${estimatedMoney(estimatedPrice)} · todavía no es un precio acordado`}</dd></div>
               </dl>
               <div className="v6-next-step"><strong>Qué pasa después</strong><p>{expectedNextStep}</p></div>
             </section>
@@ -4126,11 +4145,11 @@ function ClientHome({
               <span>
                 <ShieldCheck size={17} aria-hidden="true" /> Protección MANITO incluida
               </span>
-              <strong>{mode === 'quote' ? 'A cotizar' : money(estimatedPrice)}</strong>
+              <strong>{mode === 'quote' ? 'A cotizar' : estimatedMoney(estimatedPrice)}</strong>
               <small>
                 {mode === 'quote'
                   ? 'Publicás sin elegir profesional. Comparás propuestas antes de contratar.'
-                  : `ETA ${etaText} - ${paymentLabel(paymentMethod)} - todo queda registrado en la app`}
+                  : `Estimación orientativa · ETA ${etaText} · ${paymentLabel(paymentMethod)}. El precio acordado se confirma al contratar.`}
               </small>
             </div>
             <button className="v6-primary" type="submit" disabled={creatingOrder}>
@@ -4656,12 +4675,12 @@ function ProfessionalHome({
                   <p>{specialties.find((item) => item.id === order.required_specialty_id)?.name || 'Especialidad general'}</p>
                   <small>{V6_MODE_LABEL[order.mode]} · {cityFromLocationLabel(order.address)}{distanceKm != null ? ` · ${distanceKm.toFixed(1)} km` : ''}</small>
                 </div>
-                <b>{money(orderEstimatedAmount(order))}</b>
+                <span className="v6-price-label"><small>ESTIMACIÓN</small><b>{estimatedMoney(orderEstimatedAmount(order))}</b></span>
               </div>
               <div className="v6-direct-request-detail">
                 <p>{order.description}</p>
                 <span>{order.scheduled_at ? shortDateTime(order.scheduled_at) : 'Lo antes posible'}</span>
-                <span>Importe estimado: {money(orderEstimatedAmount(order))}</span>
+                <span>Importe estimado: {estimatedMoney(orderEstimatedAmount(order))} · todavía no es un acuerdo</span>
                 {order.manual_response_deadline_at && <span>Respondé antes de {shortDateTime(order.manual_response_deadline_at)}</span>}
               </div>
               <div className="v6-actions compact">
@@ -4779,7 +4798,7 @@ function ProfessionalHome({
                       <MapPin size={13} aria-hidden="true" /> {match.order.address}
                     </small>
                   </div>
-                  <b>{money(orderEstimatedAmount(match.order))}</b>
+                  <span className="v6-price-label"><small>ESTIMACIÓN</small><b>{estimatedMoney(orderEstimatedAmount(match.order))}</b></span>
                 </div>
                 <MatchSummary match={match} />
                 <div className="v6-actions compact">
@@ -5532,6 +5551,13 @@ function OrderCard({
     ['accepted', 'en_camino', 'en_sitio'].includes(order.status);
   const canCancelOrder = canClientCancel || canProfessionalCancel;
   const approvedExtras = extras.filter((extra) => extra.status === 'approved');
+  const acceptedProposal = proposals.find((proposal) =>
+    proposal.id === order.accepted_proposal_id || proposal.status === 'accepted') || null;
+  const hasConfirmedAgreement =
+    order.agreed_price != null || Boolean(order.contracted_at) || Boolean(order.contract_snapshot);
+  const headlineAmount = hasConfirmedAgreement
+    ? money(order.agreed_price ?? order.price)
+    : estimatedMoney(orderEstimatedAmount(order));
   const beforePhotos = photos.filter((photo) => photo.stage === 'before').length;
   const afterPhotos = photos.filter((photo) => photo.stage === 'after').length;
   const photosByStage = {
@@ -5605,7 +5631,10 @@ function OrderCard({
             )
           )}
         </div>
-        <b>{money(orderDisplayAmount(order))}</b>
+        <span className="v6-price-label">
+          <small>{hasConfirmedAgreement ? 'ACORDADO' : 'ESTIMACIÓN'}</small>
+          <b>{headlineAmount}</b>
+        </span>
       </div>
       <div className="v6-order-guidance">
         <span>Próximo paso</span>
@@ -5651,6 +5680,7 @@ function OrderCard({
           </div>
         </section>
       )}
+      <AgreementSummary order={order} extras={extras} acceptedProposal={acceptedProposal} />
       <details className="v6-inline-details v6-status-details">
         <summary>Ver recorrido del trabajo</summary>
         <StatusSteps status={order.status} />
@@ -5718,7 +5748,7 @@ function OrderCard({
         </section>
       )}
       <details className="v6-inline-details v6-commercial-details">
-        <summary>Acuerdo, pago y Protección MANITO</summary>
+        <summary>Pago y Protección MANITO</summary>
       <section className="v6-payment-box">
         <div>
           <strong>
@@ -5930,25 +5960,25 @@ function OrderCard({
                     {proposal.professional?.verified ? ' · verificado' : ''}
                   </span>
                 </div>
-                <b className={`v6-proposal-status ${proposal.status}`}>{proposalStatusLabel(proposal)}</b>
+                <b className={`v6-proposal-status ${proposalStatusClass(proposal)}`}>{proposalStatusLabel(proposal)}</b>
               </div>
               <div className="v6-quote-scope">
                 <span>Alcance</span>
-                <p>{proposal.observation || 'Sin aclaraciones adicionales sobre el alcance.'}</p>
+                <p>{proposal.observation || order.description || 'Alcance sin detallar.'}</p>
               </div>
-              <div className="v6-quote-components">
-                <span>Mano de obra {money(proposal.labor_price)}</span>
-                <span>{proposalMaterialsText(proposal)}</span>
-                <span>Visita {money(proposal.visit_price)}</span>
-                <span>{proposal.manito_fee > 0 ? `Otros conceptos ${money(proposal.manito_fee)}` : 'Otros conceptos sin especificar'}</span>
-              </div>
-              <div className="v6-quote-total-row"><span>Total propuesto</span><strong className="v6-quote-total">{money(proposalTotal(proposal))}</strong></div>
-              <p>Disponibilidad: {proposalAvailabilityText(proposal)}</p>
-              <p>Duración: {proposal.estimated_minutes ? `${proposal.estimated_minutes} min` : 'Sin especificar'}</p>
-              <p>Válida hasta: {shortDateTime(proposal.valid_until)}</p>
+              <dl className="v6-quote-compare">
+                <div><dt>Mano de obra</dt><dd>{proposalComponentText(proposal.labor_price)}</dd></div>
+                <div><dt>Materiales</dt><dd>{proposalMaterialsText(proposal)}</dd></div>
+                <div><dt>Visita</dt><dd>{proposalComponentText(proposal.visit_price)}</dd></div>
+                <div><dt>Otros conceptos</dt><dd>{proposal.manito_fee > 0 ? money(proposal.manito_fee) : 'Sin conceptos informados'}</dd></div>
+                <div><dt>Disponibilidad</dt><dd>{proposalAvailabilityText(proposal)}</dd></div>
+                <div><dt>Duración</dt><dd>{proposal.estimated_minutes ? `${proposal.estimated_minutes} min` : 'Sin especificar'}</dd></div>
+                <div className="wide"><dt>Válida hasta</dt><dd>{proposal.valid_until ? shortDateTime(proposal.valid_until) : 'Sin vigencia informada'}</dd></div>
+              </dl>
+              <div className="v6-quote-total-row"><span>Total propuesto</span><strong className="v6-quote-total">{proposalTotal(proposal) > 0 ? money(proposalTotal(proposal)) : 'Importe no informado'}</strong></div>
               {profile.role === 'client' && isOpenOpportunityStatus(order.status) && proposal.status === 'sent' && !proposalIsExpiredByClock(proposal) && (
                 <button className="v6-primary" type="button" onClick={() => acceptProposal(proposal.id)}>
-                  Aceptar presupuesto
+                  Aceptar este presupuesto
                 </button>
               )}
             </article>
@@ -5989,20 +6019,23 @@ function OrderCard({
         </form>
       )}
       {extras.length > 0 && (
-        <div className="v6-quote-list">
+        <section className="v6-agreement-changes">
+          <div className="v6-section-head compact"><h2>Cambios solicitados</h2><span>El precio acordado original no cambia</span></div>
+          <div className="v6-quote-list">
           {extras.map((extra) => (
             <article className="v6-quote-card" key={extra.id}>
               <strong>{extra.title}</strong>
-              <span>{money(extra.amount)} - {extra.status}</span>
+              <span>{money(extra.amount)} · {extraStatusLabel(extra.status)}</span>
               {profile.role === 'client' && extra.status === 'pending' && (
                 <div className="v6-actions">
-                  <button className="v6-primary" type="button" onClick={() => decideExtra(extra.id, 'approved')}>Aprobar</button>
+                  <button className="v6-primary" type="button" onClick={() => decideExtra(extra.id, 'approved')}>Aprobar modificación</button>
                   <button className="v6-danger" type="button" onClick={() => decideExtra(extra.id, 'rejected')}>Rechazar</button>
                 </div>
               )}
             </article>
           ))}
-        </div>
+          </div>
+        </section>
       )}
       {profile.role === 'professional' && order.professional_id === profile.id && ['en_sitio', 'trabajando'].includes(order.status) && (
         <form className="v6-inline-form" onSubmit={createExtra}>

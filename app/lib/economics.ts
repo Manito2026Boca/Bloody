@@ -3,6 +3,33 @@ import type { V6Order, V6OrderExtra } from './v6Types';
 export const legacyOrderPriceNote =
   'orders.price is a legacy compatibility amount; use estimated_price for estimates and agreed_price for contracts.';
 
+export type OrderEconomicPresentation = {
+  kind: 'estimate' | 'agreement';
+  amount: number | null;
+};
+
+export function orderEconomicPresentation(
+  order: Pick<
+    V6Order,
+    'agreed_price' | 'estimated_price' | 'price' | 'service' | 'contracted_at' | 'contract_snapshot'
+  >,
+): OrderEconomicPresentation {
+  const hasAgreement =
+    order.agreed_price != null || Boolean(order.contracted_at) || Boolean(order.contract_snapshot);
+
+  if (hasAgreement) {
+    return {
+      kind: 'agreement',
+      amount: order.agreed_price ?? order.price ?? null,
+    };
+  }
+
+  return {
+    kind: 'estimate',
+    amount: order.estimated_price ?? order.price ?? order.service?.base_price ?? null,
+  };
+}
+
 export function orderEstimatedAmount(order: Pick<V6Order, 'estimated_price' | 'price' | 'service'>) {
   return order.estimated_price ?? order.price ?? order.service?.base_price ?? null;
 }
