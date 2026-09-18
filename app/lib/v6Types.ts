@@ -496,7 +496,45 @@ export type V6AdminReviewService = {
 export type V6AdminReviewDocument = Pick<
   V6ProfessionalDocument,
   'id' | 'kind' | 'label' | 'status' | 'file_path' | 'observation' | 'created_at' | 'updated_at'
->;
+> & {
+  file_accessible?: boolean;
+  format_allowed?: boolean;
+};
+
+export type V6AdminVerificationRequirement = {
+  kind: string;
+  label: string;
+  category: 'identity' | 'professional';
+};
+
+export type V6AdminVerificationEvent = {
+  id: number;
+  document_id: string | null;
+  event_type: 'onboarding_status' | 'document_status';
+  from_status: string | null;
+  to_status: string;
+  note: string | null;
+  created_at: string;
+};
+
+export type V6AdminProfessionalReviewSummary = {
+  professional_id: string;
+  full_name: string;
+  email: string | null;
+  city: string | null;
+  onboarding_status: V6ProfessionalOnboarding['status'];
+  identity_status: 'verified' | 'requires_review' | 'requires_correction' | 'incomplete';
+  professional_verification_status: 'verified' | 'requires_review' | 'requires_correction' | 'incomplete';
+  queue_state: 'ready' | 'incomplete' | 'correction' | 'approved' | 'rejected';
+  primary_service_name: string | null;
+  service_names: string[];
+  documents_present: number;
+  documents_required: number;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  onboarding_updated_at: string;
+  total_count: number;
+};
 
 export type V6AdminProfessionalReview = {
   professional_id: string;
@@ -526,6 +564,8 @@ export type V6AdminProfessionalReview = {
   jobs_completed: number;
   services: V6AdminReviewService[];
   documents: V6AdminReviewDocument[];
+  requirements?: V6AdminVerificationRequirement[];
+  history?: V6AdminVerificationEvent[];
 };
 
 export type V6Message = {

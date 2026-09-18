@@ -30,6 +30,6 @@ describe('ADMIN-001', () => {
     expect(app).toContain('isAdmin={isAdmin}');
     expect(app).toContain('href="/admin"');
     expect(adminPage).toContain('if (!authorized)');
-    expect(adminPage).toContain('listV6AdminProfessionalReviews()');
+    expect(adminPage).toContain('<AdminVerificationInbox setNotice={setNotice} />');
   });
 });

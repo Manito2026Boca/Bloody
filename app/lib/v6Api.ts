@@ -6,6 +6,7 @@ import { requireSuccessfulPinAttempt } from './v6PinAttempt';
 import type {
   V6AdminComplaintReview,
   V6AdminProfessionalReview,
+  V6AdminProfessionalReviewSummary,
   V6AdminReviewStatus,
   V6AdminSetting,
   V6AssignmentMode,
@@ -1388,6 +1389,36 @@ export async function listV6AdminProfessionalReviews() {
   if (isMissingV5Table(error)) return [];
   fail(error);
   return (data || []) as V6AdminProfessionalReview[];
+}
+
+export async function listV6AdminProfessionalReviewQueue(input: {
+  scope: 'active' | 'resolved';
+  queueState?: 'all' | 'ready' | 'incomplete' | 'correction' | 'approved' | 'rejected';
+  serviceId?: number | null;
+  search?: string;
+  sort?: 'oldest' | 'newest' | 'complete';
+  limit?: number;
+  offset?: number;
+}) {
+  const { data, error } = await getV6Supabase().rpc('list_admin_professional_review_queue', {
+    p_scope: input.scope,
+    p_queue_state: input.queueState || 'all',
+    p_service_id: input.serviceId ?? null,
+    p_search: input.search?.trim() || null,
+    p_sort: input.sort || 'oldest',
+    p_limit: input.limit || 20,
+    p_offset: input.offset || 0,
+  });
+  fail(error);
+  return (data || []) as V6AdminProfessionalReviewSummary[];
+}
+
+export async function getV6AdminProfessionalReview(professionalId: string) {
+  const { data, error } = await getV6Supabase().rpc('get_admin_professional_review', {
+    p_professional_id: professionalId,
+  });
+  fail(error);
+  return data as V6AdminProfessionalReview;
 }
 
 export async function reviewV6ProfessionalOnboarding(input: {
