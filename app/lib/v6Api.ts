@@ -341,11 +341,12 @@ export async function listV6PublicProfessionals() {
   const professionalIds = ((profiles || []) as V6PublicProfessional['profile'][]).map((profile) => profile.id);
   if (!professionalIds.length) return [];
 
-  const [professionalProfilesResult, servicesResult, specialtiesResult] = await Promise.all([
+  const [professionalProfilesResult, trustResult, servicesResult, specialtiesResult] = await Promise.all([
     supabase
       .from('professional_profiles')
       .select('*')
       .in('professional_id', professionalIds),
+    supabase.rpc('list_public_professional_trust'),
     supabase
       .from('professional_services')
       .select('*')
@@ -357,6 +358,7 @@ export async function listV6PublicProfessionals() {
   ]);
 
   if (isMissingV5Table(professionalProfilesResult.error)) return [];
+  if (trustResult.error && !isMissingV5Table(trustResult.error)) fail(trustResult.error);
   if (isMissingV5Table(servicesResult.error)) return [];
   if (isMissingV5Table(specialtiesResult.error)) return [];
   fail(professionalProfilesResult.error);
@@ -365,14 +367,22 @@ export async function listV6PublicProfessionals() {
 
   const publicProfiles = (profiles || []) as V6PublicProfessional['profile'][];
   const professionalProfiles = (professionalProfilesResult.data || []) as V6ProfessionalProfile[];
+  const trustRows = (trustResult.data || []) as Array<Pick<
+    V6ProfessionalProfile,
+    'professional_id' | 'trust_rating_avg' | 'trust_review_count' | 'trust_completed_jobs' |
+    'identity_reviewed' | 'professional_documents_reviewed'
+  >>;
   const professionalServices = (servicesResult.data || []) as V6ProfessionalService[];
   const professionalSpecialties = (specialtiesResult.data || []) as V6ProfessionalSpecialty[];
 
   return publicProfiles
     .map((profile) => ({
       profile,
-      professional_profile:
-        professionalProfiles.find((item) => item.professional_id === profile.id) || null,
+      professional_profile: (() => {
+        const professionalProfile = professionalProfiles.find((item) => item.professional_id === profile.id);
+        const trust = trustRows.find((item) => item.professional_id === profile.id);
+        return professionalProfile ? { ...professionalProfile, ...trust } : null;
+      })(),
       services: professionalServices.filter((item) => item.professional_id === profile.id),
       specialties: professionalSpecialties.filter((item) => item.professional_id === profile.id),
     }))
@@ -1240,14 +1250,19 @@ export async function sendV6Message(orderId: string, senderId: string, body: str
 }
 
 export async function getV6ProfessionalProfile(userId: string) {
-  const { data, error } = await getV6Supabase()
+  const supabase = getV6Supabase();
+  const [{ data, error }, trustResult] = await Promise.all([
+    supabase
     .from('professional_profiles')
     .select('*')
     .eq('professional_id', userId)
-    .maybeSingle();
+    .maybeSingle(),
+    supabase.rpc('get_professional_trust_signals', { p_professional_id: userId }),
+  ]);
   if (isMissingV5Table(error)) return null;
   fail(error);
-  return data as V6ProfessionalProfile | null;
+  if (trustResult.error && !isMissingV5Table(trustResult.error)) fail(trustResult.error);
+  return data ? { ...(data as V6ProfessionalProfile), ...((trustResult.data || {}) as Partial<V6ProfessionalProfile>) } : null;
 }
 
 export async function getV6ProfessionalPayoutDetails(userId: string) {

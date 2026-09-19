@@ -319,6 +319,11 @@ export type V6ProfessionalProfile = {
   manito_pro: boolean;
   rating_avg: number;
   jobs_completed: number;
+  trust_rating_avg?: number | null;
+  trust_review_count?: number;
+  trust_completed_jobs?: number;
+  identity_reviewed?: boolean;
+  professional_documents_reviewed?: boolean;
   response_minutes: number | null;
   insurance_label: string | null;
   work_city?: string | null;
@@ -392,6 +397,11 @@ export type V6OrderProposal = {
     jobs_completed?: number | null;
     verified?: boolean | null;
     manito_pro?: boolean | null;
+    trust_rating_avg?: number | null;
+    trust_review_count?: number | null;
+    trust_completed_jobs?: number | null;
+    identity_reviewed?: boolean | null;
+    professional_documents_reviewed?: boolean | null;
   } | null;
 };
 

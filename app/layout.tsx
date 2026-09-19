@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'MANITO',
     description:
-      'Tu ayuda de confianza para resolver servicios con profesionales verificados.',
+      'Tu ayuda de confianza para resolver servicios con profesionales de tu zona.',
     type: 'website',
     images: [{ url: '/brand/manito-reference-horizontal.png', width: 980, height: 280, alt: 'MANITO' }],
   },

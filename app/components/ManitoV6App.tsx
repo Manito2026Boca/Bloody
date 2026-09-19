@@ -7,6 +7,7 @@ import { MatchingLocation, ProfessionalCoverage, CompleteMatchingLocation } from
 import { ProtectionAdminCase, ProtectionPanel } from './ProtectionManito';
 import { RecurringServicesPanel, RecurringAdminPanel } from './RecurringServicesPanel';
 import { NotificationHistory, NotificationQuickPanel } from './NotificationCenter';
+import { ProfessionalTrustSignals } from './ProfessionalTrustSignals';
 import {
   ExperienceSwitch,
   ManitoBottomNavigation,
@@ -936,7 +937,6 @@ function professionalCandidatesForService({
       if (distance != null && distance > radius) return null;
       const reasons = [
         mode === 'immediate' ? 'Disponible ahora' : mode === 'scheduled' ? 'Agenda compatible' : 'Puede presupuestar',
-        professional.professional_profile?.verified ? 'Verificado' : 'Verificación pendiente',
       ];
 
       if (mode === 'scheduled' && scheduledAt) {
@@ -3608,10 +3608,9 @@ function ClientHome({
                           <span className="v6-pro-avatar">{publicProfessionalName(candidate.professional).slice(0, 1)}</span>
                           <span>
                             <strong>{publicProfessionalName(candidate.professional)}</strong>
-                            <small>{candidate.professional.professional_profile?.rating_avg || 4.8} estrellas · {candidate.professional.professional_profile?.jobs_completed || 0} trabajos</small>
+                            <ProfessionalTrustSignals data={candidate.professional.professional_profile} />
                             <small>{candidate.distanceKm != null ? `${candidate.distanceKm.toFixed(1)} km` : candidate.professional.professional_profile?.work_city || 'Zona a confirmar'}</small>
                           </span>
-                          {candidate.professional.professional_profile?.verified && <BadgeCheck size={18} aria-label="Identidad verificada" />}
                         </button>
                       ))}
                     </div>
@@ -3744,11 +3743,10 @@ function ClientHome({
               </p>
               <strong>{serviceDisplayName(recommendedService)}</strong>
               {recommendedProfessional ? (
-                <small>
-                  {publicProfessionalName(recommendedProfessional.professional)} - {' '}
-                  {recommendedProfessional.professional.professional_profile?.rating_avg || 4.8} estrellas - {' '}
-                  {recommendedProfessional.etaMinutes || recommendedProfessional.professional.professional_profile?.response_minutes || 35} min
-                </small>
+                <>
+                  <small>{publicProfessionalName(recommendedProfessional.professional)}</small>
+                  <ProfessionalTrustSignals data={recommendedProfessional.professional.professional_profile} />
+                </>
               ) : (
                 <small>Sin profesionales disponibles para elegir ahora. Podés publicarlo en automático.</small>
               )}
@@ -4045,18 +4043,15 @@ function ClientHome({
                     <span>
                       <strong>{publicProfessionalName(candidate.professional)}</strong>
                       <small>{publicProfessionalTrade(candidate.professional, services)}</small>
+                      <ProfessionalTrustSignals data={candidate.professional.professional_profile} />
                       <small>
-                        {candidate.professional.professional_profile?.rating_avg || 4.8} estrellas - {' '}
-                        {candidate.professional.professional_profile?.jobs_completed || 0} trabajos - {' '}
                         {candidate.distanceKm != null
                           ? `${candidate.distanceKm < 1 ? 'menos de 1' : candidate.distanceKm.toFixed(1)} km`
-                          : candidate.professional.professional_profile?.work_city || candidate.professional.profile.city || 'zona a confirmar'} - {' '}
-                        {candidate.etaMinutes || candidate.professional.professional_profile?.response_minutes || 35} min
+                          : candidate.professional.professional_profile?.work_city || candidate.professional.profile.city || 'zona a confirmar'}
                       </small>
                       <em>{candidate.reasons.join(' - ')}</em>
                     </span>
                     <span className="v6-badges">
-                      {candidate.professional.professional_profile?.verified && <BadgeCheck size={17} aria-label="Verificado" />}
                       {candidate.professional.professional_profile?.manito_pro && <b>PRO</b>}
                       <Heart size={17} aria-label="Favorito" />
                     </span>
@@ -4473,11 +4468,8 @@ function FavoritesPanel({
               </span>
               <span>
                 <strong>{publicProfessionalName(professional)}</strong>
-                <small>
-                  {professional.professional_profile?.rating_avg || 4.8} estrellas - {' '}
-                  {professional.professional_profile?.jobs_completed || 0} trabajos - {' '}
-                  {publicProfessionalTrade(professional, services)}
-                </small>
+                <small>{publicProfessionalTrade(professional, services)}</small>
+                <ProfessionalTrustSignals data={professional.professional_profile} />
                 <em>{specialtyNames.length ? specialtyNames.join(' - ') : 'Especialidades a confirmar'}</em>
               </span>
               <span className="v6-badges">
@@ -4516,7 +4508,7 @@ function serviceDescription(slug: string) {
   if (slug === 'mecanica_automotor') return 'Diagnóstico, frenos, batería, arranque, service y fallas generales.';
   if (slug === 'gomeria') return 'Pinchaduras, cubiertas, alineación, balanceo y auxilio de ruedas.';
   if (slug === 'chapa_pintura_auto') return 'Chapa, pintura, rayones, abolladuras y arreglos de carrocería.';
-  return 'Profesionales verificados para resolver tareas del hogar.';
+  return 'Profesionales disponibles para resolver tareas del hogar.';
 }
 
 function ProfessionalHome({
@@ -5098,6 +5090,9 @@ function OrderCard({
   const other = profile.role === 'client'
     ? order.professional || order.reserved_professional
     : order.client;
+  const otherProfessional = profile.role === 'client' && other
+    ? publicProfessionals.find((professional) => professional.profile.id === other.id) || null
+    : null;
   const nextAction = nextProfessionalOrderAction(order.status);
   const clientPin = visibleClientPin(order, profile.role);
   const [proposals, setProposals] = useState<V6OrderProposal[]>([]);
@@ -5680,6 +5675,7 @@ function OrderCard({
           <strong>{serviceDisplayName(order.service)}</strong>
           <p>{order.address} · {shortDate(order.created_at)}</p>
           {other && <small>{profile.role === 'client' ? 'Profesional' : 'Cliente'}: {other.full_name || 'Usuario'}</small>}
+          {otherProfessional && <ProfessionalTrustSignals data={otherProfessional.professional_profile} detailed />}
           <span className={`v6-status ${order.status}`}>{orderStatusText(order, proposals.length)}</span>
           {order.professional_id ? (
             <small className="v6-order-hint">
@@ -6060,11 +6056,7 @@ function OrderCard({
               <div className="v6-quote-head">
                 <div>
                   <strong>{proposal.professional?.full_name || 'Profesional MANITO'}</strong>
-                  <span>
-                    <Star size={13} aria-hidden="true" />
-                    {Number(proposal.professional?.rating_avg || 0).toFixed(1)} · {proposal.professional?.jobs_completed || 0} trabajos
-                    {proposal.professional?.verified ? ' · verificado' : ''}
-                  </span>
+                  <ProfessionalTrustSignals data={proposal.professional} />
                 </div>
                 <b className={`v6-proposal-status ${proposalStatusClass(proposal)}`}>{proposalStatusLabel(proposal)}</b>
               </div>
@@ -6289,7 +6281,7 @@ function ProfilePanel({
   const [documents, setDocuments] = useState<V6ProfessionalDocument[]>([]);
   const [portfolio, setPortfolio] = useState<V6PortfolioItem[]>([]);
   const [professionalStep, setProfessionalStep] = useState(1);
-  const [headline, setHeadline] = useState('Tecnico verificado para urgencias del hogar');
+  const [headline, setHeadline] = useState('Técnico para urgencias del hogar');
   const [bio, setBio] = useState('Trabajo con turnos puntuales, presupuesto claro y Protección MANITO.');
   const [yearsExperience, setYearsExperience] = useState('3');
   const [insuranceLabel, setInsuranceLabel] = useState('Responsabilidad civil vigente');
@@ -6319,8 +6311,27 @@ function ProfilePanel({
 
   useEffect(() => {
     let alive = true;
+
+    getV6ProfessionalProfile(profile.id)
+      .then((nextProfessionalProfile) => {
+        if (!alive) return;
+        setProfessionalProfile(nextProfessionalProfile);
+        if (!nextProfessionalProfile) return;
+        setHeadline((current) => nextProfessionalProfile.headline || current);
+        setBio((current) => nextProfessionalProfile.bio || current);
+        setYearsExperience(String(nextProfessionalProfile.years_experience || 0));
+        setInsuranceLabel((current) => nextProfessionalProfile.insurance_label || current);
+        setWorkZone((current) => nextProfessionalProfile.work_city || current);
+        setWorkRadius(String(nextProfessionalProfile.service_radius_km || 8));
+        setWorkDays(nextProfessionalProfile.work_days?.length ? nextProfessionalProfile.work_days : ['Lun', 'Mar', 'Mié', 'Jue', 'Vie']);
+        setWorkStart(timeInputValue(nextProfessionalProfile.work_starts_at, '08:00'));
+        setWorkEnd(timeInputValue(nextProfessionalProfile.work_ends_at, '18:00'));
+      })
+      .catch(() => {
+        if (alive) setProfessionalProfile(null);
+      });
+
     Promise.all([
-      getV6ProfessionalProfile(profile.id),
       getV6ProfessionalPaymentAccount(profile.id),
       getV6ProfessionalPayoutDetails(profile.id),
       getV6ProfessionalOnboarding(profile.id),
@@ -6328,7 +6339,6 @@ function ProfilePanel({
       listV6Portfolio(profile.id),
     ])
       .then(([
-        nextProfessionalProfile,
         nextPaymentAccount,
         nextPayoutDetails,
         nextOnboarding,
@@ -6336,22 +6346,10 @@ function ProfilePanel({
         nextPortfolio,
       ]) => {
         if (!alive) return;
-        setProfessionalProfile(nextProfessionalProfile);
         setPaymentAccount(nextPaymentAccount);
         setOnboarding(nextOnboarding);
         setDocuments(nextDocuments);
         setPortfolio(nextPortfolio);
-        if (nextProfessionalProfile) {
-          setHeadline((current) => nextProfessionalProfile.headline || current);
-          setBio((current) => nextProfessionalProfile.bio || current);
-          setYearsExperience(String(nextProfessionalProfile.years_experience || 0));
-          setInsuranceLabel((current) => nextProfessionalProfile.insurance_label || current);
-          setWorkZone((current) => nextProfessionalProfile.work_city || current);
-          setWorkRadius(String(nextProfessionalProfile.service_radius_km || 8));
-          setWorkDays(nextProfessionalProfile.work_days?.length ? nextProfessionalProfile.work_days : ['Lun', 'Mar', 'Mié', 'Jue', 'Vie']);
-          setWorkStart(timeInputValue(nextProfessionalProfile.work_starts_at, '08:00'));
-          setWorkEnd(timeInputValue(nextProfessionalProfile.work_ends_at, '18:00'));
-        }
         if (nextPayoutDetails) {
           setPayoutAlias(nextPayoutDetails.payout_alias || '');
           setPayoutCbu(nextPayoutDetails.payout_cbu || '');
@@ -6618,7 +6616,7 @@ function ProfilePanel({
         headline,
         bio,
         yearsExperience: Number(yearsExperience) || 0,
-        responseMinutes: 35,
+        responseMinutes: null,
         insuranceLabel,
         workCity: workZone.trim(),
         serviceRadiusKm: Number(workRadius) || 8,
@@ -6654,7 +6652,7 @@ function ProfilePanel({
         headline,
         bio,
         yearsExperience: Number(yearsExperience) || 0,
-        responseMinutes: professionalProfile?.response_minutes || 35,
+        responseMinutes: professionalProfile?.response_minutes || null,
         insuranceLabel,
         workCity: workZone.trim(),
         serviceRadiusKm: Number(workRadius) || 8,
@@ -6744,7 +6742,7 @@ function ProfilePanel({
         headline: headline.trim(),
         bio: bio.trim(),
         yearsExperience: Number(yearsExperience) || 0,
-        responseMinutes: professionalProfile?.response_minutes || 35,
+        responseMinutes: professionalProfile?.response_minutes || null,
         insuranceLabel: insuranceLabel.trim(),
         workCity: workZone.trim(),
         serviceRadiusKm: Number(workRadius) || 8,
@@ -6974,8 +6972,8 @@ function ProfilePanel({
                 <span>
                   <BadgeCheck size={17} aria-hidden="true" /> Vista pública
                 </span>
-                <strong>{professionalProfile?.rating_avg || 4.8} estrellas</strong>
-                <small>{professionalProfile?.jobs_completed || 0} trabajos · {professionalProfile?.manito_pro ? 'MANITO PRO' : 'Verificación en curso'}</small>
+                <ProfessionalTrustSignals data={professionalProfile} detailed />
+                {professionalProfile?.manito_pro && <small>MANITO PRO</small>}
               </div>
               <button className="v6-primary" type="submit">
                 Guardar perfil profesional
