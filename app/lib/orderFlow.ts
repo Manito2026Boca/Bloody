@@ -1,6 +1,7 @@
 import type { V6Order, V6OrderStatus, V6Role } from './v6Types';
 
 export type ProfessionalOrderAction =
+  | { kind: 'wait_client_confirmation'; label: 'Esperando al Cliente' }
   | { kind: 'wait_payment'; label: 'Esperando pago' }
   | { kind: 'mark_en_route'; label: 'Salir hacia domicilio' }
   | { kind: 'mark_arrived'; label: 'Marcar llegada' }
@@ -9,6 +10,7 @@ export type ProfessionalOrderAction =
   | { kind: 'none'; label: 'Finalizar trabajo' };
 
 export const orderStatusFlow: V6OrderStatus[] = [
+  'pending_client_confirmation',
   'payment_pending',
   'accepted',
   'en_camino',
@@ -18,6 +20,7 @@ export const orderStatusFlow: V6OrderStatus[] = [
 ];
 
 export function nextProfessionalOrderAction(status: V6OrderStatus): ProfessionalOrderAction {
+  if (status === 'pending_client_confirmation') return { kind: 'wait_client_confirmation', label: 'Esperando al Cliente' };
   if (status === 'payment_pending') return { kind: 'wait_payment', label: 'Esperando pago' };
   if (status === 'accepted') return { kind: 'mark_en_route', label: 'Salir hacia domicilio' };
   if (status === 'en_camino') return { kind: 'mark_arrived', label: 'Marcar llegada' };

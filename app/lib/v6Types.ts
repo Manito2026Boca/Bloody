@@ -13,7 +13,8 @@ export type V6PaymentStatus =
   | 'refunded'
   | 'partially_refunded';
 export type V6PaymentProvider = 'mercado_pago' | 'manual' | 'cash' | 'wallet';
-export type V6ManualResponseStatus = 'pending' | 'accepted' | 'rejected' | 'expired' | 'awaiting_client_choice';
+export type V6ManualResponseStatus = 'pending' | 'price_confirmation_pending' | 'accepted' | 'rejected' | 'expired' | 'awaiting_client_choice';
+export type V6PriceConfirmationStatus = 'pending' | 'confirmed' | 'rejected' | 'expired' | 'unavailable';
 export type V6MatchingStatus = 'idle' | 'round_pending' | 'matched' | 'failed';
 export type V6MatchingCandidateStatus = 'pending' | 'accepted' | 'rejected' | 'expired' | 'closed';
 export type V6CancellationActor = 'client' | 'professional';
@@ -32,6 +33,7 @@ export type V6OrderStatus =
   | 'open'
   | 'scheduled_open'
   | 'waiting_quotes'
+  | 'pending_client_confirmation'
   | 'payment_pending'
   | 'accepted'
   | 'en_camino'
@@ -122,6 +124,19 @@ export type V6Order = {
   accepted_proposal_id?: string | null;
   contract_snapshot?: Record<string, unknown> | null;
   pricing_policy_snapshot?: Record<string, unknown> | null;
+  client_price_consent_amount?: number | null;
+  client_price_consented_at?: string | null;
+  price_confirmation_status?: V6PriceConfirmationStatus | null;
+  price_confirmation_professional_id?: string | null;
+  price_confirmation_estimated_amount?: number | null;
+  price_confirmation_proposed_amount?: number | null;
+  price_confirmation_scope?: string | null;
+  price_confirmation_components?: Array<Record<string, unknown>> | null;
+  price_confirmation_policy_snapshot?: Record<string, unknown> | null;
+  price_confirmation_requested_at?: string | null;
+  price_confirmation_deadline_at?: string | null;
+  price_confirmation_responded_at?: string | null;
+  price_confirmation_reason?: string | null;
   assignment_mode?: V6AssignmentMode | null;
   preferred_professional_id?: string | null;
   payment_method?: V6PaymentMethod | null;
@@ -172,6 +187,7 @@ export type V6Order = {
   service?: V6Service | null;
   client?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & { phone?: string | null } | null;
   professional?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & { phone?: string | null } | null;
+  reserved_professional?: Pick<V6Profile, 'id' | 'full_name' | 'city'> & { phone?: string | null } | null;
 };
 
 export type V6ClientAddress = {
@@ -620,6 +636,7 @@ export const V6_STATUS_LABEL: Record<V6OrderStatus, string> = {
   open: 'Buscando profesional',
   scheduled_open: 'Buscando profesional para el día elegido',
   waiting_quotes: 'Esperando presupuestos',
+  pending_client_confirmation: 'Esperando tu confirmación',
   payment_pending: 'Pago pendiente',
   accepted: 'Profesional confirmado',
   en_camino: 'Está en camino',

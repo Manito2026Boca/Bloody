@@ -2274,6 +2274,48 @@ a.v6-evidence-link {
   gap: 8px;
 }
 
+.v6-price-confirmation {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--orange-600) 52%, #d8d8d2);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--orange-600) 7%, #fff);
+}
+
+.v6-price-confirmation-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink);
+}
+
+.v6-price-confirmation-head > div { min-width: 0; }
+.v6-price-confirmation-head small { color: var(--orange-600); font-weight: 800; }
+.v6-price-confirmation-head h3 { margin: 3px 0 0; font-size: 1.05rem; line-height: 1.25; }
+
+.v6-price-confirmation-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.v6-price-confirmation-values > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(3, 66, 62, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.v6-price-confirmation-values .wide { grid-column: 1 / -1; }
+.v6-price-confirmation-values dt { color: var(--muted); font-size: 0.76rem; font-weight: 700; }
+.v6-price-confirmation-values dd { margin: 4px 0 0; overflow-wrap: anywhere; color: var(--ink); font-weight: 800; }
+.v6-price-confirmation > p { margin: 0; color: var(--muted); font-size: 0.84rem; }
+
 .v6-quote-components span {
   border: 1px solid #b8d9cb;
   border-radius: 999px;

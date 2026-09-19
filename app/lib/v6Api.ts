@@ -96,6 +96,19 @@ const safeOrderColumns = [
   'accepted_proposal_id',
   'contract_snapshot',
   'pricing_policy_snapshot',
+  'client_price_consent_amount',
+  'client_price_consented_at',
+  'price_confirmation_status',
+  'price_confirmation_professional_id',
+  'price_confirmation_estimated_amount',
+  'price_confirmation_proposed_amount',
+  'price_confirmation_scope',
+  'price_confirmation_components',
+  'price_confirmation_policy_snapshot',
+  'price_confirmation_requested_at',
+  'price_confirmation_deadline_at',
+  'price_confirmation_responded_at',
+  'price_confirmation_reason',
   'client_lat',
   'client_lng',
   'location_id',
@@ -137,7 +150,7 @@ const safeOrderColumns = [
   'paid_at',
 ].join(',');
 
-const safeOrderSelect = `${safeOrderColumns},service:services(id,slug,name,emoji,base_price,active,allow_immediate,allow_scheduled,allow_quote,supports_recurring,requires_completion_evidence),client:profiles!orders_client_id_fkey(id,full_name,city),professional:profiles!orders_professional_id_fkey(id,full_name,city)`;
+const safeOrderSelect = `${safeOrderColumns},service:services(id,slug,name,emoji,base_price,active,allow_immediate,allow_scheduled,allow_quote,supports_recurring,requires_completion_evidence),client:profiles!orders_client_id_fkey(id,full_name,city),professional:profiles!orders_professional_id_fkey(id,full_name,city),reserved_professional:profiles!orders_price_confirmation_professional_id_fkey(id,full_name,city)`;
 
 type V6VisibleOrderPin = {
   order_id: string;
@@ -629,6 +642,27 @@ export async function listV6Orders() {
     if (!refreshError) {
       return attachVisibleOrderPins((refreshed || []) as unknown as V6Order[]);
     }
+  }
+
+  const expiredPriceConfirmations = ownOrders.filter(
+    (order) =>
+      order.status === 'pending_client_confirmation' &&
+      order.price_confirmation_status === 'pending' &&
+      order.price_confirmation_deadline_at &&
+      new Date(order.price_confirmation_deadline_at).getTime() <= Date.now(),
+  );
+  if (expiredPriceConfirmations.length) {
+    await Promise.allSettled(
+      expiredPriceConfirmations.map((order) =>
+        supabase.rpc('refresh_order_price_confirmation', { p_order_id: order.id }),
+      ),
+    );
+    const { data: refreshed, error: refreshError } = await supabase
+      .from('orders')
+      .select(safeOrderSelect)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (!refreshError) return attachVisibleOrderPins((refreshed || []) as unknown as V6Order[]);
   }
 
   const { data: profileData, error: profileError } = await supabase
@@ -1131,6 +1165,24 @@ function notificationPage(value: unknown): V6NotificationPage {
     total: Number(page.total || 0),
     unreadCount: Number(page.unread_count || 0),
   };
+}
+
+export async function confirmV6OrderPrice(orderId: string) {
+  const { data, error } = await getV6Supabase().rpc('confirm_order_price', { p_order_id: orderId });
+  fail(error);
+  return singleRpcRow(data as V6Order | V6Order[] | null, 'No se pudo confirmar el precio.');
+}
+
+export async function rejectV6OrderPrice(orderId: string) {
+  const { data, error } = await getV6Supabase().rpc('reject_order_price', { p_order_id: orderId });
+  fail(error);
+  return singleRpcRow(data as V6Order | V6Order[] | null, 'No se pudo rechazar el precio.');
+}
+
+export async function refreshV6OrderPriceConfirmation(orderId: string) {
+  const { data, error } = await getV6Supabase().rpc('refresh_order_price_confirmation', { p_order_id: orderId });
+  fail(error);
+  return singleRpcRow(data as V6Order | V6Order[] | null, 'No se pudo actualizar la confirmación.');
 }
 
 export async function listV6Notifications(limit = 8) {

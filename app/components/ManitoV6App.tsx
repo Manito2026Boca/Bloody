@@ -64,6 +64,7 @@ import {
   completeV6Profile,
   completeTrackedV6Order,
   confirmV6ManualPayment,
+  confirmV6OrderPrice,
   createV6RecurringServicePlan,
   createV6Order,
   decideV6OrderExtra,
@@ -105,6 +106,8 @@ import {
   reviewV6ProfessionalOnboarding,
   rejectV6MatchingCandidate,
   rejectV6ManualOrderRequest,
+  rejectV6OrderPrice,
+  refreshV6OrderPriceConfirmation,
   reportV6OrderPayment,
   retryV6ImmediateMatching,
   sendV6OrderProposal,
@@ -666,6 +669,9 @@ function orderNextStepText(order: V6Order, role: V6Role) {
     return 'Vas a poder comparar las propuestas cuando lleguen.';
   }
   if (order.status === 'matching_failed') return 'Podés reintentar la búsqueda o cambiar cómo querés avanzar.';
+  if (order.status === 'pending_client_confirmation') return role === 'client'
+    ? 'Revisá el precio propuesto y decidí si querés contratar.'
+    : 'Esperá la confirmación del Cliente. El trabajo todavía no está contratado.';
   if (order.status === 'payment_pending') return role === 'client'
     ? 'Revisá el importe y completá la acción de pago correspondiente.'
     : 'Esperá la confirmación del pago antes de continuar.';
@@ -1164,6 +1170,9 @@ function manualRequestCanBeRejectedBy(order: V6Order, profile: V6Profile) {
 }
 
 function manualResponseLabel(order: V6Order) {
+  if (order.manual_response_status === 'price_confirmation_pending') {
+    return 'El profesional aceptó y está esperando que confirmes el precio.';
+  }
   if (order.manual_response_status === 'awaiting_client_choice') {
     return 'Tu profesional preferido no está disponible para esta visita.';
   }
@@ -1894,9 +1903,14 @@ export default function ManitoV6App() {
   );
   const professionalWorkOrders = useMemo(() => {
     const merged = new Map<string, V6Order>();
-    for (const order of [...professionalOrders, ...pendingDirectRequests]) merged.set(order.id, order);
+    const confirmationReservations = orders.filter((order) =>
+      order.status === 'pending_client_confirmation' &&
+      order.price_confirmation_status === 'pending' &&
+      order.price_confirmation_professional_id === profile?.id,
+    );
+    for (const order of [...professionalOrders, ...pendingDirectRequests, ...confirmationReservations]) merged.set(order.id, order);
     return [...merged.values()];
-  }, [pendingDirectRequests, professionalOrders]);
+  }, [orders, pendingDirectRequests, professionalOrders, profile?.id]);
   async function refreshNotificationCenter() {
     const next = await listV6Notifications();
     setNotifications(next.items);
@@ -2119,7 +2133,7 @@ export default function ManitoV6App() {
               proServices={proServices}
               proSpecialties={proSpecialties}
               matchingOrders={matchingOrders}
-              activeOrders={professionalOrders}
+              activeOrders={professionalWorkOrders}
               setProfile={setProfile}
               setProServices={setProServices}
               setProSpecialties={setProSpecialties}
@@ -4606,8 +4620,12 @@ function ProfessionalHome({
       const acceptedOrder = await acceptV6Order(orderId);
       const refreshedOrders = await listV6Orders();
       setOrders(refreshedOrders);
-      setChatOrder(refreshedOrders.find((order) => order.id === acceptedOrder.id) || acceptedOrder);
-      setNotice('Trabajo aceptado. Usá el chat del pedido para coordinar con el cliente.');
+      if (acceptedOrder.status === 'pending_client_confirmation') {
+        setNotice('Aceptaste la solicitud. Esperando confirmación del Cliente.');
+      } else {
+        setChatOrder(refreshedOrders.find((order) => order.id === acceptedOrder.id) || acceptedOrder);
+        setNotice('Trabajo aceptado. Usá el chat del pedido para coordinar con el cliente.');
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'El pedido ya no está disponible.');
     }
@@ -4890,10 +4908,14 @@ function OrdersList(props: {
 
   async function respondToDirect(orderId: string, accept: boolean) {
     try {
-      if (accept) await acceptV6Order(orderId);
-      else await rejectV6ManualOrderRequest(orderId, 'no_disponible');
+      const acceptedOrder = accept ? await acceptV6Order(orderId) : null;
+      if (!accept) await rejectV6ManualOrderRequest(orderId, 'no_disponible');
       props.setOrders(await listV6Orders());
-      props.setNotice(accept ? 'Trabajo aceptado.' : 'Solicitud rechazada.');
+      props.setNotice(accept
+        ? acceptedOrder?.status === 'pending_client_confirmation'
+          ? 'Solicitud aceptada. Esperando confirmación del Cliente.'
+          : 'Trabajo aceptado.'
+        : 'Solicitud rechazada.');
     } catch (caught) {
       props.setError(caught instanceof Error ? caught.message : 'No pudimos responder la solicitud.');
     }
@@ -5073,7 +5095,9 @@ function OrderCard({
   publicProfessionals?: V6PublicProfessional[];
   onEditRequest?: (order: V6Order) => void;
 }) {
-  const other = profile.role === 'client' ? order.professional : order.client;
+  const other = profile.role === 'client'
+    ? order.professional || order.reserved_professional
+    : order.client;
   const nextAction = nextProfessionalOrderAction(order.status);
   const clientPin = visibleClientPin(order, profile.role);
   const [proposals, setProposals] = useState<V6OrderProposal[]>([]);
@@ -5111,6 +5135,7 @@ function OrderCard({
   const [cancellationNote, setCancellationNote] = useState('');
   const [retryingMatching, setRetryingMatching] = useState(false);
   const retryingMatchingRef = useRef(false);
+  const [priceConfirmationBusy, setPriceConfirmationBusy] = useState(false);
 
   useEffect(() => {
     if (cancellationReasonOptions.some((option) => option.value === cancellationReason)) return;
@@ -5243,6 +5268,25 @@ function OrderCard({
       removeV6Channel(channel);
     };
   }, [order.id, setNotice]);
+
+  useEffect(() => {
+    if (order.status !== 'pending_client_confirmation' || !order.price_confirmation_deadline_at) return;
+    const remaining = new Date(order.price_confirmation_deadline_at).getTime() - Date.now();
+    if (remaining <= 0) {
+      void refreshV6OrderPriceConfirmation(order.id)
+        .then(() => listV6Orders())
+        .then(setOrders)
+        .catch(() => undefined);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void refreshV6OrderPriceConfirmation(order.id)
+        .then(() => listV6Orders())
+        .then(setOrders)
+        .catch(() => undefined);
+    }, Math.min(remaining + 250, 2_147_000_000));
+    return () => window.clearTimeout(timer);
+  }, [order.id, order.price_confirmation_deadline_at, order.status, setOrders]);
 
   useEffect(() => {
     if (profile.role !== 'professional') return;
@@ -5411,6 +5455,28 @@ function OrderCard({
       setNotice('Presupuesto aceptado. Si corresponde, confirmá el pago para habilitar el trabajo.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo aceptar presupuesto.');
+    }
+  }
+
+  async function decidePriceConfirmation(confirm: boolean) {
+    if (priceConfirmationBusy) return;
+    setPriceConfirmationBusy(true);
+    try {
+      const result = confirm
+        ? await confirmV6OrderPrice(order.id)
+        : await rejectV6OrderPrice(order.id);
+      setOrders(await listV6Orders());
+      if (confirm && ['accepted', 'payment_pending'].includes(result.status)) {
+        setNotice('Precio confirmado. El acuerdo quedó registrado en MANITO.');
+      } else if (confirm) {
+        setNotice('La reserva ya no estaba disponible. Tu solicitud sigue abierta.');
+      } else {
+        setNotice('No aceptaste el precio. Podés elegir otro profesional o seguir buscando.');
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No pudimos registrar tu decisión.');
+    } finally {
+      setPriceConfirmationBusy(false);
     }
   }
 
@@ -5668,6 +5734,46 @@ function OrderCard({
           </form>
         )}
       </div>
+      {order.status === 'pending_client_confirmation' && (
+        <section className="v6-price-confirmation" aria-label="Confirmación de precio">
+          <div className="v6-price-confirmation-head">
+            <div>
+              <small>{profile.role === 'client' ? 'REQUIERE TU DECISIÓN' : 'RESERVA TEMPORAL'}</small>
+              <h3>{profile.role === 'client' ? `${order.reserved_professional?.full_name || 'El profesional'} aceptó tu solicitud` : 'Esperando confirmación del Cliente'}</h3>
+            </div>
+            <Clock size={20} aria-hidden="true" />
+          </div>
+          <dl className="v6-price-confirmation-values">
+            <div>
+              <dt>Estimación que viste</dt>
+              <dd>{estimatedMoney(order.price_confirmation_estimated_amount)}</dd>
+            </div>
+            <div>
+              <dt>Precio propuesto</dt>
+              <dd>{order.price_confirmation_proposed_amount == null ? 'Importe no informado' : money(order.price_confirmation_proposed_amount)}</dd>
+            </div>
+            <div className="wide">
+              <dt>Alcance</dt>
+              <dd>{order.price_confirmation_scope || 'Sin alcance informado'}</dd>
+            </div>
+          </dl>
+          {order.price_confirmation_deadline_at && (
+            <p>Reserva disponible hasta {shortDateTime(order.price_confirmation_deadline_at)}.</p>
+          )}
+          {profile.role === 'client' ? (
+            <div className="v6-actions compact">
+              <button className="v6-primary" type="button" disabled={priceConfirmationBusy} onClick={() => void decidePriceConfirmation(true)}>
+                {priceConfirmationBusy ? 'Guardando decisión...' : 'Confirmar y contratar'}
+              </button>
+              <button className="v6-secondary" type="button" disabled={priceConfirmationBusy} onClick={() => void decidePriceConfirmation(false)}>
+                No aceptar
+              </button>
+            </div>
+          ) : (
+            <p className="v6-note">El trabajo todavía no está contratado. Te avisaremos cuando el Cliente confirme.</p>
+          )}
+        </section>
+      )}
       {profile.role === 'client' && order.status === 'matching_failed' && (
         <section className="v6-recovery-panel">
           <strong>No encontramos profesionales disponibles.</strong>

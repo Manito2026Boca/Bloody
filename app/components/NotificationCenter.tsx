@@ -30,6 +30,7 @@ export function notificationActionLabel(item: V6Notification) {
     case 'compare_proposals': return 'Comparar presupuestos';
     case 'review_extra': return 'Revisar adicional';
     case 'review_payment': return 'Revisar pago';
+    case 'review_price_confirmation': return 'Confirmar precio';
     case 'open_chat': return 'Abrir conversación';
     case 'open_protection': return 'Ver Protección MANITO';
     default: return 'Ver trabajo';
