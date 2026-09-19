@@ -24,6 +24,7 @@ export function notificationTimeLabel(value: string, now = new Date()) {
 
 export function notificationActionLabel(item: V6Notification) {
   if (!item.order_id) return null;
+  if (item.action_key === 'open_chat') return 'Abrir conversación';
   if (!item.action_pending) return 'Ver estado';
   switch (item.action_key) {
     case 'open_direct_request': return 'Responder solicitud';

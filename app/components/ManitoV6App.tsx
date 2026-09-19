@@ -8,6 +8,7 @@ import { ProtectionAdminCase, ProtectionPanel } from './ProtectionManito';
 import { RecurringServicesPanel, RecurringAdminPanel } from './RecurringServicesPanel';
 import { NotificationHistory, NotificationQuickPanel } from './NotificationCenter';
 import { ProfessionalTrustSignals } from './ProfessionalTrustSignals';
+import { WorkroomList, WorkroomSheet } from './Workroom';
 import {
   ExperienceSwitch,
   ManitoBottomNavigation,
@@ -80,11 +81,11 @@ import {
   getV6ProfessionalPayoutDetails,
   getV6ProfessionalProfile,
   getV6UserSecurityPreferences,
+  getV6WorkroomOrder,
   listV6AdminComplaintReviews,
   listV6AdminSettings,
   listV6AdminProfessionalReviews,
   listV6ClientAddresses,
-  listV6Messages,
   listV6Notifications,
   listV6OrderExtras,
   listV6OrderPhotos,
@@ -99,6 +100,7 @@ import {
   listV6ProfessionalSpecialties,
   listV6Services,
   listV6Specialties,
+  listV6Workrooms,
   markV6NotificationRead,
   markV6NotificationsRead,
   removeV6MediaFiles,
@@ -114,10 +116,8 @@ import {
   sendV6OrderProposal,
   saveV6ProfessionalServices,
   saveV6ProfessionalSpecialties,
-  sendV6Message,
   setV6Availability,
   startV6Order,
-  subscribeV6Messages,
   subscribeV6Orders,
   updateV6Profile,
   uploadV6MediaFile,
@@ -162,7 +162,6 @@ import type {
   V6AdminSetting,
   V6CancellationReason,
   V6ClientAddress,
-  V6Message,
   V6Mode,
   V6Notification,
   V6Order,
@@ -186,6 +185,7 @@ import type {
   V6Service,
   V6Specialty,
   V6UserSecurityPreferences,
+  V6Workroom,
 } from '../lib/v6Types';
 import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 import { friendlyAuthError } from '../lib/authMessages';
@@ -1527,6 +1527,7 @@ export default function ManitoV6App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatOrder, setChatOrder] = useState<V6Order | null>(null);
+  const [chatWorkroomId, setChatWorkroomId] = useState<string | null>(null);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [installPlatform, setInstallPlatform] = useState<PwaInstallPlatform>('desktop');
@@ -1540,6 +1541,10 @@ export default function ManitoV6App() {
   const [focusedOrderId, setFocusedOrderId] = useState<string | null>(null);
   const lastAuthUser = useRef<string | null>(null);
   const dataLoadEpoch = useRef(0);
+  const openWorkroom = useCallback((order: V6Order, workroomId?: string | null) => {
+    setChatWorkroomId(workroomId || null);
+    setChatOrder(order);
+  }, []);
 
   useEffect(() => {
     const ready = isV6SupabaseConfigured();
@@ -1637,6 +1642,7 @@ export default function ManitoV6App() {
     setPublicProfessionals([]);
     setClientAddresses([]);
     setChatOrder(null);
+    setChatWorkroomId(null);
     setNotificationsOpen(false);
     setLocationEditorOpen(false);
     setEditingOrder(null);
@@ -1700,6 +1706,7 @@ export default function ManitoV6App() {
           setProSpecialties([]);
           setPublicProfessionals([]);
           setChatOrder(null);
+          setChatWorkroomId(null);
           setNotificationsOpen(false);
           setLocationEditorOpen(false);
           setEditingOrder(null);
@@ -1881,6 +1888,9 @@ export default function ManitoV6App() {
     () => orders.filter((order) => order.client_id === profile?.id),
     [orders, profile?.id],
   );
+  const currentChatOrder = chatOrder
+    ? orders.find((order) => order.id === chatOrder.id) || chatOrder
+    : null;
   const professionalOrders = useMemo(
     () => orders.filter((order) => order.professional_id === profile?.id),
     [orders, profile?.id],
@@ -1949,7 +1959,10 @@ export default function ManitoV6App() {
 
     setNotificationsOpen(false);
     if (!item.order_id) return;
-    const order = orders.find((entry) => entry.id === item.order_id);
+    let order = orders.find((entry) => entry.id === item.order_id);
+    if (!order && item.action_key === 'open_chat' && item.entity_type === 'workroom' && item.entity_id) {
+      order = await getV6WorkroomOrder(item.entity_id).catch(() => undefined);
+    }
     if (!order) {
       setNotice('Este aviso ya no tiene un trabajo disponible.');
       return;
@@ -1958,6 +1971,7 @@ export default function ManitoV6App() {
       || order.manual_requested_professional_id === profile?.id;
     setAppMode(professionalDestination ? 'professional' : 'client');
     if (item.action_key === 'open_chat') {
+      setChatWorkroomId(item.entity_type === 'workroom' ? item.entity_id : null);
       setChatOrder(order);
       return;
     }
@@ -2138,7 +2152,7 @@ export default function ManitoV6App() {
               setProServices={setProServices}
               setProSpecialties={setProSpecialties}
               setOrders={setOrders}
-              setChatOrder={setChatOrder}
+              setChatOrder={openWorkroom}
               setError={setError}
               setNotice={setNotice}
               onNavigate={setTab}
@@ -2155,7 +2169,7 @@ export default function ManitoV6App() {
               problemQuery={clientProblemQuery}
               setProblemQuery={setClientProblemQuery}
               setOrders={setOrders}
-              setChatOrder={setChatOrder}
+              setChatOrder={openWorkroom}
               setError={setError}
               setNotice={setNotice}
               onNavigate={setTab}
@@ -2186,7 +2200,7 @@ export default function ManitoV6App() {
             orders={activeOrders}
             publicProfessionals={publicProfessionals}
             setOrders={setOrders}
-            setChatOrder={setChatOrder}
+            setChatOrder={openWorkroom}
             setError={setError}
             setNotice={setNotice}
             onEditRequest={(order) => {
@@ -2209,17 +2223,19 @@ export default function ManitoV6App() {
         )}
 
         {tab === 'messages' && appMode === 'client' && (
-          <MessagesPanel
-            orders={clientOrders}
-            onOpenChat={setChatOrder}
-          />
+          <WorkroomList onOpen={(workroom: V6Workroom) => {
+            const order = clientOrders.find((entry) => entry.id === workroom.order_id);
+            if (!order) { setNotice('Ese trabajo ya no está disponible.'); return; }
+            setChatWorkroomId(workroom.id);
+            setChatOrder(order);
+          }} />
         )}
 
         {tab === 'agenda' && appMode === 'professional' && (
           <ProfessionalAgenda
             profile={viewProfile}
             orders={professionalOrders}
-            onOpenChat={setChatOrder}
+            onOpenChat={openWorkroom}
             onConfigure={() => setTab('profile')}
           />
         )}
@@ -2277,11 +2293,18 @@ export default function ManitoV6App() {
 
       <ManitoBottomNavigation experience={appMode} activeTab={tab} onNavigate={setTab} />
 
-      {chatOrder && (
-        <ChatSheet
-          order={chatOrder}
+      {currentChatOrder && (
+        <WorkroomSheet
+          order={currentChatOrder}
           profile={profile}
-          onClose={() => setChatOrder(null)}
+          requestedWorkroomId={chatWorkroomId}
+          onOpenOrder={() => {
+            setFocusedOrderId(currentChatOrder.id);
+            setTab('orders');
+            setChatOrder(null);
+            setChatWorkroomId(null);
+          }}
+          onClose={() => { setChatOrder(null); setChatWorkroomId(null); }}
           setError={setError}
         />
       )}
@@ -2619,7 +2642,7 @@ function ClientHome({
   problemQuery: string;
   setProblemQuery: (query: string) => void;
   setOrders: (orders: V6Order[]) => void;
-  setChatOrder: (order: V6Order) => void;
+  setChatOrder: (order: V6Order, workroomId?: string | null) => void;
   setError: (message: string) => void;
   setNotice: (message: string) => void;
   onNavigate: (tab: Tab) => void;
@@ -4369,7 +4392,7 @@ function AppointmentNotice({
 }: {
   orders: V6Order[];
   profile: V6Profile;
-  setChatOrder: (order: V6Order) => void;
+  setChatOrder: (order: V6Order, workroomId?: string | null) => void;
 }) {
   const nextOrder = [...orders]
     .filter((order) =>
@@ -4539,7 +4562,7 @@ function ProfessionalHome({
   setProServices: (services: V6ProfessionalService[]) => void;
   setProSpecialties: (specialties: V6ProfessionalSpecialty[]) => void;
   setOrders: (orders: V6Order[]) => void;
-  setChatOrder: (order: V6Order) => void;
+  setChatOrder: (order: V6Order, workroomId?: string | null) => void;
   setError: (message: string) => void;
   setNotice: (message: string) => void;
   onNavigate: (tab: Tab) => void;
@@ -4880,7 +4903,7 @@ function OrdersList(props: {
   orders: V6Order[];
   publicProfessionals: V6PublicProfessional[];
   setOrders: (orders: V6Order[]) => void;
-  setChatOrder: (order: V6Order) => void;
+  setChatOrder: (order: V6Order, workroomId?: string | null) => void;
   setError: (message: string) => void;
   setNotice: (message: string) => void;
   onEditRequest?: (order: V6Order) => void;
@@ -4954,54 +4977,6 @@ function OrdersList(props: {
         )}
       </section>
     </>
-  );
-}
-
-function MessagesPanel({
-  orders,
-  onOpenChat,
-}: {
-  orders: V6Order[];
-  onOpenChat: (order: V6Order) => void;
-}) {
-  const chatOrders = useMemo(
-    () => orders.filter((order) => Boolean(order.professional_id)),
-    [orders],
-  );
-  const [lastMessages, setLastMessages] = useState<Record<string, V6Message | null>>({});
-
-  useEffect(() => {
-    let active = true;
-    void Promise.all(chatOrders.map(async (order) => {
-      const messages = await listV6Messages(order.id);
-      return [order.id, messages[messages.length - 1] || null] as const;
-    })).then((entries) => {
-      if (active) setLastMessages(Object.fromEntries(entries));
-    }).catch(() => undefined);
-    return () => { active = false; };
-  }, [chatOrders]);
-
-  return (
-    <section className="v6-section v6-conversation-screen">
-      <div className="v6-section-head"><h1>Mensajes</h1><span>{chatOrders.length}</span></div>
-      <div className="v6-conversation-list">
-        {chatOrders.map((order) => {
-          const lastMessage = lastMessages[order.id];
-          return (
-            <button type="button" key={order.id} onClick={() => onOpenChat(order)}>
-              <span className="v6-pro-avatar">{(order.professional?.full_name || 'M').slice(0, 1)}</span>
-              <span>
-                <strong>{order.professional?.full_name || 'Profesional MANITO'}</strong>
-                <small>{serviceDisplayName(order.service)} · {orderStatusText(order)}</small>
-                <p>{lastMessage?.body || 'Abrí la conversación para coordinar este trabajo.'}</p>
-              </span>
-              <span className="v6-conversation-time">{lastMessage ? shortDateTime(lastMessage.created_at) : ''}</span>
-            </button>
-          );
-        })}
-      </div>
-      {!chatOrders.length && <Empty title="Todavía no hay conversaciones" body="El chat se habilita cuando un profesional queda asignado a tu trabajo." />}
-    </section>
   );
 }
 
@@ -5081,7 +5056,7 @@ function OrderCard({
   order: V6Order;
   profile: V6Profile;
   setOrders: (orders: V6Order[]) => void;
-  setChatOrder: (order: V6Order) => void;
+  setChatOrder: (order: V6Order, workroomId?: string | null) => void;
   setError: (message: string) => void;
   setNotice: (message: string) => void;
   publicProfessionals?: V6PublicProfessional[];
@@ -5450,6 +5425,17 @@ function OrderCard({
       setNotice('Presupuesto aceptado. Si corresponde, confirmá el pago para habilitar el trabajo.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo aceptar presupuesto.');
+    }
+  }
+
+  async function openProposalConversation(professionalId: string) {
+    try {
+      const workrooms = await listV6Workrooms();
+      const workroom = workrooms.find((item) => item.order_id === order.id && item.professional_id === professionalId);
+      if (!workroom) throw new Error('La conversación del presupuesto todavía no está disponible.');
+      setChatOrder(order, workroom.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo abrir la conversación.');
     }
   }
 
@@ -6074,6 +6060,11 @@ function OrderCard({
                 <div className="wide"><dt>Válida hasta</dt><dd>{proposal.valid_until ? shortDateTime(proposal.valid_until) : 'Sin vigencia informada'}</dd></div>
               </dl>
               <div className="v6-quote-total-row"><span>Total propuesto</span><strong className="v6-quote-total">{proposalTotal(proposal) > 0 ? money(proposalTotal(proposal)) : 'Importe no informado'}</strong></div>
+              {(profile.id === order.client_id || profile.id === proposal.professional_id) && (
+                <button className="v6-secondary" type="button" onClick={() => void openProposalConversation(proposal.professional_id)}>
+                  <MessageCircle size={16} aria-hidden="true" /> Conversar sobre este presupuesto
+                </button>
+              )}
               {profile.role === 'client' && isOpenOpportunityStatus(order.status) && proposal.status === 'sent' && !proposalIsExpiredByClock(proposal) && (
                 <button className="v6-primary" type="button" onClick={() => acceptProposal(proposal.id)}>
                   Aceptar este presupuesto
@@ -8137,118 +8128,6 @@ function adminDocumentResultLabel(status: 'approved' | 'observed' | 'rejected') 
     rejected: 'Documento rechazado.',
   };
   return labels[status];
-}
-
-function ChatSheet({
-  order,
-  profile,
-  onClose,
-  setError,
-}: {
-  order: V6Order;
-  profile: V6Profile;
-  onClose: () => void;
-  setError: (message: string) => void;
-}) {
-  const [messages, setMessages] = useState<V6Message[]>([]);
-  const [body, setBody] = useState('');
-
-  useEffect(() => {
-    listV6Messages(order.id)
-      .then(setMessages)
-      .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : 'No se cargo el chat.'),
-      );
-    const channel = subscribeV6Messages(order.id, (message) => {
-      setMessages((current) =>
-        current.some((item) => item.id === message.id)
-          ? current
-          : [...current, message],
-      );
-    });
-    return () => removeV6Channel(channel);
-  }, [order.id, setError]);
-
-  async function send(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!body.trim()) return;
-    try {
-      await sendV6Message(order.id, profile.id, body.trim());
-      setBody('');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'No se pudo enviar.');
-    }
-  }
-
-  return (
-    <div className="v6-modal">
-      <section className="v6-sheet">
-        <div className="v6-section-head">
-          <div>
-            <h2>Chat del pedido</h2>
-            <span>{serviceDisplayName(order.service)}</span>
-          </div>
-          <button className="v6-icon-button" type="button" onClick={onClose} aria-label="Cerrar chat">
-            ×
-          </button>
-        </div>
-        <p className="v6-chat-protection">
-          Usá este chat para coordinar pagos, horarios y adicionales. Lo acordado acá queda registrado para Protección MANITO.
-        </p>
-        <div className="v6-chat-shortcuts" aria-label="Mensajes rápidos">
-          <button
-            type="button"
-            onClick={() =>
-              setBody(
-                profile.role === 'client'
-                  ? 'Hola, confirmo el pedido por acá. ¿Me pasás horario estimado y cómo coordinamos el pago?'
-                  : 'Hola, acepto coordinar este pedido por MANITO. Te confirmo horario estimado y próximos pasos por acá.',
-              )
-            }
-          >
-            Coordinar
-          </button>
-          {order.payment_method === 'wallet' && (
-            <button
-              type="button"
-              onClick={() =>
-                setBody(
-                  profile.role === 'client'
-                    ? 'Prefiero pagar con Cuenta DNI / billetera. ¿Me compartís el QR o link cuando corresponda?'
-                    : 'Te comparto mi QR o link de Cuenta DNI / billetera por este chat para que quede registrado.',
-                )
-              }
-            >
-              Pago billetera
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() =>
-              setBody('Cualquier adicional lo aprobamos desde el pedido antes de hacerlo, así queda cubierto por MANITO.')
-            }
-          >
-            Adicionales
-          </button>
-        </div>
-        <div className="v6-chat-list">
-          {messages.map((message) => (
-            <article className={message.sender_id === profile.id ? 'v6-bubble mine' : 'v6-bubble'} key={message.id}>
-              {message.body}
-              <small>{shortDate(message.created_at)}</small>
-            </article>
-          ))}
-          {!messages.length && <Empty title="Sin mensajes" body="El chat se actualiza en tiempo real." />}
-        </div>
-        <form className="v6-chat-form" onSubmit={send}>
-          <input value={body} onChange={(event) => setBody(event.target.value)} placeholder="Escribí un mensaje" />
-          <button type="submit" aria-label="Enviar mensaje">
-            <SendHorizontal size={18} aria-hidden="true" />
-          </button>
-        </form>
-      </section>
-    </div>
-  );
 }
 
 function HeaderLocationSheet({

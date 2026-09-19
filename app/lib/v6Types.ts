@@ -597,9 +597,61 @@ export type V6AdminProfessionalReview = {
 export type V6Message = {
   id: number;
   order_id: string;
+  workroom_id: string;
   sender_id: string;
   body: string;
+  kind: 'text' | 'image';
+  file_path: string | null;
+  file_name: string | null;
+  client_nonce: string | null;
   created_at: string;
+};
+
+export type V6Workroom = {
+  id: string;
+  order_id: string;
+  proposal_id: string | null;
+  client_id: string;
+  professional_id: string;
+  phase: 'precontractual' | 'contracted';
+  status: 'open' | 'read_only';
+  last_activity_at: string;
+  order_status: V6OrderStatus;
+  mode: V6Mode;
+  address: string;
+  scheduled_at: string | null;
+  description: string;
+  agreed_price: number | null;
+  estimated_price: number | null;
+  contracted_at: string | null;
+  service_name: string;
+  counterpart_name: string;
+  last_item: string | null;
+  last_item_kind: V6Message['kind'] | null;
+  last_item_at: string | null;
+  unread_count: number;
+};
+
+export type V6WorkroomTimelineItem = {
+  item_id: string;
+  item_type: 'message' | 'event';
+  created_at: string;
+  sender_id: string | null;
+  body: string | null;
+  message_kind: V6Message['kind'] | null;
+  file_path: string | null;
+  file_name: string | null;
+  event_kind: string | null;
+  title: string | null;
+  detail: string | null;
+  action_key: string | null;
+  entity_id: string | null;
+  event_status: string | null;
+};
+
+export type V6WorkroomTimelinePage = {
+  items: V6WorkroomTimelineItem[];
+  has_more: boolean;
 };
 
 export type V6Notification = {

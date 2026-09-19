@@ -38,6 +38,8 @@ import type {
   V6Service,
   V6Specialty,
   V6UserSecurityPreferences,
+  V6Workroom,
+  V6WorkroomTimelinePage,
 } from './v6Types';
 
 function fail(error: { message: string } | null) {
@@ -1154,14 +1156,36 @@ export async function listV6Complaints(orderId: string) {
   return (data || []) as V6Complaint[];
 }
 
-export async function listV6Messages(orderId: string) {
-  const { data, error } = await getV6Supabase()
-    .from('messages')
-    .select('*')
-    .eq('order_id', orderId)
-    .order('created_at');
+export async function listV6Workrooms() {
+  const { data, error } = await getV6Supabase().rpc('list_my_workrooms');
   fail(error);
-  return (data || []) as V6Message[];
+  return (data || []) as V6Workroom[];
+}
+
+export async function getV6WorkroomOrder(workroomId: string) {
+  const { data, error } = await getV6Supabase().rpc('get_workroom_order', { p_workroom_id: workroomId });
+  fail(error);
+  return data as V6Order;
+}
+
+export async function listV6WorkroomTimeline(
+  workroomId: string,
+  before: string | null = null,
+  limit = 30,
+) {
+  const { data, error } = await getV6Supabase().rpc('list_workroom_timeline', {
+    p_workroom_id: workroomId,
+    p_before: before,
+    p_limit: limit,
+  });
+  fail(error);
+  return (data || { items: [], has_more: false }) as V6WorkroomTimelinePage;
+}
+
+export async function markV6WorkroomRead(workroomId: string) {
+  const { data, error } = await getV6Supabase().rpc('mark_workroom_read', { p_workroom_id: workroomId });
+  fail(error);
+  return data as string;
 }
 
 function notificationPage(value: unknown): V6NotificationPage {
@@ -1239,14 +1263,46 @@ export async function archiveV6Notification(notificationId: string) {
   return data as string;
 }
 
-export async function sendV6Message(orderId: string, senderId: string, body: string) {
-  const { data, error } = await getV6Supabase()
-    .from('messages')
-    .insert({ order_id: orderId, sender_id: senderId, body })
-    .select('*')
-    .single();
+export async function sendV6WorkroomMessage(input: {
+  workroomId: string;
+  body: string;
+  kind?: V6Message['kind'];
+  filePath?: string | null;
+  fileName?: string | null;
+  clientNonce: string;
+}) {
+  const { data, error } = await getV6Supabase().rpc('send_workroom_message', {
+    p_workroom_id: input.workroomId,
+    p_body: input.body,
+    p_kind: input.kind || 'text',
+    p_file_path: input.filePath || null,
+    p_file_name: input.fileName || null,
+    p_client_nonce: input.clientNonce,
+  });
   fail(error);
   return data as V6Message;
+}
+
+export async function uploadV6WorkroomImage(input: { workroomId: string; ownerId: string; file: File }) {
+  const extension = input.file.name.split('.').pop()?.toLowerCase() || 'jpg';
+  const path = `${input.workroomId}/${input.ownerId}/${crypto.randomUUID()}.${extension}`;
+  const { error } = await getV6Supabase().storage.from('manito-workroom').upload(path, input.file, {
+    upsert: false,
+    contentType: input.file.type,
+  });
+  fail(error);
+  return path;
+}
+
+export async function getV6WorkroomImageSignedUrl(filePath: string) {
+  const { data, error } = await getV6Supabase().storage.from('manito-workroom').createSignedUrl(filePath, 600);
+  if (error) return null;
+  return data.signedUrl;
+}
+
+export async function removeV6WorkroomImage(filePath: string) {
+  const { error } = await getV6Supabase().storage.from('manito-workroom').remove([filePath]);
+  fail(error);
 }
 
 export async function getV6ProfessionalProfile(userId: string) {
@@ -1596,24 +1652,38 @@ export function subscribeV6Orders(onChange: () => void) {
   return channel;
 }
 
-export function subscribeV6Messages(
-  orderId: string,
-  onInsert: (message: V6Message) => void,
+export function subscribeV6Workroom(
+  workroomId: string,
+  onChange: () => void,
 ) {
   const channel = getV6Supabase()
-    .channel(`manito-v6-chat-${orderId}`)
+    .channel(`manito-v6-workroom-${workroomId}`)
     .on(
       'postgres_changes',
       {
-        event: 'INSERT',
+        event: '*',
         schema: 'public',
         table: 'messages',
-        filter: `order_id=eq.${orderId}`,
+        filter: `workroom_id=eq.${workroomId}`,
       },
-      (payload) => onInsert(payload.new as V6Message),
+      onChange,
+    )
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'workrooms', filter: `id=eq.${workroomId}` },
+      onChange,
     )
     .subscribe();
   return channel;
+}
+
+export function subscribeV6WorkroomList(onChange: () => void) {
+  return getV6Supabase()
+    .channel('manito-v6-workroom-list')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'workrooms' }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'workroom_reads' }, onChange)
+    .subscribe();
 }
 
 export function removeV6Channel(channel: RealtimeChannel | null) {
