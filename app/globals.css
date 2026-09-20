@@ -5292,6 +5292,109 @@ a.v6-evidence-link {
   box-shadow: none;
 }
 
+.v6-today-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 0;
+}
+
+.v6-today-heading small,
+.v6-next-work .v6-section-head small,
+.v6-operational-state small {
+  color: var(--orange-600);
+  font-size: 0.68rem;
+  font-weight: 950;
+}
+
+.v6-today-heading h1 { margin: 1px 0 0; font-size: 1.65rem; }
+.v6-today-heading > span { max-width: 180px; color: var(--muted); font-size: 0.78rem; text-align: right; }
+
+.v6-operational-state,
+.v6-today-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #e5c79f;
+  border-radius: 8px;
+  background: #fffaf1;
+  padding: 14px;
+}
+
+.v6-operational-state > div,
+.v6-today-empty > div { display: grid; min-width: 0; gap: 4px; }
+.v6-operational-state p,
+.v6-today-empty p { margin: 0; color: var(--muted); font-size: 0.82rem; line-height: 1.4; }
+.v6-operational-state span { display: flex; align-items: center; gap: 5px; color: var(--green-800); font-size: 0.76rem; font-weight: 850; }
+.v6-operational-state .v6-primary { width: auto; flex: 0 0 auto; }
+
+.v6-focus-card-head > div { min-width: 0; }
+.v6-focus-card-head > div > span { display: block; margin-top: 3px; color: var(--muted); font-size: 0.76rem; line-height: 1.35; }
+.v6-focus-amount { display: grid; flex: 0 0 auto; gap: 2px; text-align: right; }
+.v6-focus-amount small { color: var(--muted); font-size: 0.68rem; }
+.v6-focus-amount strong { color: var(--green-900); font-size: 1rem; white-space: nowrap; }
+
+.v6-next-work > article {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.v6-next-work > article p { margin: 3px 0 0; color: var(--muted); font-size: 0.78rem; }
+.v6-next-work > article > strong { color: var(--green-900); white-space: nowrap; }
+.v6-next-work > .v6-secondary { width: 100%; }
+
+.v6-waiting-client > .v6-section-head small { color: var(--muted); font-size: 0.68rem; font-weight: 950; }
+.v6-waiting-client > button:not(.v6-text-link) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  gap: 10px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  padding: 11px 0;
+  color: var(--ink);
+  text-align: left;
+}
+.v6-waiting-client > button > span:first-child { display: grid; min-width: 0; gap: 2px; }
+.v6-waiting-client > button small { overflow: hidden; color: var(--muted); font-size: 0.74rem; text-overflow: ellipsis; white-space: nowrap; }
+.v6-waiting-client > button > span:last-child { color: var(--green-800); font-size: 0.72rem; font-weight: 850; white-space: nowrap; }
+
+.v6-message-action { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.v6-message-action > span {
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--orange-600);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 950;
+}
+
+.v6-proposal-workroom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  border-bottom: 1px solid var(--line);
+  padding: 14px 0;
+}
+
+.v6-proposal-workroom > div { display: grid; min-width: 0; align-content: start; gap: 4px; }
+.v6-proposal-workroom > div:last-child { justify-items: end; }
+.v6-proposal-workroom small { color: var(--orange-600); font-size: 0.7rem; font-weight: 900; }
+.v6-proposal-workroom p { margin: 0; color: var(--ink); font-size: 0.84rem; line-height: 1.4; }
+.v6-proposal-workroom span,
+.v6-proposal-workroom em { color: var(--muted); font-size: 0.75rem; font-style: normal; }
+.v6-proposal-workroom .v6-message-action { margin-top: 8px; white-space: nowrap; }
+
 @media (max-width: 719px) {
   .v6-app.v6-request-active {
     display: grid;
@@ -5474,6 +5577,19 @@ a.v6-evidence-link {
     justify-self: start;
     white-space: normal;
   }
+
+  .v6-today-heading { align-items: start; }
+  .v6-operational-state { align-items: stretch; flex-direction: column; }
+  .v6-operational-state .v6-primary { width: 100%; }
+  .v6-focus-card-head { display: grid; grid-template-columns: 42px minmax(0, 1fr); }
+  .v6-focus-amount { grid-column: 2; justify-self: start; text-align: left; }
+  .v6-next-work > article { grid-template-columns: 40px minmax(0, 1fr); }
+  .v6-next-work > article > strong { grid-column: 2; }
+  .v6-waiting-client > button:not(.v6-text-link) { grid-template-columns: minmax(0, 1fr); }
+  .v6-waiting-client > button > span:last-child { white-space: normal; }
+  .v6-proposal-workroom { grid-template-columns: minmax(0, 1fr); }
+  .v6-proposal-workroom > div:last-child { justify-items: start; }
+  .v6-proposal-workroom .v6-message-action { width: 100%; white-space: normal; }
 
   .v6-agreement-head,
   .v6-agreement-modifications {

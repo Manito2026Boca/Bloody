@@ -43,12 +43,12 @@ describe('UX-001 progressive experience', () => {
 
   it('surfaces the active work and its next action with human status labels', () => {
     expect(app).toContain('orderNextStepText');
-    expect(app).toContain('TRABAJO ACTIVO');
-    expect(app).toContain('PRÓXIMO TRABAJO');
+    expect(app).toContain('TRABAJO ACTUAL');
+    expect(app).toContain('PRÓXIMO');
     expect(app).toContain('PIN de inicio');
     expect(app).toContain('Revisá cualquier adicional');
     expect(app).toContain('Calificar');
-    expect(app).toContain("order.mode !== 'quote' || !isOpenOpportunityStatus(order.status)");
+    expect(app).toContain('professionalOrderBucket(order)');
   });
 
   it('keeps proposal comparison neutral and distinguishes material information', () => {

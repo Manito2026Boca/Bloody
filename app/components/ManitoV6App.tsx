@@ -119,6 +119,7 @@ import {
   setV6Availability,
   startV6Order,
   subscribeV6Orders,
+  subscribeV6WorkroomList,
   updateV6Profile,
   uploadV6MediaFile,
   uploadV6OrderEvidenceFile,
@@ -136,10 +137,16 @@ import {
   orderStatusFlow,
   visibleClientPin,
 } from '../lib/orderFlow';
+import {
+  compareProfessionalOrders,
+  professionalEconomicState,
+  professionalOrderBucket,
+  professionalPrimaryActionLabel,
+  proposalWorkroomState,
+  workroomForOrder,
+} from '../lib/professionalCockpit';
 import { paymentCapabilities, type ManitoPaymentMethod } from '../lib/paymentCapabilities';
 import {
-  approvedExtrasTotal,
-  orderCommissionAmount,
   orderDisplayAmount,
   orderEstimatedAmount,
   orderServiceTotal,
@@ -2142,20 +2149,21 @@ export default function ManitoV6App() {
           (appMode === 'professional' ? (
             <ProfessionalHome
               profile={viewProfile}
-              services={services}
               specialties={specialties}
               proServices={proServices}
               proSpecialties={proSpecialties}
               matchingOrders={matchingOrders}
               activeOrders={professionalWorkOrders}
               setProfile={setProfile}
-              setProServices={setProServices}
-              setProSpecialties={setProSpecialties}
               setOrders={setOrders}
               setChatOrder={openWorkroom}
               setError={setError}
               setNotice={setNotice}
               onNavigate={setTab}
+              onOpenOrder={(order) => {
+                setFocusedOrderId(order.id);
+                setTab('orders');
+              }}
             />
           ) : (
             <ClientHome
@@ -4534,51 +4542,74 @@ function serviceDescription(slug: string) {
   return 'Profesionales disponibles para resolver tareas del hogar.';
 }
 
+function useProfessionalWorkrooms(profileId: string) {
+  const [workrooms, setWorkrooms] = useState<V6Workroom[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    let refreshing = false;
+    const refresh = () => {
+      if (refreshing) return;
+      refreshing = true;
+      void listV6Workrooms()
+        .then((rows) => { if (active) setWorkrooms(rows.filter((room) => room.professional_id === profileId)); })
+        .catch(() => undefined)
+        .finally(() => { refreshing = false; });
+    };
+    refresh();
+    const channel = subscribeV6WorkroomList(refresh);
+    return () => { active = false; removeV6Channel(channel); };
+  }, [profileId]);
+
+  return workrooms;
+}
+
 function ProfessionalHome({
   profile,
-  services,
   specialties,
   proServices,
   proSpecialties,
   matchingOrders,
   activeOrders,
   setProfile,
-  setProServices,
-  setProSpecialties,
   setOrders,
   setChatOrder,
   setError,
   setNotice,
   onNavigate,
+  onOpenOrder,
 }: {
   profile: V6Profile;
-  services: V6Service[];
   specialties: V6Specialty[];
   proServices: V6ProfessionalService[];
   proSpecialties: V6ProfessionalSpecialty[];
   matchingOrders: V6Order[];
   activeOrders: V6Order[];
   setProfile: (profile: V6Profile) => void;
-  setProServices: (services: V6ProfessionalService[]) => void;
-  setProSpecialties: (specialties: V6ProfessionalSpecialty[]) => void;
   setOrders: (orders: V6Order[]) => void;
   setChatOrder: (order: V6Order, workroomId?: string | null) => void;
   setError: (message: string) => void;
   setNotice: (message: string) => void;
   onNavigate: (tab: Tab) => void;
+  onOpenOrder: (order: V6Order) => void;
 }) {
   const [professionalProfile, setProfessionalProfile] = useState<V6ProfessionalProfile | null>(null);
+  const [onboarding, setOnboarding] = useState<V6ProfessionalOnboarding | null>(null);
+  const [professionalStateLoading, setProfessionalStateLoading] = useState(true);
   const [showAllOpportunities, setShowAllOpportunities] = useState(false);
+  const workrooms = useProfessionalWorkrooms(profile.id);
 
   useEffect(() => {
     let active = true;
-    getV6ProfessionalProfile(profile.id)
-      .then((nextProfile) => {
-        if (active) setProfessionalProfile(nextProfile);
-      })
-      .catch(() => {
-        if (active) setProfessionalProfile(null);
-      });
+    void Promise.allSettled([
+      getV6ProfessionalProfile(profile.id),
+      getV6ProfessionalOnboarding(profile.id),
+    ]).then(([profileResult, onboardingResult]) => {
+      if (!active) return;
+      setProfessionalProfile(profileResult.status === 'fulfilled' ? profileResult.value : null);
+      setOnboarding(onboardingResult.status === 'fulfilled' ? onboardingResult.value : null);
+      setProfessionalStateLoading(false);
+    });
     return () => {
       active = false;
     };
@@ -4602,7 +4633,10 @@ function ProfessionalHome({
     [matchingOrders, proServices, proSpecialties, professionalProfile, profile, specialties],
   );
   const directRequests = compatibleMatches.filter((match) => manualRequestCanBeRejectedBy(match.order, profile));
-  const regularOpportunities = compatibleMatches.filter((match) => !manualRequestCanBeRejectedBy(match.order, profile));
+  const pendingProposalRooms = workrooms.filter((room) => room.proposal_id && room.phase === 'precontractual' && room.status === 'open');
+  const proposedOrderIds = new Set(pendingProposalRooms.map((room) => room.order_id));
+  const regularOpportunities = compatibleMatches.filter((match) =>
+    !manualRequestCanBeRejectedBy(match.order, profile) && !proposedOrderIds.has(match.order.id));
 
   async function toggleAvailable() {
     try {
@@ -4610,23 +4644,6 @@ function ProfessionalHome({
       setNotice(!profile.is_available ? 'Ahora estás disponible.' : 'Disponibilidad desactivada.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo cambiar disponibilidad.');
-    }
-  }
-
-  async function toggleService(serviceId: number) {
-    const current = new Set(proServices.map((item) => item.service_id));
-    if (current.has(serviceId)) current.delete(serviceId);
-    else current.add(serviceId);
-    const nextServiceIds = [...current];
-    const nextSpecialtyIds = proSpecialties
-      .filter((item) => current.has(item.service_id))
-      .map((item) => item.specialty_id);
-    try {
-      setProServices(await saveV6ProfessionalServices(profile.id, nextServiceIds, services));
-      setProSpecialties(await saveV6ProfessionalSpecialties(profile.id, nextSpecialtyIds, specialties));
-      setNotice('Servicios guardados.');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'No se guardaron servicios.');
     }
   }
 
@@ -4666,34 +4683,57 @@ function ProfessionalHome({
     }
   }
 
-  const grossIncome = activeOrders.reduce(
-    (total, order) => total + Number(orderServiceTotal(order) ?? orderDisplayAmount(order) ?? 0),
-    0,
-  );
-  const commission = activeOrders.reduce(
-    (total, order) => total + orderCommissionAmount(order),
-    0,
-  );
-  const netIncome = Math.max(0, grossIncome - commission);
-  const completedJobs = activeOrders.filter((order) => order.status === 'completed').length;
-  const proProgress = Math.min(100, completedJobs * 10 + proServices.length * 8);
-  const currentProfessionalOrders = activeOrders.filter((order) => !['completed', 'cancelled'].includes(order.status));
-  const focusOrder = [...currentProfessionalOrders].sort((left, right) => {
-    const priority: Record<string, number> = { trabajando: 0, en_sitio: 1, en_camino: 2, payment_pending: 3, accepted: 4 };
-    return (priority[left.status] ?? 9) - (priority[right.status] ?? 9) ||
-      new Date(appointmentDate(left)).getTime() - new Date(appointmentDate(right)).getTime();
-  })[0] || null;
+  async function openProfessionalRoom(room: V6Workroom) {
+    try {
+      const order = activeOrders.find((item) => item.id === room.order_id)
+        || matchingOrders.find((item) => item.id === room.order_id)
+        || await getV6WorkroomOrder(room.id);
+      setChatOrder(order, room.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No pudimos abrir la conversación.');
+    }
+  }
+
+  const contractedOrders = activeOrders.filter((order) =>
+    order.professional_id === profile.id && !['completed', 'cancelled'].includes(order.status));
+  const focusOrder = contractedOrders
+    .filter((order) => professionalOrderBucket(order) === 'active')
+    .sort(compareProfessionalOrders)[0] || null;
+  const upcomingOrders = contractedOrders
+    .filter((order) => professionalOrderBucket(order) === 'upcoming')
+    .sort((left, right) => new Date(left.scheduled_at || '').getTime() - new Date(right.scheduled_at || '').getTime());
+  const nextOrder = upcomingOrders[0] || null;
+  const remainingToday = contractedOrders.filter((order) => {
+    if (!order.scheduled_at || order.id === focusOrder?.id || order.id === nextOrder?.id) return false;
+    return new Date(order.scheduled_at).toDateString() === new Date().toDateString();
+  }).length;
+  const onboardingStatus = onboarding?.status || 'draft';
+  const canOperate = onboardingStatus === 'approved' || professionalProfile?.verified === true;
+
+  function onboardingCopy() {
+    if (professionalStateLoading) return { title: 'Revisando tu estado profesional', body: 'Estamos cargando tu habilitación.', action: null };
+    if (onboardingStatus === 'submitted' || onboardingStatus === 'in_review') {
+      return { title: 'Tu perfil está en revisión', body: 'Te avisaremos cuando termine la revisión. Podés consultar lo enviado desde tu perfil.', action: 'Ver estado' };
+    }
+    if (onboardingStatus === 'observed') {
+      return { title: 'Hay información para corregir', body: onboarding?.notes || 'Revisá las observaciones para poder recibir trabajos.', action: 'Corregir perfil' };
+    }
+    if (onboardingStatus === 'rejected') {
+      return { title: 'Tu solicitud requiere revisión', body: onboarding?.notes || 'Abrí tu perfil para revisar el estado y los próximos pasos.', action: 'Ver revisión' };
+    }
+    if (onboardingStatus === 'suspended') {
+      return { title: 'Tu cuenta profesional está pausada', body: onboarding?.notes || 'Consultá el estado de tu perfil antes de aceptar trabajos.', action: 'Ver estado' };
+    }
+    return { title: 'Completá tu perfil profesional', body: 'Terminá los datos y la documentación necesarios para empezar a operar.', action: 'Continuar perfil' };
+  }
+
+  const operationalCopy = onboardingCopy();
 
   return (
     <>
-      <section className="v6-available">
-        <div>
-          <strong>{profile.is_available ? 'Disponible para pedidos Ahora' : 'Pedidos Ahora pausados'}</strong>
-          <p>{profile.is_available ? 'Podés recibir oportunidades inmediatas compatibles.' : 'Tus trabajos aceptados y tu agenda no cambian.'}</p>
-        </div>
-        <button className="v6-switch" type="button" aria-pressed={profile.is_available} onClick={toggleAvailable}>
-          <span />
-        </button>
+      <section className="v6-today-heading">
+        <div><small>PROFESIONAL</small><h1>Hoy</h1></div>
+        <span>¿Qué tenés que hacer ahora?</span>
       </section>
 
       {directRequests.length > 0 && (
@@ -4725,68 +4765,86 @@ function ProfessionalHome({
         </section>
       )}
 
+      {!canOperate && (
+        <section className={`v6-operational-state ${onboardingStatus}`}>
+          <div>
+            <small>ESTADO PROFESIONAL</small>
+            <strong>{operationalCopy.title}</strong>
+            <p>{operationalCopy.body}</p>
+            {professionalProfile?.identity_reviewed && <span><BadgeCheck size={14} aria-hidden="true" /> Identidad revisada</span>}
+          </div>
+          {operationalCopy.action && <button className="v6-primary" type="button" onClick={() => onNavigate('profile')}>{operationalCopy.action}</button>}
+        </section>
+      )}
+
       {focusOrder && (
         <section className="v6-focus-card professional">
           <div className="v6-focus-card-head">
             <span className="v6-order-icon">{serviceIcon(focusOrder.service?.slug || '')}</span>
             <div>
-              <small>{focusOrder.status === 'trabajando' ? 'TRABAJO EN CURSO' : 'PRÓXIMO TRABAJO'}</small>
+              <small>{focusOrder.status === 'trabajando' ? 'TRABAJO EN CURSO' : focusOrder.status === 'pending_client_confirmation' || focusOrder.status === 'payment_pending' ? 'ESPERANDO AL CLIENTE' : 'TRABAJO ACTUAL'}</small>
               <h1>{orderStatusText(focusOrder)}</h1>
-              <p>{serviceDisplayName(focusOrder.service)} · {focusOrder.address}</p>
+              <p>{serviceDisplayName(focusOrder.service)} · {focusOrder.client?.full_name || 'Cliente MANITO'}</p>
+              <span>{focusOrder.address}</span>
               {focusOrder.scheduled_at && <span>{shortDateTime(focusOrder.scheduled_at)}</span>}
             </div>
+            <span className="v6-focus-amount"><small>{professionalEconomicState(focusOrder)}</small><strong>{money(orderServiceTotal(focusOrder) ?? orderDisplayAmount(focusOrder))}</strong></span>
           </div>
           <div className="v6-next-step compact"><strong>Ahora</strong><p>{orderNextStepText(focusOrder, 'professional')}</p></div>
           <div className="v6-actions compact">
-            <button className="v6-primary" type="button" onClick={() => onNavigate('orders')}>Ver trabajo</button>
-            {focusOrder.professional_id && <button className="v6-secondary" type="button" onClick={() => setChatOrder(focusOrder)}>Abrir chat</button>}
+            <button className="v6-primary" type="button" onClick={() => onOpenOrder(focusOrder)}>{professionalPrimaryActionLabel(focusOrder)}</button>
+            {focusOrder.professional_id && (() => {
+              const room = workroomForOrder(workrooms, focusOrder.id);
+              return <button className="v6-secondary v6-message-action" type="button" onClick={() => setChatOrder(focusOrder, room?.id)}>
+                <MessageCircle size={16} aria-hidden="true" /> Mensaje
+                {room?.unread_count ? <span>{room.unread_count}</span> : null}
+              </button>;
+            })()}
           </div>
         </section>
       )}
 
-      <section className="v6-card v6-professional-stats">
-        <div className="v6-section-head">
-          <h2>Resumen</h2>
-          <span>MANITO PRO {proProgress}%</span>
-        </div>
-        <div className="v6-admin-grid">
+      {nextOrder && (
+        <section className="v6-section v6-next-work">
+          <div className="v6-section-head"><div><small>PRÓXIMO</small><h2>{shortDateTime(nextOrder.scheduled_at)}</h2></div><span>{professionalEconomicState(nextOrder)}</span></div>
           <article>
-            <strong>{money(grossIncome)}</strong>
-            <span>Bruto</span>
+            <span className="v6-order-icon">{serviceIcon(nextOrder.service?.slug || '')}</span>
+            <div><strong>{serviceDisplayName(nextOrder.service)}</strong><p>{nextOrder.client?.full_name || 'Cliente MANITO'} · {nextOrder.address}</p></div>
+            <strong>{money(orderServiceTotal(nextOrder) ?? orderDisplayAmount(nextOrder))}</strong>
           </article>
-          <article>
-            <strong>{money(commission)}</strong>
-            <span>Comisión MANITO</span>
-          </article>
-          <article>
-            <strong>{money(netIncome)}</strong>
-            <span>Neto estimado</span>
-          </article>
-          <article>
-            <strong>{compatibleMatches.length}</strong>
-            <span>Pedidos cercanos</span>
-          </article>
-        </div>
-        <div className="v6-progress">
-          <span style={{ width: `${proProgress}%` }} />
-        </div>
-      </section>
+          <button className="v6-secondary" type="button" onClick={() => onOpenOrder(nextOrder)}>Ver detalle</button>
+          {remainingToday > 0 && <p className="v6-muted">Después tenés {remainingToday} {remainingToday === 1 ? 'trabajo más' : 'trabajos más'} hoy.</p>}
+        </section>
+      )}
 
-      <section className="v6-card v6-legacy-home-hidden">
-        <h2>Mis servicios</h2>
-        <div className="v6-check-grid">
-          {services.map((service) => (
-            <button
-              className="v6-check-service"
-              type="button"
-              key={service.id}
-              aria-pressed={proServices.some((item) => item.service_id === service.id)}
-              onClick={() => toggleService(service.id)}
-            >
-              {serviceIcon(service.slug)} {serviceDisplayName(service)}
+      {pendingProposalRooms.length > 0 && (
+        <section className="v6-section v6-waiting-client">
+          <div className="v6-section-head"><div><small>ESPERANDO AL CLIENTE</small><h2>Presupuestos enviados</h2></div><span>{pendingProposalRooms.length}</span></div>
+          {pendingProposalRooms.slice(0, 2).map((room) => (
+            <button type="button" key={room.id} onClick={() => void openProfessionalRoom(room)}>
+              <span><strong>{room.service_name}</strong><small>{room.counterpart_name} · {room.address}</small></span>
+              <span>{room.unread_count ? `${room.unread_count} sin leer` : 'Ver conversación'}</span>
             </button>
           ))}
+          {pendingProposalRooms.length > 2 && <button className="v6-text-link" type="button" onClick={() => onNavigate('orders')}>Ver todas las propuestas</button>}
+        </section>
+      )}
+
+      {!directRequests.length && !focusOrder && !nextOrder && !pendingProposalRooms.length && canOperate && (
+        <section className="v6-today-empty">
+          <Clock size={22} aria-hidden="true" />
+          <div><strong>No tenés trabajos programados para hoy.</strong><p>{profile.is_available ? 'Te avisaremos cuando aparezca una solicitud compatible.' : 'Tus trabajos aceptados siguen en Agenda aunque pauses los pedidos Ahora.'}</p></div>
+        </section>
+      )}
+
+      <section className="v6-available">
+        <div>
+          <strong>{profile.is_available ? 'Disponible para pedidos Ahora' : 'Pedidos Ahora pausados'}</strong>
+          <p>{profile.is_available ? 'Podés recibir oportunidades inmediatas compatibles.' : 'Tus trabajos aceptados y tu agenda no cambian.'}</p>
         </div>
+        <button className="v6-switch" type="button" aria-pressed={profile.is_available} onClick={toggleAvailable} disabled={!canOperate}>
+          <span />
+        </button>
       </section>
 
       <section className="v6-section">
@@ -4804,7 +4862,10 @@ function ProfessionalHome({
                     <small>{specialties.find((item) => item.id === match.order.required_specialty_id)?.name || 'Presupuesto solicitado'}</small>
                     <small>{cityFromLocationLabel(match.order.address)} · {match.distanceKm != null ? `${match.distanceKm.toFixed(1)} km` : 'Distancia no disponible'}</small>
                   </span>
-                  <b>Enviar presupuesto</b>
+                  <b>{(() => {
+                    const room = workrooms.find((item) => item.order_id === match.order.id && item.proposal_id);
+                    return room ? proposalWorkroomState(room) : 'Enviar presupuesto';
+                  })()}</b>
                 </summary>
                 <div className="v6-opportunity-details-body">
                   <MatchSummary match={match} />
@@ -4908,17 +4969,20 @@ function OrdersList(props: {
   setNotice: (message: string) => void;
   onEditRequest?: (order: V6Order) => void;
 }) {
-  const [filter, setFilter] = useState<'current' | 'proposals' | 'history'>('current');
+  const [filter, setFilter] = useState<'current' | 'upcoming' | 'proposals' | 'history'>('current');
+  const workrooms = useProfessionalWorkrooms(props.profile.id);
   const pendingDirect = props.profile.role === 'professional'
     ? props.orders.filter((order) => manualRequestCanBeRejectedBy(order, props.profile))
+    : [];
+  const proposalRooms = props.profile.role === 'professional'
+    ? workrooms.filter((room) => room.proposal_id && room.phase === 'precontractual')
     : [];
   const visibleOrders = props.orders.filter((order) => {
     if (pendingDirect.some((pending) => pending.id === order.id)) return false;
     if (filter === 'history') return ['completed', 'cancelled'].includes(order.status);
-    if (filter === 'proposals') return order.mode === 'quote' && isOpenOpportunityStatus(order.status);
-    return !['completed', 'cancelled'].includes(order.status) && (
-      props.profile.role === 'client' || order.mode !== 'quote' || !isOpenOpportunityStatus(order.status)
-    );
+    if (filter === 'proposals') return false;
+    if (props.profile.role === 'professional') return professionalOrderBucket(order) === (filter === 'upcoming' ? 'upcoming' : 'active');
+    return filter === 'current' && !['completed', 'cancelled'].includes(order.status);
   });
 
   async function respondToDirect(orderId: string, accept: boolean) {
@@ -4936,19 +5000,31 @@ function OrdersList(props: {
     }
   }
 
+  async function openProposalRoom(room: V6Workroom) {
+    try {
+      const order = props.orders.find((item) => item.id === room.order_id) || await getV6WorkroomOrder(room.id);
+      props.setChatOrder(order, room.id);
+    } catch (caught) {
+      props.setError(caught instanceof Error ? caught.message : 'No pudimos abrir la propuesta.');
+    }
+  }
+
   return (
     <>
       <section className="v6-section">
         <div className="v6-section-head">
           <h1>{props.profile.role === 'professional' ? 'Trabajos' : 'Tus trabajos'}</h1>
-          <span>{visibleOrders.length}</span>
+          <span>{filter === 'proposals' ? proposalRooms.length : visibleOrders.length}</span>
         </div>
         <div className="v6-filter-tabs" role="tablist" aria-label="Filtrar trabajos">
           <button type="button" role="tab" aria-selected={filter === 'current'} onClick={() => setFilter('current')}>
-            {props.profile.role === 'professional' ? 'En curso' : 'Activos'}
+            Activos
           </button>
           {props.profile.role === 'professional' && (
-            <button type="button" role="tab" aria-selected={filter === 'proposals'} onClick={() => setFilter('proposals')}>Propuestas</button>
+            <>
+              <button type="button" role="tab" aria-selected={filter === 'upcoming'} onClick={() => setFilter('upcoming')}>Próximos</button>
+              <button type="button" role="tab" aria-selected={filter === 'proposals'} onClick={() => setFilter('proposals')}>Propuestas</button>
+            </>
           )}
           <button type="button" role="tab" aria-selected={filter === 'history'} onClick={() => setFilter('history')}>Historial</button>
         </div>
@@ -4967,12 +5043,30 @@ function OrdersList(props: {
           </div>
         )}
         {visibleOrders.map((order) => (
-          <OrderCard key={order.id} order={order} {...props} />
+          <OrderCard key={order.id} order={order} workroom={workroomForOrder(workrooms, order.id)} {...props} />
         ))}
-        {!visibleOrders.length && (
+        {filter === 'proposals' && proposalRooms.map((room) => (
+          <article className="v6-proposal-workroom" key={room.id}>
+            <div>
+              <small>{proposalWorkroomState(room)}</small>
+              <strong>{room.service_name}</strong>
+              <p>{room.description}</p>
+              <span>{room.address}{room.scheduled_at ? ` · ${shortDateTime(room.scheduled_at)}` : ''}</span>
+              {room.last_item && <em>{room.last_item_kind === 'image' ? 'Foto compartida' : room.last_item}</em>}
+            </div>
+            <div>
+              <span className="v6-price-label"><small>ESTIMACIÓN</small><b>{estimatedMoney(room.estimated_price)}</b></span>
+              <button className="v6-secondary v6-message-action" type="button" onClick={() => void openProposalRoom(room)}>
+                <MessageCircle size={16} aria-hidden="true" /> {room.status === 'open' ? 'Abrir conversación' : 'Ver historial'}
+                {room.unread_count ? <span>{room.unread_count}</span> : null}
+              </button>
+            </div>
+          </article>
+        ))}
+        {!visibleOrders.length && (filter !== 'proposals' || !proposalRooms.length) && (
           <Empty
-            title={filter === 'history' ? 'Todavía no hay historial' : filter === 'proposals' ? 'No tenés propuestas activas' : 'No tenés trabajos activos'}
-            body={props.profile.role === 'client' ? 'Cuando publiques una necesidad, vas a seguirla desde acá.' : 'Tus próximos trabajos aparecerán acá.'}
+            title={filter === 'history' ? 'Aún no completaste trabajos por MANITO' : filter === 'proposals' ? 'No enviaste presupuestos todavía' : filter === 'upcoming' ? 'No tenés próximos trabajos confirmados' : 'No tenés trabajos activos'}
+            body={props.profile.role === 'client' ? 'Cuando publiques una necesidad, vas a seguirla desde acá.' : filter === 'proposals' ? 'Las propuestas enviadas y su resultado aparecerán acá.' : 'Tus trabajos confirmados aparecerán acá.'}
           />
         )}
       </section>
@@ -4988,11 +5082,12 @@ function ProfessionalAgenda({
 }: {
   profile: V6Profile;
   orders: V6Order[];
-  onOpenChat: (order: V6Order) => void;
+  onOpenChat: (order: V6Order, workroomId?: string | null) => void;
   onConfigure: () => void;
 }) {
   const [professionalProfile, setProfessionalProfile] = useState<V6ProfessionalProfile | null>(null);
   const [loadingProfessionalProfile, setLoadingProfessionalProfile] = useState(true);
+  const workrooms = useProfessionalWorkrooms(profile.id);
   useEffect(() => {
     let active = true;
     void getV6ProfessionalProfile(profile.id).then((value) => {
@@ -5032,8 +5127,18 @@ function ProfessionalAgenda({
           {scheduledOrders.map((order) => (
             <article key={order.id}>
               <time>{shortDateTime(order.scheduled_at)}</time>
-              <div><strong>{serviceDisplayName(order.service)}</strong><p>{order.address}</p><small>{orderStatusText(order)}</small></div>
-              {order.professional_id && <button className="v6-secondary" type="button" onClick={() => onOpenChat(order)}>Chat</button>}
+              <div>
+                <strong>{serviceDisplayName(order.service)}</strong>
+                <p>{order.client?.full_name || 'Cliente MANITO'} · {order.address}</p>
+                <small>{orderStatusText(order)} · {professionalEconomicState(order)}</small>
+              </div>
+              {order.professional_id && (() => {
+                const room = workroomForOrder(workrooms, order.id);
+                return <button className="v6-secondary v6-message-action" type="button" onClick={() => onOpenChat(order, room?.id)}>
+                  <MessageCircle size={15} aria-hidden="true" /> Mensaje
+                  {room?.unread_count ? <span>{room.unread_count}</span> : null}
+                </button>;
+              })()}
             </article>
           ))}
         </div>
@@ -5052,6 +5157,7 @@ function OrderCard({
   setNotice,
   publicProfessionals = [],
   onEditRequest,
+  workroom = null,
 }: {
   order: V6Order;
   profile: V6Profile;
@@ -5061,6 +5167,7 @@ function OrderCard({
   setNotice: (message: string) => void;
   publicProfessionals?: V6PublicProfessional[];
   onEditRequest?: (order: V6Order) => void;
+  workroom?: V6Workroom | null;
 }) {
   const other = profile.role === 'client'
     ? order.professional || order.reserved_professional
@@ -5952,8 +6059,9 @@ function OrderCard({
       {(canChat || canShareTracking) && (
         <div className="v6-order-contact">
           {canChat && (
-            <button className="v6-secondary" type="button" onClick={() => setChatOrder(order)}>
-              <MessageCircle size={16} aria-hidden="true" /> Abrir chat
+            <button className="v6-secondary v6-message-action" type="button" onClick={() => setChatOrder(order, workroom?.id)}>
+              <MessageCircle size={16} aria-hidden="true" /> Mensaje
+              {workroom?.unread_count ? <span>{workroom.unread_count}</span> : null}
             </button>
           )}
           {canShareTracking && (
