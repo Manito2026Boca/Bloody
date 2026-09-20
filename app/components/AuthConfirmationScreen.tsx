@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, MailCheck, RotateCcw } from 'lucide-react';
 import Image from 'next/image';
 import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
+import { confirmationLinkErrorMessage, readAuthEmailFlow } from '../lib/authCallback';
 import { completeV6Profile } from '../lib/v6Api';
 import { MIN_PASSWORD_LENGTH, passwordHelpText, passwordSecurityMessage } from '../lib/security';
 import { getV6Supabase } from '../lib/v6Supabase';
@@ -47,10 +48,7 @@ function isJwtTimingError(error: unknown) {
 }
 
 function friendlyConfirmationError(error: unknown) {
-  if (isJwtTimingError(error)) {
-    return 'Tu email fue validado, pero el celular parece tener la hora desfasada. Activá fecha y hora automática y tocá Entrar a MANITO.';
-  }
-  return 'No pudimos confirmar el enlace. Probá ingresar con tu email y contraseña.';
+  return confirmationLinkErrorMessage(error);
 }
 
 export default function AuthConfirmationScreen({
@@ -83,6 +81,7 @@ export default function AuthConfirmationScreen({
         const code = query.get('code');
         const tokenHash = query.get('token_hash');
         const type = query.get('type') || 'signup';
+        const emailFlow = readAuthEmailFlow(query, hash);
         let confirmedEmail: string | null = null;
 
         if (canVerifyToken && tokenHash) {
@@ -93,7 +92,7 @@ export default function AuthConfirmationScreen({
           });
           if (error) throw error;
           confirmedEmail = getConfirmedEmail(data);
-          if (type === 'recovery') {
+          if (emailFlow === 'recovery') {
             if (!alive) return;
             setState('password');
             setMessage('Elegí una contraseña nueva para volver a entrar.');
@@ -103,7 +102,7 @@ export default function AuthConfirmationScreen({
           const { data, error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
           confirmedEmail = getConfirmedEmail(data);
-          if (type === 'recovery') {
+          if (emailFlow === 'recovery') {
             if (!alive) return;
             setState('password');
             setMessage('Elegí una contraseña nueva para volver a entrar.');
@@ -112,7 +111,7 @@ export default function AuthConfirmationScreen({
         } else if (hash.get('access_token')) {
           const { data } = await supabase.auth.getSession();
           confirmedEmail = getConfirmedEmail(data);
-          if (hash.get('type') === 'recovery' || type === 'recovery') {
+          if (emailFlow === 'recovery') {
             if (!alive) return;
             setState('password');
             setMessage('Elegí una contraseña nueva para volver a entrar.');

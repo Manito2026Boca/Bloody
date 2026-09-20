@@ -196,7 +196,8 @@ import type {
   V6Workroom,
 } from '../lib/v6Types';
 import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
-import { friendlyAuthError } from '../lib/authMessages';
+import { friendlyAuthError, isEmailNotConfirmedError } from '../lib/authMessages';
+import { buildAuthCallbackUrl, type AuthEmailFlow } from '../lib/authCallback';
 import { isRecoverableMissingProfileError } from '../lib/profileRecovery';
 import {
   authoritativeRequestCoordinates,
@@ -1333,8 +1334,8 @@ function getAuthRedirectUrl() {
   return window.location.origin;
 }
 
-function getAuthCallbackUrl() {
-  return `${getAuthRedirectUrl().replace(/\/$/, '')}/auth/callback`;
+function getAuthCallbackUrl(flow: AuthEmailFlow) {
+  return buildAuthCallbackUrl(getAuthRedirectUrl(), flow);
 }
 
 function profileNameFromSession(user: Session['user']) {
@@ -2532,6 +2533,21 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
   const [localNotice, setLocalNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [resendingConfirmation, setResendingConfirmation] = useState(false);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setTimeout(() => setResendCooldown((seconds) => Math.max(0, seconds - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendCooldown]);
+
+  function changeMode(nextMode: AuthMode) {
+    setMode(nextMode);
+    setError(null);
+    setLocalNotice(null);
+    setAwaitingConfirmation(false);
+  }
 
   async function resendConfirmation() {
     setError(null);
@@ -2542,6 +2558,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
       return;
     }
 
+    if (resendCooldown > 0) return;
     setResendingConfirmation(true);
     try {
       const supabase = getV6Supabase();
@@ -2549,11 +2566,12 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         type: 'signup',
         email: cleanEmail,
         options: {
-          emailRedirectTo: getAuthCallbackUrl(),
+          emailRedirectTo: getAuthCallbackUrl('signup'),
         },
       });
       if (resendError) throw resendError;
-      setLocalNotice('Si tu cuenta está pendiente de confirmación, te enviamos otro correo.');
+      setResendCooldown(60);
+      setLocalNotice('Te enviamos un nuevo enlace. Revisá también Spam o Correo no deseado.');
       setNotice('Revisá tu email para confirmar el acceso.');
     } catch (caught) {
       setError(friendlyAuthError(caught, 'No pudimos enviar el correo de confirmación. Probá nuevamente en unos minutos.'));
@@ -2572,7 +2590,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
       const cleanEmail = email.trim().toLowerCase();
       if (mode === 'reset') {
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-          redirectTo: getAuthCallbackUrl(),
+          redirectTo: getAuthCallbackUrl('recovery'),
         });
         if (resetError) throw resetError;
         setLocalNotice('Te mandamos un link para crear una contraseña nueva.');
@@ -2585,7 +2603,14 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
           email: cleanEmail,
           password,
         });
-        if (loginError) throw loginError;
+        if (loginError) {
+          if (isEmailNotConfirmedError(loginError)) {
+            setAwaitingConfirmation(true);
+            setLocalNotice('Tu correo todavía no fue confirmado.');
+            return;
+          }
+          throw loginError;
+        }
         return;
       }
 
@@ -2604,13 +2629,14 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         password,
         options: {
           data: { full_name: fullName },
-          emailRedirectTo: getAuthCallbackUrl(),
+          emailRedirectTo: getAuthCallbackUrl('signup'),
         },
       });
       if (signupError) throw signupError;
       if (data.session) {
         await completeV6Profile({ fullName, role: 'client' });
       } else {
+        setAwaitingConfirmation(true);
         setLocalNotice('Cuenta creada. Te mandamos un email para confirmar y entrar a MANITO.');
         setNotice('Cuenta creada. Revisá tu email para confirmar el acceso.');
       }
@@ -2633,26 +2659,51 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
           priority
         />
         <h1>
-          {mode === 'login'
+          {awaitingConfirmation
+            ? 'Revisá tu correo.'
+            : mode === 'login'
             ? 'Entra a MANITO.'
             : mode === 'reset'
               ? 'Recuperá el acceso.'
               : 'Crea tu cuenta MANITO.'}
         </h1>
         <p className="v6-muted">
-          {mode === 'reset'
+          {awaitingConfirmation
+            ? `Enviamos el enlace de confirmación a ${email.trim().toLowerCase()}.`
+            : mode === 'reset'
             ? 'Te mandamos un link para crear una contraseña nueva.'
             : 'Entrás como cliente. Después podés activar tu perfil profesional desde Cuenta.'}
         </p>
-        <div className="v6-tabs">
-          <button type="button" aria-pressed={mode === 'login'} onClick={() => setMode('login')}>
+        {!awaitingConfirmation && mode !== 'reset' && <div className="v6-tabs">
+          <button type="button" aria-pressed={mode === 'login'} onClick={() => changeMode('login')}>
             Ingresar
           </button>
-          <button type="button" aria-pressed={mode === 'signup'} onClick={() => setMode('signup')}>
+          <button type="button" aria-pressed={mode === 'signup'} onClick={() => changeMode('signup')}>
             Registrarme
           </button>
-        </div>
-        <form className="v6-stack" onSubmit={submit}>
+        </div>}
+        {awaitingConfirmation ? (
+          <section className="v6-stack" aria-live="polite">
+            <p className="v6-note">{localNotice || 'Tu correo todavía no fue confirmado.'}</p>
+            <p className="v6-muted">Abrí el enlace que te enviamos. Si no aparece, revisá Spam o pedí uno nuevo.</p>
+            {error && <p className="v6-alert">{error}</p>}
+            <button
+              className="v6-primary"
+              type="button"
+              onClick={resendConfirmation}
+              disabled={resendingConfirmation || resendCooldown > 0}
+            >
+              {resendingConfirmation
+                ? 'Enviando...'
+                : resendCooldown > 0
+                  ? `Podés reenviar en ${resendCooldown}s`
+                  : 'Reenviar correo'}
+            </button>
+            <button className="v6-text-button" type="button" onClick={() => changeMode('login')}>
+              Cambiar correo o volver
+            </button>
+          </section>
+        ) : <form className="v6-stack" onSubmit={submit}>
           {mode === 'signup' && (
             <>
               <label className="v6-field">
@@ -2696,27 +2747,17 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
                   ? 'Mandar link'
                   : 'Crear cuenta'}
           </button>
-          {mode !== 'reset' && (
-            <button
-              className="v6-secondary"
-              type="button"
-              onClick={resendConfirmation}
-              disabled={resendingConfirmation}
-            >
-              {resendingConfirmation ? 'Enviando...' : 'Reenviar correo de confirmación'}
-            </button>
-          )}
           {mode === 'login' && (
-            <button className="v6-text-button" type="button" onClick={() => setMode('reset')}>
+            <button className="v6-text-button" type="button" onClick={() => changeMode('reset')}>
               ¿No te acordás la contraseña?
             </button>
           )}
           {mode === 'reset' && (
-            <button className="v6-text-button" type="button" onClick={() => setMode('login')}>
+            <button className="v6-text-button" type="button" onClick={() => changeMode('login')}>
               Volver a ingresar
             </button>
           )}
-        </form>
+        </form>}
       </section>
     </main>
   );
