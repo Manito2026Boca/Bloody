@@ -75,6 +75,7 @@ import {
   fallbackV6ManualOrderToAuto,
   getV6Profile,
   getV6MediaSignedUrl,
+  getV6NotificationDestination,
   getV6MyCapabilities,
   getV6ProfessionalOnboarding,
   getV6ProfessionalPaymentAccount,
@@ -112,7 +113,7 @@ import {
   rejectV6OrderPrice,
   refreshV6OrderPriceConfirmation,
   reportV6OrderPayment,
-  retryV6ImmediateMatching,
+  retryV6OrderSearch,
   sendV6OrderProposal,
   saveV6ProfessionalServices,
   saveV6ProfessionalSpecialties,
@@ -208,6 +209,13 @@ import {
   PWA_INSTALL_DISMISS_KEY,
   type PwaInstallPlatform,
 } from '../lib/pwaInstall';
+import {
+  disableWebPushForCurrentDevice,
+  enableWebPush,
+  syncExistingWebPush,
+  webPushState,
+  type WebPushState,
+} from '../lib/webPush';
 
 type Tab = ManitoTab;
 type AuthMode = 'login' | 'signup' | 'reset';
@@ -664,12 +672,22 @@ function orderStatusText(order: V6Order, proposalsCount = 0) {
   }
   if (order.status === 'scheduled_open' || (order.status === 'open' && order.mode === 'scheduled')) return 'Buscando profesional para el día elegido';
   if (order.status === 'matching_failed') return 'Sin profesional disponible';
-  if (order.status === 'open' && order.mode === 'immediate') return 'Buscando ahora';
+  if (order.status === 'open' && order.mode === 'immediate') {
+    if (order.assignment_mode === 'manual' && order.manual_response_status === 'pending') return 'Esperando respuesta';
+    return (order.matching_current_round || 0) > 1 ? 'Buscando otra opción' : 'Buscando un profesional';
+  }
   return V6_STATUS_LABEL[order.status];
 }
 
 function orderNextStepText(order: V6Order, role: V6Role) {
-  if (order.status === 'open' && order.mode === 'immediate') return 'Ahora esperamos que un profesional disponible acepte.';
+  if (order.status === 'open' && order.mode === 'immediate') {
+    if (order.assignment_mode === 'manual' && order.manual_response_status === 'pending') {
+      return 'El profesional elegido tiene que responder antes del vencimiento.';
+    }
+    return (order.matching_current_round || 0) > 1
+      ? 'La primera opción no respondió. MANITO ya está buscando otra.'
+      : 'Ahora esperamos que un profesional disponible acepte.';
+  }
   if (order.status === 'scheduled_open' || (order.status === 'open' && order.mode === 'scheduled')) {
     return 'Ahora esperamos que un profesional confirme el día y horario.';
   }
@@ -1510,6 +1528,59 @@ async function geocodeManualLocation(line: string, city: string) {
   return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
 }
 
+function PushPermissionCard({
+  audience,
+  setNotice,
+  setError,
+}: {
+  audience: AppMode;
+  setNotice: (message: string) => void;
+  setError: (message: string) => void;
+}) {
+  const [state, setState] = useState<WebPushState>(() => webPushState());
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const nextState = webPushState();
+    setState(nextState);
+    if (nextState === 'enabled') {
+      void syncExistingWebPush().catch(() => undefined);
+    }
+  }, []);
+
+  if (state !== 'default') return null;
+
+  async function activate() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await enableWebPush();
+      setState(result);
+      if (result === 'enabled') setNotice('Listo. Te vamos a avisar cuando haya algo importante.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No pudimos activar los avisos.');
+      setState(webPushState());
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="v6-push-card" aria-label="Avisos importantes">
+      <Bell size={20} aria-hidden="true" />
+      <div>
+        <strong>{audience === 'professional' ? 'Respondé a tiempo' : 'Seguí tu solicitud'}</strong>
+        <p>{audience === 'professional'
+          ? 'Activá avisos para enterarte de solicitudes y cambios aunque MANITO esté cerrada.'
+          : 'Activá avisos para enterarte cuando un profesional responda o tu trabajo cambie.'}</p>
+      </div>
+      <button className="v6-secondary" type="button" disabled={busy} onClick={() => void activate()}>
+        {busy ? 'Activando...' : 'Activar avisos'}
+      </button>
+    </section>
+  );
+}
+
 export default function ManitoV6App() {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -1547,6 +1618,7 @@ export default function ManitoV6App() {
   const [clientProblemQuery, setClientProblemQuery] = useState('');
   const [focusedOrderId, setFocusedOrderId] = useState<string | null>(null);
   const lastAuthUser = useRef<string | null>(null);
+  const handledPushNotification = useRef<string | null>(null);
   const dataLoadEpoch = useRef(0);
   const openWorkroom = useCallback((order: V6Order, workroomId?: string | null) => {
     setChatWorkroomId(workroomId || null);
@@ -1633,6 +1705,11 @@ export default function ManitoV6App() {
   const resetSession = useCallback(async () => {
     dataLoadEpoch.current++;
     lastAuthUser.current = null;
+    try {
+      await disableWebPushForCurrentDevice();
+    } catch {
+      // Session recovery must continue even when the browser cannot remove push.
+    }
     try {
       await getV6Supabase().auth.signOut({ scope: 'local' });
     } catch {
@@ -1810,6 +1887,11 @@ export default function ManitoV6App() {
   }, [profile]);
 
   useEffect(() => {
+    if (!profile || webPushState() !== 'enabled') return;
+    void syncExistingWebPush().catch(() => undefined);
+  }, [profile?.id]);
+
+  useEffect(() => {
     if (!notice) return undefined;
     const timeout = window.setTimeout(() => setNotice(null), 4200);
     return () => window.clearTimeout(timeout);
@@ -1971,6 +2053,11 @@ export default function ManitoV6App() {
       order = await getV6WorkroomOrder(item.entity_id).catch(() => undefined);
     }
     if (!order) {
+      const refreshedOrders = await listV6Orders().catch(() => []);
+      if (refreshedOrders.length) setOrders(refreshedOrders);
+      order = refreshedOrders.find((entry) => entry.id === item.order_id);
+    }
+    if (!order) {
       setNotice('Este aviso ya no tiene un trabajo disponible.');
       return;
     }
@@ -1985,6 +2072,51 @@ export default function ManitoV6App() {
     setFocusedOrderId(order.id);
     setTab('orders');
   }
+
+  useEffect(() => {
+    if (!profile) return;
+    const notificationId = new URLSearchParams(window.location.search).get('notification');
+    if (!notificationId || handledPushNotification.current === notificationId) return;
+    handledPushNotification.current = notificationId;
+
+    void (async () => {
+      try {
+        const destination = await getV6NotificationDestination(notificationId);
+        if (!destination) {
+          setNotice('Este aviso ya no está disponible para esta cuenta.');
+          return;
+        }
+        const nextPage = await listV6Notifications();
+        setNotifications(nextPage.items);
+        setUnreadNotificationCount(nextPage.unreadCount);
+        const stored = nextPage.items.find((item) => item.id === notificationId);
+        await openNotification(stored || {
+          id: destination.notification_id,
+          recipient_id: profile.id,
+          actor_id: null,
+          order_id: destination.order_id,
+          kind: 'order_status',
+          title: 'Novedad en MANITO',
+          body: 'Abrí el trabajo para ver el detalle.',
+          read_at: new Date().toISOString(),
+          archived_at: null,
+          action_key: destination.action_key,
+          entity_type: destination.entity_type,
+          entity_id: destination.entity_id,
+          metadata: {},
+          dedupe_key: null,
+          action_pending: false,
+          created_at: new Date().toISOString(),
+        });
+      } catch {
+        setNotice('No pudimos abrir ese aviso. Revisá tus notificaciones dentro de MANITO.');
+      } finally {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('notification');
+        window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+      }
+    })();
+  }, [profile?.id]);
 
   async function refreshProfile() {
     if (!profile) return;
@@ -3725,6 +3857,8 @@ function ClientHome({
         </section>
       )}
 
+      {activeClientOrder && <PushPermissionCard audience="client" setNotice={setNotice} setError={setError} />}
+
       <section className="v6-home-intro">
         <span>{activeClientOrder ? '¿Necesitás otra cosa?' : `Hola ${profile.full_name?.split(' ')[0] || ''}`}</span>
         <h1>¿Qué necesitás resolver?</h1>
@@ -4765,6 +4899,10 @@ function ProfessionalHome({
         </section>
       )}
 
+      {(directRequests.length > 0 || focusOrder || nextOrder) && (
+        <PushPermissionCard audience="professional" setNotice={setNotice} setError={setError} />
+      )}
+
       {!canOperate && (
         <section className={`v6-operational-state ${onboardingStatus}`}>
           <div>
@@ -5484,11 +5622,13 @@ function OrderCard({
     setRetryingMatching(true);
     setNotice('Buscando profesionales...');
     try {
-      await retryV6ImmediateMatching(order.id);
+      await retryV6OrderSearch(order.id);
       const nextOrders = await listV6Orders();
       setOrders(nextOrders);
       const refreshedOrder = nextOrders.find((item) => item.id === order.id);
-      setNotice(refreshedOrder?.professional_id ? 'Encontramos un profesional.' : 'La búsqueda terminó sin nuevos candidatos. Podés editar la solicitud.');
+      if (refreshedOrder?.professional_id) setNotice('Encontramos un profesional.');
+      else if (refreshedOrder?.status === 'matching_failed') setNotice('La búsqueda terminó sin nuevos candidatos. Podés editar la solicitud.');
+      else setNotice(order.mode === 'quote' ? 'Tu solicitud volvió a quedar abierta para recibir propuestas.' : 'La búsqueda volvió a quedar activa.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo reintentar la búsqueda.');
     } finally {
@@ -5865,14 +6005,25 @@ function OrderCard({
       )}
       {profile.role === 'client' && order.status === 'matching_failed' && (
         <section className="v6-recovery-panel">
-          <strong>No encontramos profesionales disponibles.</strong>
-          <p>Podés volver a buscar con estos datos o cambiar la ubicación, especialidad y modalidad.</p>
+          <strong>{order.mode === 'quote' ? 'No recibimos propuestas disponibles.' : order.mode === 'scheduled' ? 'No encontramos disponibilidad para ese horario.' : 'No encontramos profesionales disponibles.'}</strong>
+          <p>{order.mode === 'quote'
+            ? 'Podés volver a abrir la solicitud o cambiar sus datos.'
+            : order.mode === 'scheduled'
+              ? 'Podés buscar nuevamente o cambiar el horario y los datos de la solicitud.'
+              : 'Podés volver a buscar con estos datos o cambiar la ubicación, especialidad y modalidad.'}</p>
           <div className="v6-actions compact">
             <button className="v6-primary" type="button" disabled={retryingMatching} onClick={retryAutomaticSearch}>
-              {retryingMatching ? 'Buscando profesionales...' : 'Reintentar búsqueda'}
+              {retryingMatching ? 'Buscando profesionales...' : order.mode === 'quote' ? 'Volver a recibir propuestas' : 'Reintentar búsqueda'}
             </button>
             <button className="v6-secondary" type="button" onClick={() => onEditRequest?.(order)}>Editar solicitud</button>
           </div>
+        </section>
+      )}
+      {profile.role === 'client' && order.status === 'waiting_quotes' && proposals.length === 0 && (
+        <section className="v6-recovery-panel waiting">
+          <strong>Aún no recibiste propuestas.</strong>
+          <p>Tu solicitud sigue abierta. Te avisaremos cuando llegue una propuesta.</p>
+          <button className="v6-secondary" type="button" onClick={() => onEditRequest?.(order)}>Editar solicitud</button>
         </section>
       )}
       <AgreementSummary order={order} extras={extras} acceptedProposal={acceptedProposal} />
@@ -7493,6 +7644,7 @@ function AccountPanel({
   }, [profile.id, profile.role]);
 
   async function logout() {
+    await disableWebPushForCurrentDevice().catch(() => undefined);
     await getV6Supabase().auth.signOut();
   }
 

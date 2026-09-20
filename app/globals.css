@@ -3928,6 +3928,51 @@ a.v6-evidence-link {
   overflow-wrap: anywhere;
 }
 
+.v6-push-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #b8d9cb;
+  border-radius: 8px;
+  background: var(--mist);
+  color: var(--green-900);
+  padding: 12px;
+}
+
+.v6-push-card div {
+  min-width: 0;
+}
+
+.v6-push-card strong,
+.v6-push-card p {
+  display: block;
+  margin: 0;
+}
+
+.v6-push-card p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.v6-recovery-panel.waiting {
+  border-color: var(--line);
+  background: white;
+}
+
+@media (max-width: 430px) {
+  .v6-push-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .v6-push-card button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
 .admin-queue-facts,
 .admin-objective-checks {
   display: flex;

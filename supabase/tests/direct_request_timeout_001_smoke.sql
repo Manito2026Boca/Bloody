@@ -82,10 +82,18 @@ select pg_temp.check_true(
   'requested professional accepts before deadline'
 );
 select pg_temp.check_true(
+  (select status='pending_client_confirmation' and price_confirmation_professional_id=current_setting('test.plumber')::uuid
+   from public.orders where id=current_setting('test.accept_order')::uuid),
+  'valid acceptance creates client price confirmation'
+);
+select set_config('request.jwt.claim.sub', current_setting('test.client'), true);
+select public.confirm_order_price(current_setting('test.accept_order')::uuid);
+select pg_temp.check_true(
   (select professional_id=current_setting('test.plumber')::uuid and manual_response_status='accepted'
    from public.orders where id=current_setting('test.accept_order')::uuid),
-  'valid acceptance consumes invitation'
+  'client confirmation consumes invitation'
 );
+select set_config('request.jwt.claim.sub', current_setting('test.plumber'), true);
 
 with inserted as (insert into public.orders(
   id, client_id, service_id, description, address, mode, status,

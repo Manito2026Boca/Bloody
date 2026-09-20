@@ -59,3 +59,41 @@ self.addEventListener('fetch', (event) => {
         (navigation ? await caches.match('/') : null) || new Response('', { status: 503, statusText: 'Offline' })),
   );
 });
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = {};
+  }
+  const title = typeof payload.title === 'string' ? payload.title : 'Novedad en MANITO';
+  const body = typeof payload.body === 'string' ? payload.body : 'Abrí MANITO para ver el detalle.';
+  const url = typeof payload.url === 'string' && payload.url.startsWith('/') ? payload.url : '/';
+  const tag = typeof payload.tag === 'string' ? payload.tag : 'manito-notification';
+  event.waitUntil(self.registration.showNotification(title, {
+    body,
+    tag,
+    renotify: false,
+    icon: '/brand/manito-icon-192.png',
+    badge: '/brand/manito-favicon-64.png',
+    data: { url },
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const relativeUrl = event.notification.data?.url || '/';
+  const destination = new URL(relativeUrl, self.location.origin);
+  if (destination.origin !== self.location.origin) return;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (windows) => {
+      const existing = windows.find((client) => new URL(client.url).origin === self.location.origin);
+      if (existing) {
+        await existing.navigate(destination.href);
+        return existing.focus();
+      }
+      return self.clients.openWindow(destination.href);
+    }),
+  );
+});

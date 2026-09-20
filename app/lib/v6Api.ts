@@ -910,6 +910,14 @@ export async function retryV6ImmediateMatching(orderId: string) {
   fail(error);
 }
 
+export async function retryV6OrderSearch(orderId: string) {
+  const { data, error } = await getV6Supabase().rpc('retry_order_search', {
+    p_order_id: orderId,
+  });
+  fail(error);
+  return (Array.isArray(data) ? data[0] : data) as V6Order;
+}
+
 export async function editV6UncontractedOrder(input: {
   orderId: string;
   locationId?: string | null;
@@ -1261,6 +1269,21 @@ export async function archiveV6Notification(notificationId: string) {
   });
   fail(error);
   return data as string;
+}
+
+export async function getV6NotificationDestination(notificationId: string) {
+  const { data, error } = await getV6Supabase().rpc('get_notification_destination', {
+    p_notification_id: notificationId,
+  });
+  fail(error);
+  const row = Array.isArray(data) ? data[0] : data;
+  return row as {
+    notification_id: string;
+    action_key: string | null;
+    entity_type: string | null;
+    entity_id: string | null;
+    order_id: string | null;
+  } | null;
 }
 
 export async function sendV6WorkroomMessage(input: {

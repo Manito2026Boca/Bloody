@@ -105,6 +105,9 @@ begin
  perform pg_temp.pm_ok(not exists(select 1 from public.order_match_candidates c where c.order_id=q.id and c.professional_id=pg_temp.pm_id('other')),'round excludes incompatible professional');
  perform set_config('request.jwt.claim.sub',pg_temp.pm_id('pro')::text,true);
  perform public.accept_order(q.id);
+ perform pg_temp.pm_ok((select status='pending_client_confirmation' and price_confirmation_professional_id=pg_temp.pm_id('pro') from public.orders where id=q.id),'eligible round creates client price confirmation');
+ perform set_config('request.jwt.claim.sub',pg_temp.pm_id('client')::text,true);
+ perform public.confirm_order_price(q.id);
  perform pg_temp.pm_ok((select professional_id=pg_temp.pm_id('pro') from public.orders where id=q.id),'eligible round acceptance');
  perform set_config('request.jwt.claim.sub',pg_temp.pm_id('other')::text,true);
  perform pg_temp.pm_denied(format('select public.accept_order(%L)',q.id),'second professional cannot replace assignee');
