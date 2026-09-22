@@ -3,6 +3,7 @@
 import type { Session } from '@supabase/supabase-js';
 import Image from 'next/image';
 import { AgreementSummary } from './AgreementSummary';
+import { ClosureCheckpoint, CompletedWorkSummary } from './ClosureSummary';
 import { MatchingLocation, ProfessionalCoverage, CompleteMatchingLocation } from './MatchingLocation';
 import { ProtectionAdminCase, ProtectionPanel } from './ProtectionManito';
 import { RecurringServicesPanel, RecurringAdminPanel } from './RecurringServicesPanel';
@@ -91,6 +92,7 @@ import {
   listV6OrderExtras,
   listV6OrderPhotos,
   listV6OrderProposals,
+  listV6OrderRatings,
   listV6Orders,
   listV6PaymentsForOrder,
   listV6PaymentProfiles,
@@ -182,6 +184,7 @@ import type {
   V6PortfolioItem,
   V6OrderStatus,
   V6Profile,
+  V6Rating,
   V6ProfessionalDocument,
   V6ProfessionalOnboarding,
   V6ProfessionalPaymentAccount,
@@ -5384,6 +5387,7 @@ function OrderCard({
   }, [pinActionError]);
   const [ratingStars, setRatingStars] = useState(5);
   const [ratingComment, setRatingComment] = useState('');
+  const [rating, setRating] = useState<V6Rating | null>(null);
   const [manualReplacementProfessionalId, setManualReplacementProfessionalId] = useState('');
   const [showCancellationForm, setShowCancellationForm] = useState(false);
   const cancellationReasonOptions = profile.role === 'professional' ? professionalCancellationReasons : clientCancellationReasons;
@@ -5501,12 +5505,14 @@ function OrderCard({
           listV6OrderProposals(order.id), listV6OrderExtras(order.id),
           listV6PaymentsForOrder(order.id), listV6OrderPhotos(order.id).then(async rows =>
             Promise.all(rows.map(async photo => ({ ...photo, signedUrl: await getV6MediaSignedUrl(photo.file_path) })))),
+          listV6OrderRatings(order.id),
         ]);
         if (!alive) return;
         if (results[0].status === 'fulfilled') setProposals(results[0].value);
         if (results[1].status === 'fulfilled') setExtras(results[1].value);
         if (results[2].status === 'fulfilled') setPayments(results[2].value);
         if (results[3].status === 'fulfilled') setPhotos(results[3].value);
+        if (results[4].status === 'fulfilled') setRating(results[4].value[0] || null);
         if (results.some(result => result.status === 'rejected')) {
           setNotice('No pudimos actualizar todos los datos del pedido. Revisá tu conexión.');
         }
@@ -5822,13 +5828,12 @@ function OrderCard({
       return;
     }
     try {
-      await addV6Rating({
+      const saved = await addV6Rating({
         orderId: order.id,
-        clientId: profile.id,
-        professionalId: order.professional_id,
         stars: ratingStars,
         comment: ratingComment,
       });
+      setRating(saved);
       setNotice('Calificación enviada.');
       setRatingComment('');
     } catch (caught) {
@@ -5893,14 +5898,11 @@ function OrderCard({
   const headlineAmount = hasConfirmedAgreement
     ? money(order.agreed_price ?? order.price)
     : estimatedMoney(orderEstimatedAmount(order));
-  const beforePhotos = photos.filter((photo) => photo.stage === 'before').length;
-  const afterPhotos = photos.filter((photo) => photo.stage === 'after').length;
   const photosByStage = {
     before: photos.filter((photo) => photo.stage === 'before'),
     during: photos.filter((photo) => photo.stage === 'during'),
     after: photos.filter((photo) => photo.stage === 'after'),
   };
-  const protectionReference = order.completed_at || order.updated_at || order.created_at;
   const latestPayment = payments[0] || null;
   const approvedPaymentTotal = payments
     .filter((payment) => payment.status === 'approved' || payment.status === 'confirmed')
@@ -5972,6 +5974,9 @@ function OrderCard({
           <b>{headlineAmount}</b>
         </span>
       </div>
+      {order.status === 'trabajando' && (
+        <ClosureCheckpoint order={order} extras={extras} photos={photos} />
+      )}
       <div className="v6-order-guidance">
         <span>Próximo paso</span>
         <p>{orderNextStepText(order, profile.role)}</p>
@@ -6434,54 +6439,16 @@ function OrderCard({
         </form>
       )}
       {order.status === 'completed' && (
-        <section className="v6-protection">
-          <div className="v6-section-head compact">
-            <div>
-              <h2>Constancia MANITO</h2>
-              <span>Servicio registrado</span>
-            </div>
-            <ShieldCheck size={18} aria-hidden="true" />
-          </div>
-          <p>
-            Este pedido conserva chat, presupuesto, adicionales y evidencia para revisar cualquier inconveniente relacionado con el trabajo.
-          </p>
-          <div className="v6-proof-grid">
-            <span>
-              <b>Pedido</b>
-              #{order.id.slice(0, 8).toUpperCase()}
-            </span>
-            <span>
-              <b>Finalizado</b>
-              {shortDate(protectionReference)}
-            </span>
-            <span>
-              <b>Servicio</b>
-              {serviceDisplayName(order.service)}
-            </span>
-            <span>
-              <b>{profile.role === 'client' ? 'Profesional' : 'Cliente'}</b>
-              {other?.full_name || 'Usuario MANITO'}
-            </span>
-            <span>
-              <b>Precio final</b>
-              {money(orderServiceTotal(order, approvedExtras) ?? orderDisplayAmount(order))}
-            </span>
-            <span>
-              <b>Evidencia</b>
-              {beforePhotos} antes · {afterPhotos} después
-            </span>
-            <span>
-              <b>Adicionales</b>
-              {approvedExtras.length ? `${approvedExtras.length} aprobados` : 'Sin adicionales'}
-            </span>
-            <span>
-              <b>PIN final</b>
-              Validado
-            </span>
-          </div>
-        </section>
+        <CompletedWorkSummary
+          order={order}
+          extras={extras}
+          photos={photos}
+          payments={payments}
+          rating={rating}
+          counterpart={other?.full_name || 'Usuario MANITO'}
+        />
       )}
-      {profile.role === 'client' && order.status === 'completed' && order.professional_id && (
+      {profile.role === 'client' && order.status === 'completed' && order.professional_id && !rating && (
         <div className="v6-aftercare">
           <form className="v6-inline-form" onSubmit={submitRating}>
             <select value={ratingStars} onChange={(event) => setRatingStars(Number(event.target.value))} aria-label="Estrellas">
@@ -6493,6 +6460,9 @@ function OrderCard({
             <button className="v6-secondary" type="submit">Calificar</button>
           </form>
         </div>
+      )}
+      {profile.role === 'client' && order.status === 'completed' && rating && (
+        <p className="v6-note">Tu calificacion de {rating.stars} estrellas quedo registrada.</p>
       )}
       {showCancellationForm && canCancelOrder && (
         <form className="v6-inline-form" onSubmit={cancel}>

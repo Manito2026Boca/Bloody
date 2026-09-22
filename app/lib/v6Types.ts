@@ -489,6 +489,7 @@ export type V6AdminComplaintReview = V6Complaint & {
   service_name: string;
   order_status: V6OrderStatus;
   order_price: number | null;
+  service_total: number | null;
   client_name: string;
   client_city: string | null;
   professional_name: string | null;

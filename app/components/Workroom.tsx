@@ -5,6 +5,7 @@ import Image from 'next/image';
 import type { FormEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgreementSummary } from './AgreementSummary';
+import { subscribeV6OrderDetails } from '../lib/v6OrderRealtime';
 import {
   getV6WorkroomImageSignedUrl,
   listV6OrderExtras,
@@ -139,9 +140,10 @@ export function WorkroomSheet({
       refreshing = true;
       void loadTimeline(workroom).finally(() => { refreshing = false; });
     };
-    const channel = subscribeV6Workroom(workroom.id, refresh);
-    return () => removeV6Channel(channel);
-  }, [loadTimeline, workroom]);
+    const workroomChannel = subscribeV6Workroom(workroom.id, refresh);
+    const orderChannel = subscribeV6OrderDetails(order.id, refresh);
+    return () => { removeV6Channel(workroomChannel); removeV6Channel(orderChannel); };
+  }, [loadTimeline, order.id, workroom]);
 
   const canSend = workroom?.status === 'open';
   const title = workroom?.phase === 'precontractual' ? 'Conversación del presupuesto' : 'Trabajo compartido';

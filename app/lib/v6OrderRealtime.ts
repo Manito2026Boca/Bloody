@@ -4,7 +4,7 @@ import { getV6Supabase } from './v6Supabase';
 
 export function subscribeV6OrderDetails(orderId: string, onChange: () => void) {
   const channel = getV6Supabase().channel(`manito-v6-details-${orderId}`);
-  for (const table of ['order_proposals', 'order_extras', 'payments', 'order_photos']) {
+  for (const table of ['order_proposals', 'order_extras', 'payments', 'order_photos', 'ratings', 'complaints']) {
     channel.on('postgres_changes', {
       event: '*', schema: 'public', table, filter: `order_id=eq.${orderId}`,
     }, onChange);

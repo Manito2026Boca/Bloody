@@ -5,6 +5,7 @@ import { FileText, RefreshCw, Send, ShieldCheck, Upload } from 'lucide-react';
 import { addV6Complaint, getV6MediaSignedUrl, listV6Complaints, removeV6Channel, reviewV6OrderComplaint } from '../lib/v6Api';
 import { getV6ComplaintContext, listV6ComplaintEvidence, respondToV6Complaint, subscribeV6Complaints, uploadV6ComplaintEvidence } from '../lib/v6ProtectionApi';
 import { canOpenProtection, claimLabels, complaintStatusLabels, isMonetaryResolution, isTerminalComplaint, protectionDeadline, resolutionLabels } from '../lib/v6Protection';
+import { approvedExtrasTotal } from '../lib/economics';
 import type { V6AdminComplaintReview, V6ClaimType, V6Complaint, V6ComplaintContext, V6ComplaintEvidence, V6Order, V6OrderPhoto, V6Profile, V6ResolutionType } from '../lib/v6Types';
 
 const date = (value: string | number) => new Date(value).toLocaleString('es-AR');
@@ -119,25 +120,29 @@ export function ProtectionPanel({ order, profile, notify }: { order: V6Order; pr
   }
   return <section className="v6-protection compact">
     <div className="v6-section-head compact"><h2>Protección MANITO</h2><ShieldCheck size={18} aria-hidden="true" /></div>
+    <p>Si surge un inconveniente relacionado con este trabajo, podés solicitar que MANITO revise el historial. La revisión no garantiza una resolución específica.</p>
     <p>{deadline !== null ? (deadline > now ? `Protección disponible hasta ${date(deadline)}.` : `El plazo para abrir un caso terminó el ${date(deadline)}.`) : 'No hay una ventana de Protección registrada para este pedido.'}</p>
     {loading && <p role="status">Cargando casos...</p>}
     {cases.map((item) => <ParticipantCase key={item.id} item={item} order={order} profile={profile} refresh={refresh} notify={notify} />)}
     {!loading && !error && canOpenProtection(order, profile.id, cases, now) &&
       <form className="v6-inline-form" onSubmit={(event) => void open(event)}>
-        <h3>Reportar un problema</h3>
+        <h3>Solicitar revisión</h3>
         <label className="v6-field"><span>Tipo de problema</span><select value={type} onChange={(event) => setType(event.target.value as V6ClaimType)}>{Object.entries(claimLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
         <label className="v6-field"><span>Qué pasó</span><textarea required minLength={type === 'other' ? 20 : 10} maxLength={5000} value={detail} onChange={(event) => setDetail(event.target.value)} /></label>
         <label className="v6-field"><span>Evidencia opcional</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
-        <button className="v6-secondary" type="submit" disabled={busy}><ShieldCheck size={16} aria-hidden="true" /> {busy ? 'Enviando...' : 'Reportar un problema'}</button>
+        <button className="v6-secondary" type="submit" disabled={busy}><ShieldCheck size={16} aria-hidden="true" /> {busy ? 'Enviando...' : 'Solicitar revisión'}</button>
       </form>}
     {error && <div role="alert"><p>{error}</p><button className="v6-text-button" type="button" onClick={() => { setError(''); void refresh().catch((caught) => setError(message(caught))); }}><RefreshCw size={16} /> Reintentar</button></div>}
   </section>;
 }
 
 function InvestigationContext({ context }: { context: V6ComplaintContext }) {
+  const approvedExtras = context.extras.filter((extra) => extra.status === 'approved');
+  const approvedTotal = approvedExtrasTotal(approvedExtras);
+  const serviceTotal = context.order.agreed_price == null ? null : Number(context.order.agreed_price) + approvedTotal;
   return <div className="v6-protection-context">
     <h4>Contrato</h4>
-    <p>Finalizado: {context.order.completed_at ? date(context.order.completed_at) : 'Sin fecha'} · {amount(context.order.agreed_price)}</p>
+    <p>Finalizado: {context.order.completed_at ? date(context.order.completed_at) : 'Sin fecha'} · precio acordado {amount(context.order.agreed_price)}</p>
     <p className="v6-protection-text">{context.order.agreed_scope || 'Sin alcance contractual histórico registrado.'}</p>
     {context.order.contract_snapshot && <details><summary>Detalle del contrato aceptado</summary><pre>{JSON.stringify(context.order.contract_snapshot, null, 2)}</pre></details>}
     <h4>Propuesta aceptada</h4>
@@ -145,6 +150,7 @@ function InvestigationContext({ context }: { context: V6ComplaintContext }) {
     <h4>Adicionales</h4>
     {context.extras.map((extra) => <p key={extra.id}>{extra.title} · {amount(extra.amount)} · {extra.status === 'approved' ? 'Aprobado' : extra.status === 'rejected' ? 'Rechazado' : 'Pendiente'}</p>)}
     {!context.extras.length && <p>Sin adicionales.</p>}
+    <p><strong>Total del servicio:</strong> {amount(serviceTotal)} ({amount(approvedTotal)} en adicionales aprobados)</p>
     <h4>Evidencia del trabajo</h4><EvidenceLinks files={context.order_evidence} />
     <h4>Evidencia del reclamo</h4><EvidenceLinks files={context.complaint_evidence} />
     <h4>Pago</h4>
@@ -189,7 +195,7 @@ export function ProtectionAdminCase({ item, refresh, notify }: { item: V6AdminCo
   }
   return <article className="v6-admin-review-card v6-protection-case">
     <h3>{item.service_name}</h3>
-    <p>{item.client_name} · Profesional: {item.professional_name || 'Sin dato'}</p>
+    <p>{item.client_name} · Profesional: {item.professional_name || 'Sin dato'} · Total {amount(item.service_total)}</p>
     <CaseSummary item={item} />
     <button className="v6-text-button" type="button" onClick={() => setExpanded(!expanded)}>{expanded ? 'Ocultar detalle' : 'Revisar contrato y evidencia'}</button>
     {expanded && (context ? <InvestigationContext context={context} /> : <p role="status">Cargando detalle...</p>)}

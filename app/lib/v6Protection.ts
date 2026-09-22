@@ -1,8 +1,8 @@
 import type { V6ClaimType, V6Complaint, V6Order, V6ResolutionType } from './v6Types';
 
 export const claimLabels: Record<V6ClaimType, string> = {
-  work_quality: 'Problema con la calidad del trabajo',
-  incomplete_work: 'Trabajo incompleto',
+  work_quality: 'El problema continúa o el resultado no es el acordado',
+  incomplete_work: 'Trabajo incompleto o problema relacionado',
   damage: 'Daño',
   unexpected_charge: 'Cobro no acordado',
   professional_conduct: 'Conducta del profesional',

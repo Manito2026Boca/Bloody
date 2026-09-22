@@ -34,6 +34,7 @@ import type {
   V6ProfessionalSpecialty,
   V6PublicProfessional,
   V6RecurringServicePlan,
+  V6Rating,
   V6Role,
   V6Service,
   V6Specialty,
@@ -1120,24 +1121,26 @@ export async function decideV6OrderExtra(extraId: string, status: 'approved' | '
 
 export async function addV6Rating(input: {
   orderId: string;
-  clientId: string;
-  professionalId: string;
   stars: number;
   comment: string;
 }) {
+  const { data, error } = await getV6Supabase().rpc('submit_order_rating', {
+    p_order_id: input.orderId,
+    p_stars: input.stars,
+    p_comment: input.comment || null,
+  });
+  fail(error);
+  return singleRpcRow(data as V6Rating | V6Rating[] | null, 'No se pudo guardar la calificacion.');
+}
+
+export async function listV6OrderRatings(orderId: string) {
   const { data, error } = await getV6Supabase()
     .from('ratings')
-    .insert({
-      order_id: input.orderId,
-      client_id: input.clientId,
-      professional_id: input.professionalId,
-      stars: input.stars,
-      comment: input.comment || null,
-    })
     .select('*')
-    .single();
+    .eq('order_id', orderId)
+    .order('created_at', { ascending: false });
   fail(error);
-  return data;
+  return (data || []) as V6Rating[];
 }
 
 export async function addV6Complaint(input: {
