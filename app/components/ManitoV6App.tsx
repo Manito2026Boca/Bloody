@@ -57,6 +57,7 @@ import {
   acceptV6Proposal,
   acceptV6Order,
   addV6OrderPhoto,
+  addV6ProfessionalService,
   addV6OrderExtra,
   addV6PortfolioItem,
   addV6Rating,
@@ -107,6 +108,7 @@ import {
   markV6NotificationRead,
   markV6NotificationsRead,
   removeV6MediaFiles,
+  removeV6ProfessionalService,
   removeV6Channel,
   reviewV6ProfessionalDocument,
   reviewV6ProfessionalOnboarding,
@@ -119,6 +121,7 @@ import {
   sendV6OrderProposal,
   saveV6ProfessionalServices,
   saveV6ProfessionalSpecialties,
+  saveV6SpecialtiesForService,
   setV6Availability,
   startV6Order,
   subscribeV6Orders,
@@ -6566,9 +6569,23 @@ function ProfilePanel({
   const [submittingOnboarding, setSubmittingOnboarding] = useState(false);
   const [professionalServiceGroup, setProfessionalServiceGroup] = useState<ServiceGroupId>('home');
   const [serviceSearch, setServiceSearch] = useState('');
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [specialtySearch, setSpecialtySearch] = useState('');
   const [showServiceCatalog, setShowServiceCatalog] = useState(false);
   const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
+  const [draftSpecialtyIds, setDraftSpecialtyIds] = useState<Set<number>>(new Set());
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [editorError, setEditorError] = useState('');
   const [savingCatalog, setSavingCatalog] = useState(false);
+  const catalogSavingRef = useRef(false);
+
+  useEffect(() => {
+    if (!editingServiceId && !showServiceCatalog) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [editingServiceId, showServiceCatalog]);
 
   useEffect(() => {
     let alive = true;
@@ -6639,14 +6656,16 @@ function ProfilePanel({
   );
   const visibleProfessionalServices = useMemo(
     () => filterServicesByGroup(services, professionalServiceGroup).filter((service) =>
-      `${serviceDisplayName(service)} ${service.slug}`.toLocaleLowerCase('es').includes(serviceSearch.trim().toLocaleLowerCase('es')),
+      `${serviceDisplayName(service)} ${service.slug}`.toLocaleLowerCase('es').includes(catalogSearch.trim().toLocaleLowerCase('es')),
     ),
-    [professionalServiceGroup, serviceSearch, services],
+    [professionalServiceGroup, catalogSearch, services],
   );
-  const selectedSpecialtyIds = useMemo(
-    () => new Set(proSpecialties.map((item) => item.specialty_id)),
-    [proSpecialties],
-  );
+  const listedProfessionalServices = useMemo(() => proServices
+    .map((item) => services.find((service) => service.id === item.service_id))
+    .filter((service): service is V6Service => Boolean(service))
+    .sort((a, b) => serviceDisplayName(a).localeCompare(serviceDisplayName(b), 'es'))
+    .filter((service) => serviceDisplayName(service).toLocaleLowerCase('es').includes(serviceSearch.trim().toLocaleLowerCase('es'))),
+  [proServices, serviceSearch, services]);
   const specialtiesByService = useMemo(
     () =>
       specialties.reduce<Record<number, V6Specialty[]>>((groups, specialty) => {
@@ -6766,65 +6785,89 @@ function ProfilePanel({
     }
   }
 
-  async function toggleService(serviceId: number) {
+  function openServiceEditor(serviceId: number) {
+    setDraftSpecialtyIds(new Set(proSpecialties.filter((item) => item.service_id === serviceId).map((item) => item.specialty_id)));
+    setSpecialtySearch('');
+    setEditorError('');
+    setConfirmDiscard(false);
+    setConfirmRemove(false);
+    setShowServiceCatalog(false);
+    setEditingServiceId(serviceId);
+  }
+
+  const savedEditorIds = new Set(proSpecialties.filter((item) => item.service_id === editingServiceId).map((item) => item.specialty_id));
+  const hasUnsavedSpecialties = editingServiceId !== null && (
+    !selectedServiceIds.has(editingServiceId) ||
+    draftSpecialtyIds.size !== savedEditorIds.size ||
+    [...draftSpecialtyIds].some((id) => !savedEditorIds.has(id))
+  );
+
+  function leaveServiceEditor() {
     if (savingCatalog) return;
-    const previousServices = proServices;
-    const previousSpecialties = proSpecialties;
-    const current = new Set(proServices.map((item) => item.service_id));
-    if (current.has(serviceId)) current.delete(serviceId);
-    else current.add(serviceId);
-    const nextServiceIds = [...current];
-    const nextSpecialtyIds = proSpecialties
-      .filter((item) => current.has(item.service_id))
-      .map((item) => item.specialty_id);
-    setProServices(nextServiceIds.map((id) => previousServices.find((item) => item.service_id === id) || {
-      professional_id: profile.id,
-      service_id: id,
-      price_from: services.find((item) => item.id === id)?.base_price || null,
-    }));
-    setProSpecialties(previousSpecialties.filter((item) => current.has(item.service_id)));
+    if (hasUnsavedSpecialties) { setConfirmDiscard(true); return; }
+    setEditingServiceId(null);
+  }
+
+  async function saveServiceEditor() {
+    if (editingServiceId === null || catalogSavingRef.current) return;
+    const serviceId = editingServiceId;
+    const service = services.find((item) => item.id === serviceId);
+    if (!service) return;
+    catalogSavingRef.current = true;
     setSavingCatalog(true);
+    setEditorError('');
+    let addedService: V6ProfessionalService | null = null;
     try {
-      const nextServices = await saveV6ProfessionalServices(profile.id, nextServiceIds, services, serviceRatesFor(nextServiceIds));
-      setProServices(nextServices);
-      setProSpecialties(await saveV6ProfessionalSpecialties(profile.id, nextSpecialtyIds, specialties));
-      if (current.has(serviceId)) {
-        setEditingServiceId(serviceId);
-        setShowServiceCatalog(false);
-      } else if (editingServiceId === serviceId) {
-        setEditingServiceId(null);
+      if (!selectedServiceIds.has(serviceId)) {
+        addedService = await addV6ProfessionalService(profile.id, service);
       }
-      setNotice('Servicios guardados.');
+      const saved = await saveV6SpecialtiesForService(profile.id, serviceId, [...draftSpecialtyIds], specialties);
+      if (addedService) setProServices([...proServices, addedService]);
+      setProSpecialties([...proSpecialties.filter((item) => item.service_id !== serviceId), ...saved]);
+      setEditingServiceId(null);
+      setNotice('Cambios guardados.');
     } catch (caught) {
-      setProServices(previousServices);
-      setProSpecialties(previousSpecialties);
-      setError(caught instanceof Error ? caught.message : 'No se guardaron servicios.');
+      let rollbackFailed = false;
+      if (addedService) {
+        try { await removeV6ProfessionalService(profile.id, serviceId); }
+        catch { rollbackFailed = true; }
+      }
+      try {
+        const [currentServices, currentSpecialties] = await Promise.all([
+          listV6ProfessionalServices(profile.id),
+          listV6ProfessionalSpecialties(profile.id),
+        ]);
+        setProServices(currentServices);
+        setProSpecialties(currentSpecialties);
+      } catch { /* Keep the draft and allow retry if the network is unavailable. */ }
+      setEditorError(rollbackFailed
+        ? 'El guardado quedó incompleto. Revisá el servicio antes de reintentar.'
+        : 'No se pudieron guardar los cambios. Probá de nuevo.');
     } finally {
+      catalogSavingRef.current = false;
       setSavingCatalog(false);
     }
   }
 
-  async function toggleSpecialty(specialty: V6Specialty) {
-    if (!selectedServiceIds.has(specialty.service_id) || savingCatalog) return;
-    const previous = proSpecialties;
-    const current = new Set(proSpecialties.map((item) => item.specialty_id));
-    if (current.has(specialty.id)) current.delete(specialty.id);
-    else current.add(specialty.id);
-    const next = [...current];
-    setProSpecialties(next.map((id) => previous.find((item) => item.specialty_id === id) || {
-      professional_id: profile.id,
-      service_id: specialties.find((item) => item.id === id)?.service_id || specialty.service_id,
-      specialty_id: id,
-      created_at: new Date().toISOString(),
-    }));
+  async function removeServiceFromEditor() {
+    if (editingServiceId === null || catalogSavingRef.current) return;
+    const serviceId = editingServiceId;
+    catalogSavingRef.current = true;
     setSavingCatalog(true);
+    setEditorError('');
     try {
-      setProSpecialties(await saveV6ProfessionalSpecialties(profile.id, next, specialties));
-      setNotice('Especialidades guardadas.');
+      if (selectedServiceIds.has(serviceId)) await removeV6ProfessionalService(profile.id, serviceId);
+      setProServices(proServices.filter((item) => item.service_id !== serviceId));
+      setProSpecialties(proSpecialties.filter((item) => item.service_id !== serviceId));
+      setEditingServiceId(null);
+      setConfirmRemove(false);
+      setNotice('Servicio eliminado.');
     } catch (caught) {
-      setProSpecialties(previous);
-      setError(caught instanceof Error ? caught.message : 'No se guardaron especialidades.');
+      setConfirmRemove(false);
+      setEditorError(caught instanceof Error && caught.message.startsWith('Este servicio está vinculado')
+        ? caught.message : 'No se pudo quitar el servicio. Probá de nuevo.');
     } finally {
+      catalogSavingRef.current = false;
       setSavingCatalog(false);
     }
   }
@@ -7145,66 +7188,73 @@ function ProfilePanel({
       </section>
 
       {professionalStep === 2 && (
-          <section className="v6-card">
-            <h2>Servicios que ofrecés</h2>
-            <p className="v6-help-text">
-              Agregá un rubro y elegí sólo las tareas que realizás.
-            </p>
-            {proServices.length > 0 && (
-              <div className="v6-selected-service-list">
-                <div className="v6-section-head compact">
-                  <h3>Servicios seleccionados</h3>
-                  <span>{proServices.length}</span>
-                </div>
-                {proServices.map((item) => {
-                  const service = services.find((candidate) => candidate.id === item.service_id);
-                  if (!service) return null;
-                  const count = proSpecialties.filter((specialty) => specialty.service_id === item.service_id).length;
-                  return (
-                    <button className="v6-selected-service" type="button" key={item.service_id} onClick={() => setEditingServiceId(item.service_id)}>
-                      <span>{serviceIcon(service.slug)}</span>
-                      <span><strong>{serviceDisplayName(service)}</strong><small>{count ? `${count} especialidades seleccionadas` : 'Elegí tus especialidades'}</small></span>
-                      <ChevronRight size={18} aria-hidden="true" />
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            <button className="v6-secondary v6-add-service" type="button" onClick={() => { setShowServiceCatalog((value) => !value); setEditingServiceId(null); }}>
-              {showServiceCatalog ? 'Cerrar catálogo' : '+ Agregar servicio'}
-            </button>
-            {showServiceCatalog && (
-              <div className="v6-service-catalog">
-                <label className="v6-field"><span>Buscar servicio</span><input value={serviceSearch} onChange={(event) => setServiceSearch(event.target.value)} placeholder="Ej: plomería" /></label>
+        <>
+          <section className="v6-card v6-services-page">
+            <div className="v6-section-head compact">
+              <div><h2>Servicios que ofrecés</h2><span>{proServices.length} {proServices.length === 1 ? 'servicio' : 'servicios'}</span></div>
+              <button className="v6-secondary" type="button" onClick={() => setShowServiceCatalog(true)}>Agregar servicio</button>
+            </div>
+            <label className="v6-field"><span>Buscar en mis servicios</span><input type="search" value={serviceSearch} onChange={(event) => setServiceSearch(event.target.value)} placeholder="Buscar servicio" /></label>
+            <div className="v6-selected-service-list">
+              {listedProfessionalServices.map((service) => {
+                const count = proSpecialties.filter((item) => item.service_id === service.id).length;
+                return (
+                  <button className="v6-selected-service" type="button" key={service.id} onClick={() => openServiceEditor(service.id)}>
+                    <span aria-hidden="true">{serviceIcon(service.slug)}</span>
+                    <span><strong>{serviceDisplayName(service)}</strong><small>{count ? `${count} ${count === 1 ? 'especialidad seleccionada' : 'especialidades seleccionadas'}` : 'Sin especialidades seleccionadas'}</small></span>
+                    <ChevronRight size={18} aria-hidden="true" />
+                  </button>
+                );
+              })}
+              {!listedProfessionalServices.length && <p className="v6-muted">{proServices.length ? 'No hay servicios con esa búsqueda.' : 'Todavía no agregaste servicios.'}</p>}
+            </div>
+          </section>
+
+          {showServiceCatalog && (
+            <div className="v6-service-screen" role="dialog" aria-modal="true" aria-label="Agregar servicio">
+              <header className="v6-service-screen-head"><button type="button" className="v6-icon-button" onClick={() => setShowServiceCatalog(false)} aria-label="Volver a mis servicios"><ArrowLeft size={20} /></button><h2>Agregar servicio</h2></header>
+              <div className="v6-service-screen-scroll">
+                <label className="v6-field"><span>Buscar servicio</span><input type="search" value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Ej: plomería" /></label>
                 <div className="v6-chip-row nowrap">
                   {serviceGroups.map((group) => <button type="button" key={group.id} aria-pressed={professionalServiceGroup === group.id} onClick={() => setProfessionalServiceGroup(group.id)}>{group.label}</button>)}
                 </div>
                 <div className="v6-service-catalog-list">
-                  {visibleProfessionalServices.filter((service) => !selectedServiceIds.has(service.id)).map((service) => (
-                    <button type="button" key={service.id} disabled={savingCatalog} onClick={() => void toggleService(service.id)}>
-                      <span>{serviceIcon(service.slug)}</span><strong>{serviceDisplayName(service)}</strong><span>Agregar</span>
+                  {[...visibleProfessionalServices].sort((a, b) => serviceDisplayName(a).localeCompare(serviceDisplayName(b), 'es')).map((service) => (
+                    <button type="button" key={service.id} onClick={() => openServiceEditor(service.id)}>
+                      <span aria-hidden="true">{serviceIcon(service.slug)}</span><strong>{serviceDisplayName(service)}</strong><span>{selectedServiceIds.has(service.id) ? 'Ya agregado' : 'Elegir'}</span>
                     </button>
                   ))}
                 </div>
-                {!visibleProfessionalServices.some((service) => !selectedServiceIds.has(service.id)) && <p className="v6-muted">No hay otros servicios con este filtro.</p>}
+                {!visibleProfessionalServices.length && <p className="v6-muted">No hay servicios con ese filtro.</p>}
               </div>
-            )}
-            {editingServiceId && (() => {
-              const service = services.find((item) => item.id === editingServiceId);
-              const serviceSpecialties = specialtiesByService[editingServiceId] || [];
-              if (!service) return null;
-              return (
-                <div className="v6-specialty-editor">
-                  <div className="v6-section-head compact"><div><h3>{serviceDisplayName(service)}</h3><span>Elegí las tareas que realizás</span></div><button className="v6-icon-button" type="button" onClick={() => setEditingServiceId(null)} aria-label="Cerrar">×</button></div>
-                  <div className="v6-chip-list">
-                    {serviceSpecialties.map((specialty) => <button type="button" key={specialty.id} disabled={savingCatalog} aria-pressed={selectedSpecialtyIds.has(specialty.id)} onClick={() => void toggleSpecialty(specialty)}>{specialty.name}</button>)}
+            </div>
+          )}
+
+          {editingServiceId !== null && (() => {
+            const service = services.find((item) => item.id === editingServiceId);
+            if (!service) return null;
+            const choices = specialtiesByService[service.id] || [];
+            const visibleChoices = choices.filter((item) => item.name.toLocaleLowerCase('es').includes(specialtySearch.trim().toLocaleLowerCase('es')));
+            return (
+              <div className="v6-service-screen" role="dialog" aria-modal="true" aria-label={`Editar ${serviceDisplayName(service)}`}>
+                <header className="v6-service-screen-head"><button type="button" className="v6-icon-button" onClick={leaveServiceEditor} aria-label="Volver a mis servicios"><ArrowLeft size={20} /></button><h2>{serviceDisplayName(service)}</h2></header>
+                <div className="v6-service-screen-scroll">
+                  <div className="v6-section-head compact"><h3>¿Qué tareas realizás?</h3><span>{draftSpecialtyIds.size} seleccionadas</span></div>
+                  {choices.length > 8 && <label className="v6-field"><span>Buscar especialidad</span><input type="search" value={specialtySearch} onChange={(event) => setSpecialtySearch(event.target.value)} placeholder="Buscar tarea" /></label>}
+                  <div className="v6-specialty-choices">
+                    {visibleChoices.map((specialty) => <label className="v6-specialty-choice" key={specialty.id}><input type="checkbox" checked={draftSpecialtyIds.has(specialty.id)} onChange={() => setDraftSpecialtyIds((current) => { const next = new Set(current); if (next.has(specialty.id)) next.delete(specialty.id); else next.add(specialty.id); return next; })} /><span>{specialty.name}</span></label>)}
+                    {!visibleChoices.length && <p className="v6-muted">No hay tareas con esa búsqueda.</p>}
                   </div>
-                  <button className="v6-link-button danger" type="button" disabled={savingCatalog} onClick={() => void toggleService(editingServiceId)}>Quitar servicio</button>
+                  {selectedServiceIds.has(service.id) && <button className="v6-link-button danger" type="button" disabled={savingCatalog} onClick={() => setConfirmRemove(true)}>Dejar de ofrecer este servicio</button>}
+                  {editorError && <p className="v6-alert" role="alert">{editorError}</p>}
                 </div>
-              );
-            })()}
-            {savingCatalog && <p className="v6-save-status" role="status">Guardando cambios...</p>}
-          </section>
+                <footer className="v6-service-screen-footer"><button className="v6-primary" type="button" disabled={savingCatalog || (!hasUnsavedSpecialties && !editorError)} onClick={() => void saveServiceEditor()}>{savingCatalog ? 'Guardando…' : 'Guardar cambios'}</button></footer>
+                {confirmDiscard && <div className="v6-service-confirm" role="alertdialog" aria-modal="true" aria-label="Cambios sin guardar"><div><h3>Tenés cambios sin guardar</h3><p>¿Querés seguir editando o descartarlos?</p><button className="v6-primary" type="button" onClick={() => setConfirmDiscard(false)}>Seguir editando</button><button className="v6-secondary" type="button" onClick={() => { setConfirmDiscard(false); setEditingServiceId(null); }}>Descartar cambios</button></div></div>}
+                {confirmRemove && <div className="v6-service-confirm" role="alertdialog" aria-modal="true" aria-label="Quitar servicio"><div><h3>Dejar de ofrecer {serviceDisplayName(service)}</h3><p>Se quitarán sus especialidades de tu perfil.</p><button className="v6-danger" type="button" disabled={savingCatalog} onClick={() => void removeServiceFromEditor()}>Quitar {serviceDisplayName(service)}</button><button className="v6-secondary" type="button" disabled={savingCatalog} onClick={() => setConfirmRemove(false)}>Seguir editando</button></div></div>}
+              </div>
+            );
+          })()}
+        </>
       )}
 
       {professionalStep === 1 && (

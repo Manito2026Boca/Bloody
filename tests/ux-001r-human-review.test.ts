@@ -47,12 +47,15 @@ describe('UX-001R human review regressions', () => {
     expect(migration).not.toContain("else 'Pedido actualizado'");
   });
 
-  it('uses progressive disclosure and immediate visual state for professional services', () => {
-    expect(app).toContain('Servicios seleccionados');
-    expect(app).toContain('+ Agregar servicio');
-    expect(app).toContain('setProServices(nextServiceIds.map');
-    expect(app).toContain('setProServices(previousServices)');
-    expect(app).toContain('Guardando cambios...');
+  it('uses a dedicated service editor and saves the local specialty selection on demand', () => {
+    expect(app).toContain('Buscar en mis servicios');
+    expect(app).toContain('Agregar servicio');
+    expect(app).toContain('draftSpecialtyIds');
+    expect(app).toContain('setDraftSpecialtyIds((current)');
+    expect(app).toContain('Guardar cambios');
+    expect(app).toContain('Seguir editando');
+    expect(app).toContain('Descartar cambios');
+    expect(api).toContain('saveV6SpecialtiesForService');
   });
 
   it('shows useful agenda empty and configured states', () => {
