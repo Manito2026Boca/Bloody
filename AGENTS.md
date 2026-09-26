@@ -19,6 +19,7 @@ Read this file before work. Use [multiagent workflow](docs/DEVELOPMENT_MULTIAGEN
 
 ## Delivery
 
+- For blocks with significant architecture, product, UX, or work-split decisions, Astra Medium is the Architect/Planning Lead: it freezes the approved behavior, shared interfaces, ownership, and acceptance criteria in the MASTER TASK. Sol Medium implementers execute that specification; the Sol Medium integrator retains technical security, compatibility, and integration authority. If evidence invalidates an architectural decision, stop that part and report `ARCHITECT_DECISION_REQUIRED`; do not improvise a replacement architecture.
 - Implementers run focused tests; the integrator checks cross-package behavior, then runs the final full suite once, TypeScript, build, relevant smoke and Browser QA. A passing build does not replace a real two-account or human test. Mark Human Test pending until a person completes it.
 - Preview is not production. Do not push, deploy, migrate a remote database, change infrastructure, or claim a deployed commit without task authorization and verification. Commit only scoped changes; preserve unrelated work.
 - Report: scope and result, files/migrations, security or product decisions, tests and their limits, preview/production deployment with verified commit if any, Human Test status, and remaining risks. Say plainly when something could not be verified.

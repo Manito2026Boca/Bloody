@@ -1,12 +1,18 @@
 # MANITO multiagent workflow
 
-Use [root agent rules](../AGENTS.md) on every task. This document governs coordination, not product behavior. Start from a named block, an exact base commit, an owner for shared contracts, and acceptance criteria. The coordinator is the sole integration authority.
+Use [root agent rules](../AGENTS.md) on every task. This document governs coordination, not product behavior. Start from a named block, an exact base commit, an owner for shared contracts, and acceptance criteria.
+
+## Design authority
+
+For blocks requiring significant architecture, product, UX, or work-split decisions, Astra Medium is the Architect/Planning Lead. It analyzes the problem, defines expected behavior and dependencies, freezes shared interfaces, decides whether packages are truly independent, produces the MASTER TASK and Package A/B specifications when applicable, and sets acceptance criteria. It does not implement code unless explicitly instructed.
+
+Sol Medium implementers execute the approved specification. The Sol Medium coordinator/integrator retains authority over technical security, compatibility, and integration. If implementation evidence invalidates an Architect decision, stop that part and report `ARCHITECT_DECISION_REQUIRED` with evidence; do not silently redesign or merge around it. Unaffected independent work may continue.
 
 ## Staffing and ownership
 
 - Default: one coordinator/integrator and one implementer. Use two implementers only when ownership is disjoint, shared interfaces are agreed first, each package can be tested independently, and neither writes the same central file or migration area. Otherwise work sequentially.
 - One central file, one writer per cycle. Assign a single owner for shared types, migrations, RPC contracts, central UI/API modules, and generated artifacts. Agree on shared interfaces before parallel work. If a package needs unmerged code from another, run them sequentially in a new cycle/base instead of pretending they are independent.
-- Implementers own only their packages. They do not merge each other's branches or change shared remote state. The coordinator resolves cross-package decisions and integrates.
+- Implementers own only their packages. They do not merge each other's branches or change shared remote state. The coordinator resolves technical integration decisions within the approved design and integrates.
 - Use an independent, read-only reviewer when a block changes Auth, permissions, security, economic contracts, concurrency, persistence, PWA, significant migrations, or cross-module behavior. Review commits/diffs, error states, permission boundaries, regressions, and test sufficiency. Do not add a reviewer for trivial changes.
 
 ## Branches and worktrees
@@ -34,6 +40,6 @@ Worktrees isolate files, **not** Supabase, Auth, QA accounts, production data, V
 
 ## Model policy
 
-Sol Medium is MANITO's default for coordination, implementation, integration, debugging, and technical review. Do not downgrade automatically to save cost. Focus context, split only independent execution, avoid repeated audits/full suites, and keep reports brief. Astra is optional for architecture, product/UX, or difficult conceptual review; no technical workflow depends on it.
+Astra Medium leads planning when a block requires significant architecture, product, UX, or work-split decisions. Sol Medium is the default for coordination, implementation, integration, debugging, and technical review. Do not downgrade automatically to save cost. Focus context, split only independent execution, avoid repeated audits/full suites, and keep reports brief. Blocks without significant design decisions do not need an Architect pass.
 
 Use the [reusable task templates](templates/MULTIAGENT_TASKS.md). With one implementer, omit Package B and integrate Package A alone.

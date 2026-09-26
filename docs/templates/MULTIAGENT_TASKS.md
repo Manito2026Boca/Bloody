@@ -6,9 +6,11 @@ Fill only relevant fields. Every agent reads [AGENTS.md](../../AGENTS.md) and th
 
 ```text
 BLOCK: <ID>
+DESIGN AUTHORITY: <Astra Medium Architect for significant decisions, or not needed>
 BASE COMMIT: <full SHA; same for all packages>
 OBJECTIVE / ACCEPTANCE: <observable outcome>
-SHARED CONTRACTS: <API, types, DB, product invariants and their single owner>
+APPROVED BEHAVIOR / DECISIONS: <frozen product, UX, and architecture decisions>
+SHARED CONTRACTS: <frozen API, types, DB, product invariants and their single owner>
 OWNERSHIP: Coordinator <areas>; Package A <files/area>; Package B <files/area or none>
 DEPENDENCIES / ORDER: <what must land first>
 CENTRAL FILES / REMOTE OWNER: <single writer; one operator for Supabase/Auth/deploy>
@@ -28,6 +30,7 @@ INTERFACES: <agreed inputs/outputs and dependency on other package>
 DO NOT TOUCH: <other package, remote state, unrelated modules>
 FOCUSED TESTS: <commands and scenarios>
 HANDOFF: <commit, diff summary, tests/results, risks; no integration/deploy>
+ESCALATION: <if evidence invalidates the approved design, stop that part and report ARCHITECT_DECISION_REQUIRED>
 ```
 
 ## PACKAGE B
@@ -42,6 +45,7 @@ INTERFACES: <agreed inputs/outputs; no dependency on unmerged Package A code>
 DO NOT TOUCH: <Package A, remote state, unrelated modules>
 FOCUSED TESTS: <commands and scenarios>
 HANDOFF: <commit, diff summary, tests/results, risks; no integration/deploy>
+ESCALATION: <if evidence invalidates the approved design, stop that part and report ARCHITECT_DECISION_REQUIRED>
 ```
 
 ## REVIEW TASK
@@ -60,6 +64,7 @@ OUTPUT: <findings first with file/line and severity; gaps/assumptions; no edits 
 BASE COMMIT / INTEGRATION BRANCH: <SHA; codex/<bloque>/integration>
 PACKAGE BRANCHES / COMMITS / ORDER: <A, then B if used>
 DIFF REVIEW: <base, scope, ownership, shared contracts, duplicates, dependencies>
+DESIGN CHECK: <approved Architect decisions still valid; otherwise ARCHITECT_DECISION_REQUIRED>
 MERGE: <one at a time; inspect conflicts manually; combined-diff review>
 CROSS TESTS: <interfaces and user journeys across packages>
 FINAL QA: <full suite once, TypeScript, build, relevant smoke, Browser QA>
