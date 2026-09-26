@@ -432,6 +432,71 @@ export async function saveV6ProfessionalSpecialties(
   return (data || []) as V6ProfessionalSpecialty[];
 }
 
+export async function addV6ProfessionalService(userId: string, service: V6Service) {
+  const { data, error } = await getV6Supabase()
+    .from('professional_services')
+    .insert({ professional_id: userId, service_id: service.id, price_from: service.base_price ?? null })
+    .select('*')
+    .single();
+  fail(error);
+  return data as V6ProfessionalService;
+}
+
+export async function removeV6ProfessionalService(userId: string, serviceId: number) {
+  const { error } = await getV6Supabase()
+    .from('professional_services')
+    .delete()
+    .eq('professional_id', userId)
+    .eq('service_id', serviceId);
+  if (error?.code === '23503') throw new Error('Este servicio está vinculado a un trabajo y no se puede quitar.');
+  fail(error);
+}
+
+export async function saveV6SpecialtiesForService(
+  userId: string,
+  serviceId: number,
+  selectedIds: number[],
+  catalog: V6Specialty[],
+) {
+  const allowed = new Set(catalog.filter((item) => item.service_id === serviceId).map((item) => item.id));
+  if (selectedIds.some((id) => !allowed.has(id))) throw new Error('Especialidad inválida para este servicio.');
+
+  const supabase = getV6Supabase();
+  const { data: existing, error: readError } = await supabase
+    .from('professional_specialties')
+    .select('*')
+    .eq('professional_id', userId)
+    .eq('service_id', serviceId);
+  fail(readError);
+  const current = (existing || []) as V6ProfessionalSpecialty[];
+  const currentIds = new Set(current.map((item) => item.specialty_id));
+  const desiredIds = new Set(selectedIds);
+  const additions = [...desiredIds].filter((id) => !currentIds.has(id));
+  const removals = [...currentIds].filter((id) => !desiredIds.has(id));
+
+  if (additions.length) {
+    const { error } = await supabase.from('professional_specialties').insert(
+      additions.map((specialtyId) => ({ professional_id: userId, service_id: serviceId, specialty_id: specialtyId })),
+    );
+    fail(error);
+  }
+  if (removals.length) {
+    const { error } = await supabase.from('professional_specialties')
+      .delete()
+      .eq('professional_id', userId)
+      .eq('service_id', serviceId)
+      .in('specialty_id', removals);
+    fail(error);
+  }
+
+  const { data, error } = await supabase.from('professional_specialties')
+    .select('*')
+    .eq('professional_id', userId)
+    .eq('service_id', serviceId);
+  fail(error);
+  return (data || []) as V6ProfessionalSpecialty[];
+}
+
 export async function listV6ClientAddresses(userId: string) {
   const { data, error } = await getV6Supabase()
     .from('client_addresses')

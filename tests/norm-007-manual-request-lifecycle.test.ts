@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const migration = readFileSync(
   join(process.cwd(), 'supabase/migrations/20260831140000_norm_007_manual_request_lifecycle.sql'),
   'utf8',
-).toLowerCase();
+).replace(/\r\n/g, '\n').toLowerCase();
 
 const api = readFileSync(join(process.cwd(), 'app/lib/v6Api.ts'), 'utf8').toLowerCase();
 const component = readFileSync(
