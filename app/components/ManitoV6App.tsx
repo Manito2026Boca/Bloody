@@ -52,7 +52,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   acceptV6Proposal,
   acceptV6Order,
@@ -152,6 +152,7 @@ import {
   workroomForOrder,
 } from '../lib/professionalCockpit';
 import { paymentCapabilities, type ManitoPaymentMethod } from '../lib/paymentCapabilities';
+import { specialtyEditorExitDecision } from '../lib/specialtyEditorNavigation';
 import {
   orderDisplayAmount,
   orderEstimatedAmount,
@@ -6579,6 +6580,9 @@ function ProfilePanel({
   const [editorError, setEditorError] = useState('');
   const [savingCatalog, setSavingCatalog] = useState(false);
   const catalogSavingRef = useRef(false);
+  const serviceEditorHistoryRef = useRef(false);
+  const ignoreServiceEditorPopRef = useRef(false);
+  const serviceEditorExitRef = useRef({ saving: false, unsaved: false });
 
   useEffect(() => {
     if (!editingServiceId && !showServiceCatalog) return;
@@ -6801,11 +6805,54 @@ function ProfilePanel({
     draftSpecialtyIds.size !== savedEditorIds.size ||
     [...draftSpecialtyIds].some((id) => !savedEditorIds.has(id))
   );
+  useLayoutEffect(() => {
+    serviceEditorExitRef.current = { saving: savingCatalog, unsaved: hasUnsavedSpecialties };
+  }, [savingCatalog, hasUnsavedSpecialties]);
+
+  useEffect(() => {
+    if (editingServiceId === null) return;
+
+    const pushEditorEntry = () => {
+      const state = window.history.state;
+      window.history.pushState({ ...(state && typeof state === 'object' ? state : {}), manitoServiceEditor: true }, '', window.location.href);
+    };
+    if (!serviceEditorHistoryRef.current) {
+      pushEditorEntry();
+      serviceEditorHistoryRef.current = true;
+      ignoreServiceEditorPopRef.current = false;
+    }
+
+    const onBack = () => {
+      if (ignoreServiceEditorPopRef.current) {
+        ignoreServiceEditorPopRef.current = false;
+        return;
+      }
+      if (!serviceEditorHistoryRef.current) return;
+      const decision = specialtyEditorExitDecision(serviceEditorExitRef.current);
+      if (decision !== 'close') pushEditorEntry();
+      else serviceEditorHistoryRef.current = false;
+      if (decision === 'confirm') setConfirmDiscard(true);
+      if (decision === 'close') setEditingServiceId(null);
+    };
+    window.addEventListener('popstate', onBack);
+    return () => window.removeEventListener('popstate', onBack);
+  }, [editingServiceId]);
+
+  function closeServiceEditor() {
+    setConfirmDiscard(false);
+    setConfirmRemove(false);
+    setEditingServiceId(null);
+    if (serviceEditorHistoryRef.current) {
+      serviceEditorHistoryRef.current = false;
+      ignoreServiceEditorPopRef.current = true;
+      window.history.back();
+    }
+  }
 
   function leaveServiceEditor() {
-    if (savingCatalog) return;
-    if (hasUnsavedSpecialties) { setConfirmDiscard(true); return; }
-    setEditingServiceId(null);
+    const decision = specialtyEditorExitDecision(serviceEditorExitRef.current);
+    if (decision === 'confirm') setConfirmDiscard(true);
+    if (decision === 'close') closeServiceEditor();
   }
 
   async function saveServiceEditor() {
@@ -6824,7 +6871,7 @@ function ProfilePanel({
       const saved = await saveV6SpecialtiesForService(profile.id, serviceId, [...draftSpecialtyIds], specialties);
       if (addedService) setProServices([...proServices, addedService]);
       setProSpecialties([...proSpecialties.filter((item) => item.service_id !== serviceId), ...saved]);
-      setEditingServiceId(null);
+      closeServiceEditor();
       setNotice('Cambios guardados.');
     } catch (caught) {
       let rollbackFailed = false;
@@ -6859,8 +6906,7 @@ function ProfilePanel({
       if (selectedServiceIds.has(serviceId)) await removeV6ProfessionalService(profile.id, serviceId);
       setProServices(proServices.filter((item) => item.service_id !== serviceId));
       setProSpecialties(proSpecialties.filter((item) => item.service_id !== serviceId));
-      setEditingServiceId(null);
-      setConfirmRemove(false);
+      closeServiceEditor();
       setNotice('Servicio eliminado.');
     } catch (caught) {
       setConfirmRemove(false);
@@ -7237,7 +7283,7 @@ function ProfilePanel({
             const visibleChoices = choices.filter((item) => item.name.toLocaleLowerCase('es').includes(specialtySearch.trim().toLocaleLowerCase('es')));
             return (
               <div className="v6-service-screen" role="dialog" aria-modal="true" aria-label={`Editar ${serviceDisplayName(service)}`}>
-                <header className="v6-service-screen-head"><button type="button" className="v6-icon-button" onClick={leaveServiceEditor} aria-label="Volver a mis servicios"><ArrowLeft size={20} /></button><h2>{serviceDisplayName(service)}</h2></header>
+                <header className="v6-service-screen-head"><button type="button" className="v6-icon-button" onClick={leaveServiceEditor} aria-label="Volver a mis servicios"><ArrowLeft size={22} aria-hidden="true" /></button><h2>{serviceDisplayName(service)}</h2></header>
                 <div className="v6-service-screen-scroll">
                   <div className="v6-section-head compact"><h3>¿Qué tareas realizás?</h3><span>{draftSpecialtyIds.size} seleccionadas</span></div>
                   {choices.length > 8 && <label className="v6-field"><span>Buscar especialidad</span><input type="search" value={specialtySearch} onChange={(event) => setSpecialtySearch(event.target.value)} placeholder="Buscar tarea" /></label>}
@@ -7249,7 +7295,7 @@ function ProfilePanel({
                   {editorError && <p className="v6-alert" role="alert">{editorError}</p>}
                 </div>
                 <footer className="v6-service-screen-footer"><button className="v6-primary" type="button" disabled={savingCatalog || (!hasUnsavedSpecialties && !editorError)} onClick={() => void saveServiceEditor()}>{savingCatalog ? 'Guardando…' : 'Guardar cambios'}</button></footer>
-                {confirmDiscard && <div className="v6-service-confirm" role="alertdialog" aria-modal="true" aria-label="Cambios sin guardar"><div><h3>Tenés cambios sin guardar</h3><p>¿Querés seguir editando o descartarlos?</p><button className="v6-primary" type="button" onClick={() => setConfirmDiscard(false)}>Seguir editando</button><button className="v6-secondary" type="button" onClick={() => { setConfirmDiscard(false); setEditingServiceId(null); }}>Descartar cambios</button></div></div>}
+                {confirmDiscard && <div className="v6-service-confirm" role="alertdialog" aria-modal="true" aria-label="Cambios sin guardar"><div><h3>Tenés cambios sin guardar</h3><p>¿Querés seguir editando o descartarlos?</p><button className="v6-primary" type="button" onClick={() => setConfirmDiscard(false)}>Seguir editando</button><button className="v6-secondary" type="button" onClick={closeServiceEditor}>Descartar cambios</button></div></div>}
                 {confirmRemove && <div className="v6-service-confirm" role="alertdialog" aria-modal="true" aria-label="Quitar servicio"><div><h3>Dejar de ofrecer {serviceDisplayName(service)}</h3><p>Se quitarán sus especialidades de tu perfil.</p><button className="v6-danger" type="button" disabled={savingCatalog} onClick={() => void removeServiceFromEditor()}>Quitar {serviceDisplayName(service)}</button><button className="v6-secondary" type="button" disabled={savingCatalog} onClick={() => setConfirmRemove(false)}>Seguir editando</button></div></div>}
               </div>
             );

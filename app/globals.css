@@ -3815,7 +3815,14 @@ a.v6-evidence-link {
   padding: 10px 16px;
 }
 .v6-service-screen-head h2 { min-width: 0; margin: 0; font-size: 1.15rem; overflow-wrap: anywhere; }
-.v6-service-screen-head .v6-icon-button { flex: 0 0 44px; min-height: 44px; }
+.v6-service-screen-head .v6-icon-button {
+  flex: 0 0 44px;
+  min-height: 44px;
+  border-color: var(--line);
+  background: white;
+  color: var(--green-900);
+}
+.v6-service-screen-head .v6-icon-button:focus-visible { outline: 2px solid var(--orange-600); outline-offset: 2px; }
 .v6-service-screen-scroll {
   display: grid;
   align-content: start;
