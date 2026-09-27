@@ -47,6 +47,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: '/sw.js',
+        headers: [{ key: 'Cache-Control', value: 'no-cache, max-age=0, must-revalidate' }],
+      },
+      {
+        source: '/pwa-version.json',
+        headers: [{ key: 'Cache-Control', value: 'no-cache, max-age=0, must-revalidate' }],
+      },
+      {
         source: '/:path*',
         headers: securityHeaders,
       },

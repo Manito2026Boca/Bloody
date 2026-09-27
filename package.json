@@ -7,8 +7,8 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build": "vinext build",
-    "vercel-build": "next build",
+    "build": "node scripts/generate-pwa-build.mjs && vinext build",
+    "vercel-build": "node scripts/generate-pwa-build.mjs && next build",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test": "vitest run --config vitest.config.ts"
