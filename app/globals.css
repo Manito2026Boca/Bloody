@@ -3545,6 +3545,41 @@ a.v6-evidence-link {
   }
 }
 
+.pwa-update-notice,
+.pwa-update-startup {
+  position: fixed;
+  z-index: 1200;
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  max-width: 540px;
+  margin-inline: auto;
+  padding: 12px;
+  color: #172323;
+  background: #fff;
+  border: 1px solid #9ab0ac;
+  border-left: 4px solid #177b70;
+  border-radius: 6px;
+  box-shadow: 0 6px 22px #0002;
+}
+.pwa-update-notice { display: flex; align-items: flex-start; gap: 10px; }
+.pwa-update-notice > div:first-of-type { flex: 1; min-width: 0; }
+.pwa-update-notice strong { font-size: 14px; }
+.pwa-update-notice p { margin: 4px 0; font-size: 13px; }
+.pwa-update-notice small { display: block; color: #53635f; font-size: 11px; }
+.pwa-update-notice details { margin-top: 5px; font-size: 11px; }
+.pwa-update-notice details small { overflow-wrap: anywhere; line-height: 1.45; }
+.pwa-update-actions { display: flex; align-items: center; gap: 4px; }
+.pwa-update-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 4px 8px; border: 1px solid #c5d3d0; border-radius: 4px; background: #fff; color: #124f48; cursor: pointer; }
+.pwa-update-actions button:disabled { opacity: .5; cursor: default; }
+.pwa-update-startup { border-left-color: #a44b30; font-size: 13px; }
+.pwa-version-panel dl { margin: 0; display: grid; gap: 5px; font-size: 12px; }
+.pwa-version-panel dl > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; }
+.pwa-version-panel dt { color: #53635f; }
+.pwa-version-panel dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 719px) { .pwa-update-notice, .pwa-update-startup { bottom: calc(78px + env(safe-area-inset-bottom)); } }
+@media (max-width: 520px) { .pwa-update-notice { flex-wrap: wrap; } .pwa-update-actions { width: 100%; justify-content: flex-end; } }
+
 /* UX-001: progressive, role-specific mobile experience. */
 .v6-legacy-home-hidden {
   display: none !important;

@@ -6,6 +6,7 @@ import { addV6Complaint, getV6MediaSignedUrl, listV6Complaints, removeV6Channel,
 import { getV6ComplaintContext, listV6ComplaintEvidence, respondToV6Complaint, subscribeV6Complaints, uploadV6ComplaintEvidence } from '../lib/v6ProtectionApi';
 import { canOpenProtection, claimLabels, complaintStatusLabels, isMonetaryResolution, isTerminalComplaint, protectionDeadline, resolutionLabels } from '../lib/v6Protection';
 import { approvedExtrasTotal } from '../lib/economics';
+import { usePwaSurface } from './PwaUpdateProvider';
 import type { V6AdminComplaintReview, V6ClaimType, V6Complaint, V6ComplaintContext, V6ComplaintEvidence, V6Order, V6OrderPhoto, V6Profile, V6ResolutionType } from '../lib/v6Types';
 
 const date = (value: string | number) => new Date(value).toLocaleString('es-AR');
@@ -90,6 +91,7 @@ function ParticipantCase({ item, order, profile, refresh, notify }: {
 }
 
 export function ProtectionPanel({ order, profile, notify }: { order: V6Order; profile: V6Profile; notify: (text: string) => void }) {
+  usePwaSurface(`protection-case:${order.id}`, 'unknown');
   const [cases, setCases] = useState<V6Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import type { FormEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgreementSummary } from './AgreementSummary';
+import { usePwaSurface } from './PwaUpdateProvider';
 import { subscribeV6OrderDetails } from '../lib/v6OrderRealtime';
 import {
   getV6WorkroomImageSignedUrl,
@@ -93,6 +94,7 @@ export function WorkroomSheet({
   const [extras, setExtras] = useState<V6OrderExtra[]>([]);
   const [acceptedProposal, setAcceptedProposal] = useState<V6OrderProposal | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const messageSafety = usePwaSurface(`workroom-message:${order.id}`, 'clean');
 
   const loadTimeline = useCallback(async (target: V6Workroom, before: string | null = null) => {
     const page = await listV6WorkroomTimeline(target.id, before);
@@ -152,7 +154,9 @@ export function WorkroomSheet({
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (messageSafety.blocked()) return;
     if (!workroom || !canSend || sending || (!body.trim() && !image)) return;
+    messageSafety.set('saving');
     setSending(true);
     setSendFailed(false);
     let uploadedPath: string | null = null;
@@ -170,7 +174,9 @@ export function WorkroomSheet({
       setImage(null);
       if (inputRef.current) inputRef.current.value = '';
       await loadTimeline(workroom);
+      messageSafety.set('clean');
     } catch (caught) {
+      messageSafety.set('dirty');
       if (uploadedPath) await removeV6WorkroomImage(uploadedPath).catch(() => undefined);
       setSendFailed(true);
       setError(caught instanceof Error ? caught.message : 'No se pudo enviar. Podés reintentar.');
@@ -217,7 +223,7 @@ export function WorkroomSheet({
         </div>
 
         {canSend ? (
-          <form className="v6-workroom-compose" onSubmit={send}>
+          <form className="v6-workroom-compose" data-pwa-tracked onChangeCapture={() => messageSafety.set('dirty')} onSubmit={send}>
             {image && <div className="v6-workroom-file"><span>{image.name}</span><button type="button" onClick={() => { setImage(null); if (inputRef.current) inputRef.current.value = ''; }}>Quitar</button></div>}
             {sendFailed && <button className="v6-workroom-retry" type="submit"><RefreshCw size={15} /> Reintentar envío</button>}
             <div>

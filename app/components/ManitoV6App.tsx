@@ -10,6 +10,7 @@ import { RecurringServicesPanel, RecurringAdminPanel } from './RecurringServices
 import { NotificationHistory, NotificationQuickPanel } from './NotificationCenter';
 import { ProfessionalTrustSignals } from './ProfessionalTrustSignals';
 import { WorkroomList, WorkroomSheet } from './Workroom';
+import { PwaVersionDetails, usePwaSurface } from './PwaUpdateProvider';
 import {
   ExperienceSwitch,
   ManitoBottomNavigation,
@@ -1590,6 +1591,7 @@ function PushPermissionCard({
 }
 
 export default function ManitoV6App() {
+  const routeSafety = usePwaSurface('app-route', 'unknown');
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<V6Profile | null>(null);
@@ -1625,6 +1627,9 @@ export default function ManitoV6App() {
   const [clientSelectedService, setClientSelectedService] = useState<V6Service | null>(null);
   const [clientProblemQuery, setClientProblemQuery] = useState('');
   const [focusedOrderId, setFocusedOrderId] = useState<string | null>(null);
+  useEffect(() => {
+    routeSafety.set(!loading && !!session && !!profile && !isAdmin ? 'clean' : 'unknown');
+  }, [loading, session, profile, isAdmin, routeSafety]);
   const lastAuthUser = useRef<string | null>(null);
   const handledPushNotification = useRef<string | null>(null);
   const dataLoadEpoch = useRef(0);
@@ -1919,12 +1924,6 @@ export default function ManitoV6App() {
     }, 120);
     return () => window.clearTimeout(timer);
   }, [focusedOrderId, tab, orders]);
-
-  useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      void navigator.serviceWorker.register('/sw.js');
-    }
-  }, []);
 
   useEffect(() => {
     function handleBeforeInstallPrompt(event: Event) {
@@ -2840,6 +2839,7 @@ function ClientHome({
   onAddressesChange: (addresses: V6ClientAddress[]) => void;
 }) {
   const initialAddress = editingOrder ? splitStoredAddress(editingOrder.address, profile.city) : null;
+  const requestSafety = usePwaSurface(`request:${profile.id}`, 'clean');
   const defaultAddress = accountAddresses.find((item) => item.is_default) || accountAddresses[0] || null;
   const [description, setDescription] = useState(editingOrder?.description || 'Necesito un plomero.');
   const [address, setAddress] = useState(initialAddress?.line || defaultAddress?.line || '');
@@ -3076,6 +3076,7 @@ function ClientHome({
 
   async function createOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (requestSafety.blocked()) return;
     if (creatingOrder) return;
     if (!selectedService) {
       setError('Elegí un servicio.');
@@ -3126,6 +3127,7 @@ function ClientHome({
       return;
     }
     setCreatingOrder(true);
+    requestSafety.set('saving');
     try {
       const orderAddress = formatAddress(address, addressCity);
       const orderDescription = description.trim();
@@ -3231,7 +3233,9 @@ function ClientHome({
       setRequestStep('need');
       onEditingComplete();
       onNavigate('orders');
+      requestSafety.set(photoUploadFailed || recurringPlanFailed ? 'dirty' : 'clean');
     } catch (caught) {
+      requestSafety.set('dirty');
       setError(caught instanceof Error ? caught.message : 'No se pudo publicar.');
     } finally {
       setCreatingOrder(false);
@@ -3565,7 +3569,7 @@ function ClientHome({
         : 'MANITO buscará un profesional disponible para aceptar el trabajo.';
 
     return (
-      <section className="v6-request-shell" ref={requestFormRef}>
+      <section className="v6-request-shell" ref={requestFormRef} onClickCapture={() => requestSafety.set('dirty')}>
         <header className="v6-request-header">
           <button className="v6-back-button" type="button" onClick={previousRequestStep} aria-label="Volver">
             <ArrowLeft size={20} aria-hidden="true" />
@@ -3578,7 +3582,7 @@ function ClientHome({
 
         <RequestProgress steps={requestStepLabels} current={requestStepIndex} />
 
-        <form className="v6-request-form" onSubmit={createOrder}>
+        <form className="v6-request-form" data-pwa-tracked onChangeCapture={() => requestSafety.set('dirty')} onSubmit={createOrder}>
           {requestStep === 'need' && (
             <section className="v6-request-stage">
               <div className="v6-stage-heading">
@@ -3919,6 +3923,7 @@ function ClientHome({
           <div className="v6-search-box">
             <Search size={18} aria-hidden="true" />
             <textarea
+              data-pwa-ephemeral
               value={problemQuery}
               onChange={(event) => setProblemQuery(event.target.value)}
               placeholder="Ej: pierde agua debajo de la pileta"
@@ -4509,6 +4514,7 @@ function SearchPanel({
           <div className="v6-search-box line">
             <Search size={18} aria-hidden="true" />
             <input
+              data-pwa-ephemeral
               value={problemQuery}
               onChange={(event) => setProblemQuery(event.target.value)}
               placeholder="Buscar un servicio"
@@ -4779,6 +4785,13 @@ function ProfessionalHome({
   const [onboarding, setOnboarding] = useState<V6ProfessionalOnboarding | null>(null);
   const [professionalStateLoading, setProfessionalStateLoading] = useState(true);
   const [showAllOpportunities, setShowAllOpportunities] = useState(false);
+  const homeActionSafety = usePwaSurface(`professional-actions:${profile.id}`, 'clean');
+  async function guardedHomeAction<T>(action: () => Promise<T>) {
+    if (homeActionSafety.blocked()) throw new Error('La actualización está preparando la página.');
+    homeActionSafety.set('critical');
+    try { const result = await action(); homeActionSafety.set('clean'); return result; }
+    catch (caught) { homeActionSafety.set('critical'); throw caught; }
+  }
   const workrooms = useProfessionalWorkrooms(profile.id);
 
   useEffect(() => {
@@ -4822,16 +4835,17 @@ function ProfessionalHome({
 
   async function toggleAvailable() {
     try {
-      setProfile(await setV6Availability(profile.id, !profile.is_available));
+      setProfile(await guardedHomeAction(() => setV6Availability(profile.id, !profile.is_available)));
       setNotice(!profile.is_available ? 'Ahora estás disponible.' : 'Disponibilidad desactivada.');
     } catch (caught) {
+      homeActionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo cambiar disponibilidad.');
     }
   }
 
   async function accept(orderId: string) {
     try {
-      const acceptedOrder = await acceptV6Order(orderId);
+      const acceptedOrder = await guardedHomeAction(() => acceptV6Order(orderId));
       const refreshedOrders = await listV6Orders();
       setOrders(refreshedOrders);
       if (acceptedOrder.status === 'pending_client_confirmation') {
@@ -4841,26 +4855,29 @@ function ProfessionalHome({
         setNotice('Trabajo aceptado. Usá el chat del pedido para coordinar con el cliente.');
       }
     } catch (caught) {
+      homeActionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'El pedido ya no está disponible.');
     }
   }
 
   async function rejectManual(orderId: string) {
     try {
-      await rejectV6ManualOrderRequest(orderId, 'no_disponible');
+      await guardedHomeAction(() => rejectV6ManualOrderRequest(orderId, 'no_disponible'));
       setOrders(await listV6Orders());
       setNotice('Solicitud rechazada. El cliente va a poder elegir cómo seguir.');
     } catch (caught) {
+      homeActionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo rechazar la solicitud.');
     }
   }
 
   async function rejectAutomaticInvitation(orderId: string) {
     try {
-      await rejectV6MatchingCandidate(orderId, 'no_disponible');
+      await guardedHomeAction(() => rejectV6MatchingCandidate(orderId, 'no_disponible'));
       setOrders(await listV6Orders());
       setNotice('Invitación rechazada. MANITO va a buscar otro profesional.');
     } catch (caught) {
+      homeActionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo rechazar la invitación.');
     }
   }
@@ -5155,6 +5172,7 @@ function OrdersList(props: {
   setNotice: (message: string) => void;
   onEditRequest?: (order: V6Order) => void;
 }) {
+  const listActionSafety = usePwaSurface(`orders-list-actions:${props.profile.id}`, 'clean');
   const [filter, setFilter] = useState<'current' | 'upcoming' | 'proposals' | 'history'>('current');
   const workrooms = useProfessionalWorkrooms(props.profile.id);
   const pendingDirect = props.profile.role === 'professional'
@@ -5172,16 +5190,20 @@ function OrdersList(props: {
   });
 
   async function respondToDirect(orderId: string, accept: boolean) {
+    if (listActionSafety.blocked()) return;
+    listActionSafety.set('critical');
     try {
       const acceptedOrder = accept ? await acceptV6Order(orderId) : null;
       if (!accept) await rejectV6ManualOrderRequest(orderId, 'no_disponible');
       props.setOrders(await listV6Orders());
+      listActionSafety.set('clean');
       props.setNotice(accept
         ? acceptedOrder?.status === 'pending_client_confirmation'
           ? 'Solicitud aceptada. Esperando confirmación del Cliente.'
           : 'Trabajo aceptado.'
         : 'Solicitud rechazada.');
     } catch (caught) {
+      listActionSafety.set('critical');
       props.setError(caught instanceof Error ? caught.message : 'No pudimos responder la solicitud.');
     }
   }
@@ -5358,6 +5380,19 @@ function OrderCard({
   const other = profile.role === 'client'
     ? order.professional || order.reserved_professional
     : order.client;
+  const actionSafety = usePwaSurface(`order-action:${order.id}`, 'clean');
+  async function guardedAction<T>(action: () => Promise<T>): Promise<T> {
+    if (actionSafety.blocked()) throw new Error('La actualización está preparando la página. Reintentá en un momento.');
+    actionSafety.set('critical');
+    try {
+      const result = await action();
+      actionSafety.set('clean');
+      return result;
+    } catch (caught) {
+      actionSafety.set('critical');
+      throw caught;
+    }
+  }
   const otherProfessional = profile.role === 'client' && other
     ? publicProfessionals.find((professional) => professional.profile.id === other.id) || null
     : null;
@@ -5584,21 +5619,22 @@ function OrderCard({
     setPinActionError(null);
     try {
       if (nextAction.kind === 'start_with_pin') {
-        await startV6Order(order.id, pinValue);
+        await guardedAction(() => startV6Order(order.id, pinValue));
       } else if (nextAction.kind === 'complete_with_pin') {
         if (order.service?.requires_completion_evidence && !photos.some((photo) => photo.stage === 'after')) {
           setError('Agregá al menos una foto del trabajo terminado antes de finalizar.');
           return;
         }
-        await completeTrackedV6Order(order.id, pinValue);
+        await guardedAction(() => completeTrackedV6Order(order.id, pinValue));
       } else {
-        await advanceV6Order(order.id);
+        await guardedAction(() => advanceV6Order(order.id));
       }
       setOrders(await listV6Orders());
       setPinEntryOpen(false);
       setPinValue('');
       setNotice('Estado actualizado.');
     } catch (caught) {
+      actionSafety.set('critical');
       const message = caught instanceof Error ? caught.message : 'No se pudo avanzar.';
       if (nextAction.kind === 'start_with_pin' || nextAction.kind === 'complete_with_pin') setPinActionError(message);
       else setError(message);
@@ -5624,18 +5660,19 @@ function OrderCard({
     );
     if (!confirmed) return;
     try {
-      await cancelV6Order(order.id, cancellationReason, cancellationNote);
+      await guardedAction(() => cancelV6Order(order.id, cancellationReason, cancellationNote));
       setOrders(await listV6Orders());
       setNotice('Servicio cancelado.');
       setShowCancellationForm(false);
     } catch (caught) {
+      actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo cancelar.');
     }
   }
 
   async function rejectManualRequest(reason = 'no_disponible') {
     try {
-      await rejectV6ManualOrderRequest(order.id, reason);
+      await guardedAction(() => rejectV6ManualOrderRequest(order.id, reason));
       setOrders(await listV6Orders());
       setNotice('Solicitud rechazada. El cliente va a poder elegir cómo seguir.');
     } catch (caught) {
@@ -5649,7 +5686,7 @@ function OrderCard({
       return;
     }
     try {
-      await chooseV6ManualOrderProfessional(order.id, manualReplacementProfessionalId);
+      await guardedAction(() => chooseV6ManualOrderProfessional(order.id, manualReplacementProfessionalId));
       setOrders(await listV6Orders());
       setNotice('Solicitud enviada al nuevo profesional.');
     } catch (caught) {
@@ -5659,7 +5696,7 @@ function OrderCard({
 
   async function fallbackToAutomaticSearch() {
     try {
-      await fallbackV6ManualOrderToAuto(order.id);
+      await guardedAction(() => fallbackV6ManualOrderToAuto(order.id));
       setOrders(await listV6Orders());
       setNotice('Búsqueda automática activada.');
     } catch (caught) {
@@ -5673,7 +5710,7 @@ function OrderCard({
     setRetryingMatching(true);
     setNotice('Buscando profesionales...');
     try {
-      await retryV6OrderSearch(order.id);
+      await guardedAction(() => retryV6OrderSearch(order.id));
       const nextOrders = await listV6Orders();
       setOrders(nextOrders);
       const refreshedOrder = nextOrders.find((item) => item.id === order.id);
@@ -5696,7 +5733,7 @@ function OrderCard({
       return;
     }
     try {
-      await sendV6OrderProposal({
+      await guardedAction(() => sendV6OrderProposal({
         orderId: order.id,
         professionalId: profile.id,
         laborPrice: Number(proposalLabor) || 0,
@@ -5707,21 +5744,23 @@ function OrderCard({
         availabilityLabel: proposalAvailability.trim(),
         availableFrom: proposalAvailableFrom ? new Date(proposalAvailableFrom).toISOString() : null,
         observation: proposalNote,
-      });
+      }));
       await refreshCommercialData();
       setNotice('Presupuesto enviado.');
     } catch (caught) {
+      actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo enviar presupuesto.');
     }
   }
 
   async function acceptProposal(proposalId: string) {
     try {
-      await acceptV6Proposal(proposalId);
+      await guardedAction(() => acceptV6Proposal(proposalId));
       setOrders(await listV6Orders());
       await refreshCommercialData();
       setNotice('Presupuesto aceptado. Si corresponde, confirmá el pago para habilitar el trabajo.');
     } catch (caught) {
+      actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo aceptar presupuesto.');
     }
   }
@@ -5741,9 +5780,9 @@ function OrderCard({
     if (priceConfirmationBusy) return;
     setPriceConfirmationBusy(true);
     try {
-      const result = confirm
-        ? await confirmV6OrderPrice(order.id)
-        : await rejectV6OrderPrice(order.id);
+      const result = await guardedAction(() => confirm
+        ? confirmV6OrderPrice(order.id)
+        : rejectV6OrderPrice(order.id));
       setOrders(await listV6Orders());
       if (confirm && ['accepted', 'payment_pending'].includes(result.status)) {
         setNotice('Precio confirmado. El acuerdo quedó registrado en MANITO.');
@@ -5753,6 +5792,7 @@ function OrderCard({
         setNotice('No aceptaste el precio. Podés elegir otro profesional o seguir buscando.');
       }
     } catch (caught) {
+      actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No pudimos registrar tu decisión.');
     } finally {
       setPriceConfirmationBusy(false);
@@ -5761,22 +5801,24 @@ function OrderCard({
 
   async function confirmPayment() {
     try {
-      await reportV6OrderPayment(order.id);
+      await guardedAction(() => reportV6OrderPayment(order.id));
       setOrders(await listV6Orders());
       await refreshCommercialData();
       setNotice('Pago reportado. Esperando confirmación del profesional.');
     } catch (caught) {
+      actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo reportar el pago.');
     }
   }
 
   async function confirmManualPayment() {
     try {
-      await confirmV6ManualPayment(order.id);
+      await guardedAction(() => confirmV6ManualPayment(order.id));
       setOrders(await listV6Orders());
       await refreshCommercialData();
       setNotice('Pago confirmado.');
     } catch (caught) {
+      actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo confirmar el pago.');
     }
   }
@@ -5784,11 +5826,12 @@ function OrderCard({
   async function disputeManualPayment() {
     const reason = window.prompt('¿Qué problema hubo con el pago?') || '';
     try {
-      await disputeV6ManualPayment(order.id, reason);
+      await guardedAction(() => disputeV6ManualPayment(order.id, reason));
       setOrders(await listV6Orders());
       await refreshCommercialData();
       setNotice('Pago enviado a revisión.');
     } catch (caught) {
+      actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo reportar el problema de pago.');
     }
   }
@@ -5796,18 +5839,20 @@ function OrderCard({
   async function createExtra(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!order.professional_id || extraRequestInFlight.current) return;
+    const professionalId = order.professional_id;
     extraRequestInFlight.current = true;
     setSubmittingExtra(true);
     try {
-      await addV6OrderExtra({
+      await guardedAction(() => addV6OrderExtra({
         orderId: order.id,
-        professionalId: order.professional_id,
+        professionalId,
         title: extraTitle,
         amount: Number(extraAmount) || 0,
-      });
+      }));
       await refreshCommercialData();
       setNotice('Adicional enviado para aprobación.');
     } catch (caught) {
+      actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo crear adicional.');
     } finally {
       extraRequestInFlight.current = false;
@@ -5817,10 +5862,11 @@ function OrderCard({
 
   async function decideExtra(extraId: string, status: 'approved' | 'rejected') {
     try {
-      await decideV6OrderExtra(extraId, status);
+      await guardedAction(() => decideV6OrderExtra(extraId, status));
       await refreshCommercialData();
       setNotice(status === 'approved' ? 'Adicional aprobado.' : 'Adicional rechazado.');
     } catch (caught) {
+      actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo responder el adicional.');
     }
   }
@@ -5853,28 +5899,31 @@ function OrderCard({
     }
     setUploadingEvidence(true);
     try {
-      const filePath = await uploadV6OrderEvidenceFile({
-        orderId: order.id,
-        ownerId: profile.id,
-        file: evidenceFile,
-      });
-      try {
-        await addV6OrderPhoto({
+      await guardedAction(async () => {
+        const filePath = await uploadV6OrderEvidenceFile({
           orderId: order.id,
-          uploadedBy: profile.id,
-          stage: evidenceStage,
-          filePath,
-          caption: evidenceFile.name,
+          ownerId: profile.id,
+          file: evidenceFile,
         });
-      } catch (caught) {
-        await removeV6MediaFiles([filePath]).catch(() => undefined);
-        throw caught;
-      }
+        try {
+          await addV6OrderPhoto({
+            orderId: order.id,
+            uploadedBy: profile.id,
+            stage: evidenceStage,
+            filePath,
+            caption: evidenceFile.name,
+          });
+        } catch (caught) {
+          await removeV6MediaFiles([filePath]).catch(() => undefined);
+          throw caught;
+        }
+      });
       await refreshPhotos();
       setEvidenceFile(null);
       event.currentTarget.reset();
       setNotice('Evidencia agregada al seguimiento.');
     } catch (caught) {
+      actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo subir la evidencia.');
     } finally {
       setUploadingEvidence(false);
@@ -6579,6 +6628,11 @@ function ProfilePanel({
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [editorError, setEditorError] = useState('');
   const [savingCatalog, setSavingCatalog] = useState(false);
+  const specialtySafety = usePwaSurface(`specialties:${profile.id}`, 'clean');
+  const profileWriteSafety = usePwaSurface(`profile-write:${profile.id}`, 'clean');
+  const documentSafety = usePwaSurface(`documents:${profile.id}`, 'clean');
+  const portfolioSafety = usePwaSurface(`portfolio:${profile.id}`, 'clean');
+  const onboardingSafety = usePwaSurface(`onboarding:${profile.id}`, 'clean');
   const catalogSavingRef = useRef(false);
   const serviceEditorHistoryRef = useRef(false);
   const ignoreServiceEditorPopRef = useRef(false);
@@ -6807,7 +6861,8 @@ function ProfilePanel({
   );
   useLayoutEffect(() => {
     serviceEditorExitRef.current = { saving: savingCatalog, unsaved: hasUnsavedSpecialties };
-  }, [savingCatalog, hasUnsavedSpecialties]);
+    specialtySafety.set(savingCatalog ? 'saving' : editingServiceId !== null && editorError ? 'critical' : hasUnsavedSpecialties ? 'dirty' : 'clean');
+  }, [savingCatalog, hasUnsavedSpecialties, editorError, editingServiceId]);
 
   useEffect(() => {
     if (editingServiceId === null) return;
@@ -6841,6 +6896,7 @@ function ProfilePanel({
   function closeServiceEditor() {
     setConfirmDiscard(false);
     setConfirmRemove(false);
+    setEditorError('');
     setEditingServiceId(null);
     if (serviceEditorHistoryRef.current) {
       serviceEditorHistoryRef.current = false;
@@ -6857,6 +6913,7 @@ function ProfilePanel({
 
   async function saveServiceEditor() {
     if (editingServiceId === null || catalogSavingRef.current) return;
+    if (specialtySafety.blocked()) return;
     const serviceId = editingServiceId;
     const service = services.find((item) => item.id === serviceId);
     if (!service) return;
@@ -6898,6 +6955,7 @@ function ProfilePanel({
 
   async function removeServiceFromEditor() {
     if (editingServiceId === null || catalogSavingRef.current) return;
+    if (specialtySafety.blocked()) return;
     const serviceId = editingServiceId;
     catalogSavingRef.current = true;
     setSavingCatalog(true);
@@ -6935,6 +6993,7 @@ function ProfilePanel({
   ];
 
   async function saveOnboardingProgress(nextStep: number) {
+    onboardingSafety.set('saving');
     try {
       const mappedStep = Math.max(1, Math.min(16, Math.ceil((nextStep / professionalSteps.length) * 16)));
       setOnboarding(await upsertV6ProfessionalOnboarding({
@@ -6943,7 +7002,8 @@ function ProfilePanel({
         currentStep: Math.max(onboarding?.current_step || 1, mappedStep),
         notes: 'Alta profesional en progreso.',
       }));
-    } catch {}
+      onboardingSafety.set('clean');
+    } catch { onboardingSafety.set('critical'); }
   }
 
   function goToProfessionalStep(nextStep: number) {
@@ -6960,6 +7020,7 @@ function ProfilePanel({
 
   async function saveProfessionalSurface(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    profileWriteSafety.set('saving');
     try {
       const nextProfile = await upsertV6ProfessionalProfile({
         professionalId: profile.id,
@@ -6989,12 +7050,15 @@ function ProfilePanel({
       setProfessionalProfile(nextProfile);
       setOnboarding(nextOnboarding);
       setNotice('Perfil profesional guardado.');
+      profileWriteSafety.set('clean');
     } catch (caught) {
+      profileWriteSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'Aplicá la migración V7 para guardar alta profesional.');
     }
   }
 
   async function saveProfessionalAvailability() {
+    profileWriteSafety.set('saving');
     try {
       const selectedIds = proServices.map((item) => item.service_id);
       const nextProfile = await upsertV6ProfessionalProfile({
@@ -7032,7 +7096,9 @@ function ProfilePanel({
         notes: 'Servicios, zona, horarios y tarifas guardados.',
       }));
       setNotice('Zona, horarios y tarifas guardados.');
+      profileWriteSafety.set('clean');
     } catch (caught) {
+      profileWriteSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo guardar disponibilidad.');
     }
   }
@@ -7047,6 +7113,7 @@ function ProfilePanel({
       return;
     }
     setSavingDocumentKind(kind);
+    documentSafety.set('critical');
     try {
       const filePath = link || (file ? await uploadV6MediaFile({
         ownerId: profile.id,
@@ -7067,7 +7134,9 @@ function ProfilePanel({
       setDocumentLinks((currentLinks) => ({ ...currentLinks, [kind]: '' }));
       event.currentTarget.reset();
       setNotice(`${label} guardado para revisión.`);
+      documentSafety.set('clean');
     } catch (caught) {
+      documentSafety.set('critical');
       setError(uploadErrorMessage(caught));
     } finally {
       setSavingDocumentKind(null);
@@ -7080,6 +7149,7 @@ function ProfilePanel({
       return;
     }
     setSubmittingOnboarding(true);
+    onboardingSafety.set('critical');
     try {
       const selectedIds = proServices.map((item) => item.service_id);
       const changedProfile = await updateV6Profile(profile.id, {
@@ -7123,7 +7193,9 @@ function ProfilePanel({
         notes: 'Alta enviada para revisión.',
       }));
       setNotice('Alta enviada para revisión MANITO.');
+      onboardingSafety.set('clean');
     } catch (caught) {
+      onboardingSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo enviar alta.');
     } finally {
       setSubmittingOnboarding(false);
@@ -7137,6 +7209,7 @@ function ProfilePanel({
       return;
     }
     setSavingPortfolio(true);
+    portfolioSafety.set('critical');
     try {
       const link = portfolioLink.trim();
       const beforePath = portfolioBeforeFile
@@ -7158,7 +7231,9 @@ function ProfilePanel({
       setPortfolioAfterFile(null);
       event.currentTarget.reset();
       setNotice('Portfolio actualizado.');
+      portfolioSafety.set('clean');
     } catch (caught) {
+      portfolioSafety.set('critical');
       setError(uploadErrorMessage(caught));
     } finally {
       setSavingPortfolio(false);
@@ -7920,6 +7995,7 @@ function AccountPanel({
         <h1>{profile.full_name || 'Usuario MANITO'}</h1>
         <p>{profile.email} · cuenta MANITO</p>
       </section>
+      <PwaVersionDetails />
       {showRecurring && <RecurringServicesPanel
         clientOrders={clientOrders}
         onOrders={() => onNavigate('orders')}
