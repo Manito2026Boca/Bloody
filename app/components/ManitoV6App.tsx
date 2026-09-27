@@ -1592,6 +1592,7 @@ function PushPermissionCard({
 
 export default function ManitoV6App() {
   const routeSafety = usePwaSurface('app-route', 'unknown');
+  const phoneLocationSafety = usePwaSurface('phone-location', 'clean');
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<V6Profile | null>(null);
@@ -2134,6 +2135,7 @@ export default function ManitoV6App() {
   async function handlePhoneLocation() {
     if (!profile || savingPhoneLocation) return;
 
+    phoneLocationSafety.set('saving');
     setSavingPhoneLocation(true);
     setNotice('Permití el acceso a la ubicación del teléfono.');
     try {
@@ -2160,7 +2162,9 @@ export default function ManitoV6App() {
           ? `Ubicación actualizada: ${reverseLocation.label}.`
           : 'GPS actualizado. No pude leer la ciudad exacta, pero guardé las coordenadas.',
       );
+      phoneLocationSafety.set('clean');
     } catch (caught) {
+      phoneLocationSafety.set('critical');
       setNotice(phoneLocationErrorMessage(caught));
     } finally {
       setSavingPhoneLocation(false);
@@ -6918,6 +6922,7 @@ function ProfilePanel({
     const service = services.find((item) => item.id === serviceId);
     if (!service) return;
     catalogSavingRef.current = true;
+    specialtySafety.set('saving');
     setSavingCatalog(true);
     setEditorError('');
     let addedService: V6ProfessionalService | null = null;
@@ -6930,7 +6935,9 @@ function ProfilePanel({
       setProSpecialties([...proSpecialties.filter((item) => item.service_id !== serviceId), ...saved]);
       closeServiceEditor();
       setNotice('Cambios guardados.');
+      specialtySafety.set('clean');
     } catch (caught) {
+      specialtySafety.set('critical');
       let rollbackFailed = false;
       if (addedService) {
         try { await removeV6ProfessionalService(profile.id, serviceId); }
@@ -6958,6 +6965,7 @@ function ProfilePanel({
     if (specialtySafety.blocked()) return;
     const serviceId = editingServiceId;
     catalogSavingRef.current = true;
+    specialtySafety.set('saving');
     setSavingCatalog(true);
     setEditorError('');
     try {
@@ -6966,7 +6974,9 @@ function ProfilePanel({
       setProSpecialties(proSpecialties.filter((item) => item.service_id !== serviceId));
       closeServiceEditor();
       setNotice('Servicio eliminado.');
+      specialtySafety.set('clean');
     } catch (caught) {
+      specialtySafety.set('critical');
       setConfirmRemove(false);
       setEditorError(caught instanceof Error && caught.message.startsWith('Este servicio está vinculado')
         ? caught.message : 'No se pudo quitar el servicio. Probá de nuevo.');
@@ -7783,6 +7793,12 @@ function AccountPanel({
   const [adminReviews, setAdminReviews] = useState<V6AdminProfessionalReview[]>([]);
   const [adminComplaints, setAdminComplaints] = useState<V6AdminComplaintReview[]>([]);
   const [showRecurring, setShowRecurring] = useState(false);
+  const accountPreferencesSafety = usePwaSurface(`account-preferences:${profile.id}`, 'clean');
+  const accountDefaultSafety = usePwaSurface(`account-default-address:${profile.id}`, 'clean');
+  const accountPaymentSafety = usePwaSurface(`account-payment:${profile.id}`, 'clean');
+  const accountDraftSafety = usePwaSurface(`account-draft:${profile.id}`, 'clean');
+  const addressSafety = usePwaSurface(`account-address:${profile.id}`, 'clean');
+  const addressDraftDirtyRef = useRef(false);
   const referralCode = `MANITO-${normalizeText(profile.full_name || profile.email || profile.id)
     .replace(/[^a-z0-9]+/g, '')
     .slice(0, 6)
@@ -7838,6 +7854,7 @@ function AccountPanel({
 
   async function saveAccountPreferences() {
     if (savingSecurityPreferences) return;
+    accountPreferencesSafety.set('saving');
     setSavingSecurityPreferences(true);
     try {
       await upsertV6UserSecurityPreferences({
@@ -7856,7 +7873,10 @@ function AccountPanel({
         window.localStorage.removeItem(key);
       }
       setNotice('Cuenta actualizada con privacidad protegida.');
+      accountPreferencesSafety.set('clean');
+      accountDraftSafety.set('clean');
     } catch (caught) {
+      accountPreferencesSafety.set('critical');
       setNotice(caught instanceof Error ? caught.message : 'No se pudo guardar seguridad de cuenta.');
     } finally {
       setSavingSecurityPreferences(false);
@@ -7870,6 +7890,7 @@ function AccountPanel({
       setNotice('Escribí dirección y ciudad.');
       return;
     }
+    addressSafety.set('saving');
     setSavingLocation(true);
     try {
       const geocoded = await geocodeManualLocation(addressLine.trim(), addressCity.trim()).catch(() => null);
@@ -7892,7 +7913,10 @@ function AccountPanel({
       }
       onAddressesChange(await listV6ClientAddresses(profile.id));
       setNotice('Dirección predeterminada actualizada.');
+      addressDraftDirtyRef.current = false;
+      addressSafety.set('clean');
     } catch (caught) {
+      addressSafety.set('critical');
       setNotice(caught instanceof Error ? caught.message : 'No se pudo guardar la ubicación.');
     } finally {
       setSavingLocation(false);
@@ -7900,6 +7924,9 @@ function AccountPanel({
   }
 
   function editAddress(item?: V6ClientAddress) {
+    if (savingLocation || (addressDraftDirtyRef.current && !window.confirm('¿Descartar los cambios de la dirección?'))) return;
+    addressDraftDirtyRef.current = false;
+    addressSafety.set('clean');
     setAddressId(item?.id || '');
     setAddressLabel(item?.label || (addresses.length ? 'Otro' : 'Casa'));
     setAddressLine(item?.line || '');
@@ -7907,6 +7934,7 @@ function AccountPanel({
   }
 
   async function makeDefaultAddress(item: V6ClientAddress) {
+    accountDefaultSafety.set('saving');
     try {
       await upsertV6ClientAddress({
         id: item.id,
@@ -7920,7 +7948,9 @@ function AccountPanel({
       });
       onAddressesChange(await listV6ClientAddresses(profile.id));
       setNotice(`${item.label} es ahora tu dirección predeterminada.`);
+      accountDefaultSafety.set('clean');
     } catch (caught) {
+      accountDefaultSafety.set('critical');
       setNotice(caught instanceof Error ? caught.message : 'No pudimos cambiar la dirección predeterminada.');
     }
   }
@@ -7970,6 +8000,7 @@ function AccountPanel({
 
   async function addPayment(type: PaymentMethod) {
     if (savingPaymentType) return;
+    accountPaymentSafety.set('saving');
     setSavingPaymentType(type);
     try {
       const alreadySaved = paymentProfiles.some((payment) => payment.type === type);
@@ -7982,7 +8013,9 @@ function AccountPanel({
       });
       setPaymentProfiles(uniquePaymentProfiles(await listV6PaymentProfiles(profile.id)));
       setNotice(alreadySaved ? 'Medio de pago preferido actualizado.' : 'Medio de pago preferido guardado.');
+      accountPaymentSafety.set('clean');
     } catch {
+      accountPaymentSafety.set('critical');
       setNotice('Aplicá la migración V7 para guardar medios de pago.');
     } finally {
       setSavingPaymentType(null);
@@ -8029,7 +8062,7 @@ function AccountPanel({
           ))}
         </div>
         {!addresses.length && <div className="v6-empty-inline"><strong>Todavía no guardaste una dirección.</strong><p>Agregá Casa o usá el GPS para empezar.</p></div>}
-        <form className="v6-stack" onSubmit={saveLocation}>
+        <form className="v6-stack" data-pwa-tracked onChangeCapture={() => { addressDraftDirtyRef.current = true; addressSafety.set('dirty'); }} onSubmit={saveLocation}>
           <div className="v6-field-grid-two">
             <label className="v6-field"><span>Nombre</span><input value={addressLabel} onChange={(event) => setAddressLabel(event.target.value)} placeholder="Casa" required /></label>
             <label className="v6-field"><span>Ciudad</span><input value={addressCity} onChange={(event) => setAddressCity(event.target.value)} placeholder="Mar del Plata" required /></label>
@@ -8060,7 +8093,7 @@ function AccountPanel({
       </section>}
       <section className="v6-card">
         <h2>Datos de cuenta</h2>
-        <div className="v6-stack">
+        <div className="v6-stack" data-pwa-tracked onChangeCapture={() => accountDraftSafety.set('dirty')}>
           <label className="v6-field">
             <span>Tipo</span>
             <select

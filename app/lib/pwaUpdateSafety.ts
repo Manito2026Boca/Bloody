@@ -5,6 +5,8 @@ const priority: Record<PwaReadinessLevel, number> = { unknown: 1, clean: 0, dirt
 export class PwaUpdateSafetyRegistry {
   private reasons = new Map<string, PwaReadinessLevel>();
   private orphaned = new Set<string>();
+  private reviewable = new Set<string>();
+  private reconciled = new Set<string>();
   private listeners = new Set<() => void>();
   private hold: { attemptId: string; expiresAt: number } | null = null;
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
@@ -15,18 +17,23 @@ export class PwaUpdateSafetyRegistry {
   register(reason: string, level: PwaReadinessLevel = 'unknown') {
     if (!this.reasons.has(reason)) this.reasons.set(reason, level);
     this.orphaned.delete(reason);
+    this.reconciled.delete(reason);
     this.emit();
     return () => {
       const current = this.reasons.get(reason);
       if (current === 'saving' || current === 'critical') this.orphaned.add(reason);
-      else { this.reasons.delete(reason); this.orphaned.delete(reason); }
+      else { this.reasons.delete(reason); this.orphaned.delete(reason); this.reviewable.delete(reason); }
       this.emit();
     };
   }
   set(reason: string, level: PwaReadinessLevel) {
-    if (!this.reasons.has(reason)) throw new Error(`Unregistered PWA safety reason: ${reason}`);
-    if (level === 'clean' && this.orphaned.has(reason)) { this.reasons.delete(reason); this.orphaned.delete(reason); this.emit(); return; }
-    if (this.reasons.get(reason) === level) return;
+    if (!this.reasons.has(reason)) {
+      if (this.reconciled.has(reason)) return;
+      throw new Error(`Unregistered PWA safety reason: ${reason}`);
+    }
+    if (level === 'clean' && this.orphaned.has(reason)) { this.reasons.delete(reason); this.orphaned.delete(reason); this.reviewable.delete(reason); this.emit(); return; }
+    const clearedReview = this.reviewable.delete(reason);
+    if (this.reasons.get(reason) === level) { if (clearedReview) this.emit(); return; }
     this.reasons.set(reason, level);
     this.emit();
   }
@@ -55,12 +62,28 @@ export class PwaUpdateSafetyRegistry {
   clearHold() { if (this.holdTimer) clearTimeout(this.holdTimer); this.holdTimer = null; this.hold = null; this.emit(); }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   revision() { return this.version; }
-  unresolvedCount() { return [...this.orphaned].filter((reason) => this.reasons.get(reason) === 'critical').length; }
+  markReviewable(reason: string) {
+    if (!this.reasons.has(reason)) throw new Error(`Unregistered PWA safety reason: ${reason}`);
+    if (this.reasons.get(reason) !== 'dirty' && this.reasons.get(reason) !== 'critical') return;
+    if (this.reviewable.has(reason)) return;
+    this.reviewable.add(reason);
+    this.emit();
+  }
+  reasonLevel(reason: string) { return this.reasons.get(reason); }
+  unresolvedCount() {
+    return new Set([...this.orphaned, ...this.reviewable].filter((reason) => {
+      const level = this.reasons.get(reason);
+      return level === 'dirty' || level === 'critical';
+    })).size;
+  }
   reconcileOrphans() {
-    for (const reason of this.orphaned) {
-      if (this.reasons.get(reason) !== 'critical') continue;
-      this.reasons.delete(reason);
+    for (const reason of new Set([...this.orphaned, ...this.reviewable])) {
+      const level = this.reasons.get(reason);
+      if (level !== 'dirty' && level !== 'critical') continue;
+      if (this.orphaned.has(reason)) { this.reasons.delete(reason); this.reconciled.add(reason); }
+      else this.reasons.set(reason, 'clean');
       this.orphaned.delete(reason);
+      this.reviewable.delete(reason);
     }
     this.emit();
   }
@@ -96,4 +119,17 @@ export function authorizePwaReload(targetBuildId: string, runningBuildId: string
     storage.setItem(PWA_RELOAD_MARKER, targetBuildId);
     return storage.getItem(PWA_RELOAD_MARKER) === targetBuildId;
   } catch { return false; }
+}
+
+export function attemptPwaReload(
+  expectedTarget: string,
+  read: () => { snapshot: PwaUpdateSnapshot; level: PwaReadinessLevel; held: boolean; visible: boolean; online: boolean },
+  storage: Pick<Storage, 'getItem' | 'setItem'>,
+  reload: () => void,
+) : 'reloaded' | 'deferred' | 'storage-failed' {
+  const current = read();
+  if (pwaReloadTarget(current.snapshot, current.level, current.held, current.visible, current.online) !== expectedTarget) return 'deferred';
+  if (!authorizePwaReload(expectedTarget, current.snapshot.runningBuild.buildId, storage)) return 'storage-failed';
+  reload();
+  return 'reloaded';
 }

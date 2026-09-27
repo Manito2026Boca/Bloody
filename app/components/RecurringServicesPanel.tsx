@@ -7,6 +7,7 @@ import { changeRecurringPlanStatus, listRecurringPlans, updateRecurringPlan, lis
 import type { V6Order, V6PublicProfessional, V6RecurringServicePlan } from '../lib/v6Types';
 import styles from './RecurringServicesPanel.module.css';
 import { MatchingLocation } from './MatchingLocation';
+import { usePwaSurface } from './PwaUpdateProvider';
 
 const frequencies = { weekly: 'Cada semana', biweekly: 'Cada 2 semanas', monthly: 'Cada mes' };
 const states = { active: 'Activo', paused: 'Pausado', cancelled: 'Cancelado' };
@@ -37,6 +38,10 @@ export function RecurringAdminPanel() {
 export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
   clientOrders: V6Order[]; onOrders: () => void; onClose: () => void;
 }) {
+  const actionSafety = usePwaSurface('recurring-actions', 'clean');
+  const createSafety = usePwaSurface('recurring-create', 'clean');
+  const editSafety = usePwaSurface('recurring-edit', 'clean');
+  const editDirtyRef = useRef(false);
   const root = useRef<HTMLElement>(null);
   const [plans, setPlans] = useState<V6RecurringServicePlan[]>([]);
   const [professionals, setProfessionals] = useState<V6PublicProfessional[]>([]);
@@ -59,10 +64,12 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
     return () => { alive = false; };
   }, []);
   async function run(action: () => Promise<unknown>, success: string) {
-    if (busy) return;
+    if (busy) return false;
+    const writes = Boolean(success);
+    if (writes) actionSafety.set('saving');
     setBusy(true); setMessage('');
-    try { await action(); setMessage(success); setEditing(null); setConfirmCancel(null); await reload(); }
-    catch (error) { setMessage(error instanceof Error ? error.message : 'No pudimos actualizar el plan.'); }
+    try { await action(); setMessage(success); setEditing(null); setConfirmCancel(null); await reload(); if (writes) actionSafety.set('clean'); return true; }
+    catch (error) { if (writes) actionSafety.set('critical'); setMessage(error instanceof Error ? error.message : 'No pudimos actualizar el plan.'); return false; }
     finally { setBusy(false); }
   }
   const sources = clientOrders.filter(o => o.mode === 'scheduled' &&
@@ -76,10 +83,14 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
     {message && <p role="status">{message}</p>}
     {loading ? <p>Cargando servicios...</p> : plans.length === 0 && <p>No tenés servicios recurrentes.</p>}
     <button type="button" disabled={busy} title="Actualizar" onClick={() => run(reload, '')}><RefreshCw size={16} /> Actualizar</button>
-    {sources.length > 0 && <form className={styles.form} onSubmit={event => {
+    {sources.length > 0 && <form className={styles.form} data-pwa-tracked onChangeCapture={() => createSafety.set('dirty')} onSubmit={event => {
       event.preventDefault();
-      if (source) void run(() => createV6RecurringServicePlan({ sourceOrderId: source, frequency }),
-        'Plan creado. Cada visita necesita aceptación profesional; no se cobra automáticamente.');
+      if (source) {
+        createSafety.set('saving');
+        void run(() => createV6RecurringServicePlan({ sourceOrderId: source, frequency }),
+          'Plan creado. Cada visita necesita aceptación profesional; no se cobra automáticamente.')
+          .then(ok => createSafety.set(ok ? 'clean' : 'dirty'));
+      }
     }}>
       <label>Repetir un servicio<select required value={source} onChange={e => setSource(e.target.value)}>
         <option value="">Elegí un pedido programado</option>
@@ -106,7 +117,13 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
           plan.status === 'active' ? 'Plan pausado. Los pedidos ya creados siguen vigentes.' : 'Plan reanudado sin visitas atrasadas.')}>
           {plan.status === 'active' ? <Pause size={16} /> : <Play size={16} />}{plan.status === 'active' ? 'Pausar' : 'Reanudar'}
         </button>
-        <button type="button" disabled={busy} onClick={() => { setEditingLocation(plan.location_id || ''); setEditing(editing === plan.id ? null : plan.id); }}><Pencil size={16} /> Editar</button>
+        <button type="button" disabled={busy} onClick={() => {
+          if (editDirtyRef.current && !window.confirm('¿Descartar los cambios del plan?')) return;
+          editDirtyRef.current = false;
+          editSafety.set('clean');
+          setEditingLocation(plan.location_id || '');
+          setEditing(editing === plan.id ? null : plan.id);
+        }}><Pencil size={16} /> Editar</button>
         <button type="button" disabled={busy} onClick={() => setConfirmCancel(plan.id)}><X size={16} /> Cancelar</button>
       </div>}
       {confirmCancel === plan.id && <div role="group" aria-label="Confirmar cancelación">
@@ -114,11 +131,12 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
         <button type="button" disabled={busy} onClick={() => run(() => changeRecurringPlanStatus(plan.id, 'cancel'), 'Plan cancelado. Conservamos los pedidos y el historial.')}>Confirmar cancelación</button>
         <button type="button" onClick={() => setConfirmCancel(null)}>Volver</button>
       </div>}
-      {editing === plan.id && <form className={styles.form} onSubmit={event => {
+      {editing === plan.id && <form className={styles.form} data-pwa-tracked onChangeCapture={() => { editDirtyRef.current = true; editSafety.set('dirty'); }} onSubmit={event => {
         event.preventDefault(); const data = new FormData(event.currentTarget);
         const preferred = String(data.get('preferred') || '');
         const date = String(data.get('date') || '');
         const address = String(data.get('address'));
+        editSafety.set('saving');
         void run(() => updateRecurringPlan(plan.id, {
           frequency: data.get('frequency') as V6RecurringServicePlan['frequency'],
           description: String(data.get('description')), address,
@@ -127,14 +145,15 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
           ...(preferred !== (plan.preferred_professional_id || '') ? { preferred_professional_id: preferred || null } : {}),
           ...(address !== plan.address || editingLocation !== (plan.location_id || '') ? { client_lat: null, client_lng: null } : {}),
           ...(date ? { scheduled_at: new Date(date + ':00-03:00').toISOString() } : {}),
-        }), 'Plan actualizado. Los pedidos ya creados no cambiaron.');
+        }), 'Plan actualizado. Los pedidos ya creados no cambiaron.')
+          .then(ok => { if (ok) editDirtyRef.current = false; editSafety.set(ok ? 'clean' : 'dirty'); });
       }}>
         <label>Frecuencia<select name="frequency" defaultValue={plan.frequency}>{Object.entries(frequencies).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
         <label>Nuevo día y horario (Argentina)<input name="date" type="datetime-local" /></label>
         <label>Duración estimada (minutos)<input name="duration" type="number" min="1" max="1440" required defaultValue={plan.estimated_duration_minutes} /></label>
         <label>Descripción<textarea name="description" required minLength={2} defaultValue={plan.description} /></label>
         <label>Dirección y ciudad<input name="address" required minLength={2} defaultValue={plan.address} /></label>
-        <MatchingLocation value={editingLocation} onChange={setEditingLocation} />
+        <MatchingLocation value={editingLocation} onChange={value => { setEditingLocation(value); editDirtyRef.current = true; editSafety.set('dirty'); }} />
         <label>Profesional preferido<select name="preferred" defaultValue={plan.preferred_professional_id || ''}>
           <option value="">Sin preferido</option>
           {plan.preferred_professional_id && !professionals.some(p => p.profile.id === plan.preferred_professional_id) &&
