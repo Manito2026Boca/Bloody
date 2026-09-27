@@ -13,6 +13,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe('PWA-UPDATE-001 runtime', () => {
   it('signals a prepared peer only when the target worker controls it', async () => {
     const intervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout');
     const foreground = vi.fn();
     const reconnect = vi.fn();
     const listeners = new Map<string, Set<(event: MockEvent) => void>>();
@@ -23,7 +24,7 @@ describe('PWA-UPDATE-001 runtime', () => {
     const removeEventListener = (name: string, listener: (event: MockEvent) => void) => listeners.get(name)?.delete(listener);
     const emit = (name: string, event: MockEvent = {}) => listeners.get(name)?.forEach((listener) => listener(event));
     const worker = (build: typeof CURRENT_PWA_BUILD) => ({
-      postMessage: vi.fn((message: { type: string; requestId?: string }) => {
+      postMessage: vi.fn((message: { type: string; requestId?: string; attemptId?: string }) => {
         if (message.type === 'STATUS_REQUEST') queueMicrotask(() => emit('message', {
           source: build.buildId === newer.buildId ? waiting : active,
           data: wire('STATUS_REPLY', { requestId: message.requestId, build }),
@@ -50,6 +51,17 @@ describe('PWA-UPDATE-001 runtime', () => {
     foreground.mock.calls.find(([name]) => name === 'visibilitychange')?.[1]();
     reconnect.mock.calls.find(([name]) => name === 'online')?.[1]();
     expect(fetchVersion).toHaveBeenCalledTimes(1);
+    const activation = port.activate(newer.buildId);
+    await vi.waitFor(() => expect(waiting.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'ACTIVATE_REQUEST' })));
+    expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 20000);
+    const activationRequest = waiting.postMessage.mock.calls.find(([sent]) => sent.type === 'ACTIVATE_REQUEST')?.[0];
+    expect(activationRequest?.attemptId).toBeTruthy();
+    emit('message', { source: waiting, data: wire('ACTIVATE_RESULT', {
+      attemptId: activationRequest!.attemptId, result: 'deferred',
+    }) });
+    expect(await activation).toBe('deferred');
+    await port.check('manual');
+    expect(port.snapshot().phase).toBe('waiting');
     emit('message', { source: waiting, data: wire('PREPARE', {
       request: { attemptId: 'peer-attempt', targetBuildId: newer.buildId, expiresAt: Date.now() + 10000 },
     }) });

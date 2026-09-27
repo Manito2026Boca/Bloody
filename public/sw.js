@@ -29,31 +29,37 @@ async function release(attempt, clients) {
 
 async function negotiate(source, message) {
   const { attemptId, targetBuildId } = message;
-  if (!attemptId || targetBuildId !== WORKER_BUILD.buildId || attempts.size) return;
-  const clients = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).filter(inScope);
-  const pending = new Set(clients.map((client) => client.id));
-  const attempt = { targetBuildId, pending, blocked: false, finish: null };
-  attempts.set(attemptId, attempt);
-  const expiresAt = Date.now() + 10000;
-  for (const client of clients) client.postMessage(wire('PREPARE', { request: { attemptId, targetBuildId, expiresAt } }));
-  if (pending.size) await Promise.race([
-    new Promise((resolve) => { attempt.finish = resolve; }),
-    new Promise((resolve) => setTimeout(resolve, 10000)),
-  ]);
-  attempts.delete(attemptId);
-  const currentClients = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).filter(inScope);
-  if (attempt.blocked || pending.size || Date.now() > expiresAt ||
-      currentClients.length !== clients.length || currentClients.some((client) => !clients.some((voter) => voter.id === client.id))) {
-    await release(attemptId, clients);
+  if (!attemptId || targetBuildId !== WORKER_BUILD.buildId) return;
+  if (attempts.size) {
     source?.postMessage(wire('ACTIVATE_RESULT', { attemptId, result: 'deferred' }));
     return;
   }
+  const attempt = { targetBuildId, pending: new Set(), blocked: false, finish: null };
+  attempts.set(attemptId, attempt);
+  let clients = [];
   try {
+    clients = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).filter(inScope);
+    attempt.pending = new Set(clients.map((client) => client.id));
+    const expiresAt = Date.now() + 10000;
+    for (const client of clients) client.postMessage(wire('PREPARE', { request: { attemptId, targetBuildId, expiresAt } }));
+    if (attempt.pending.size) await Promise.race([
+      new Promise((resolve) => { attempt.finish = resolve; }),
+      new Promise((resolve) => setTimeout(resolve, 10000)),
+    ]);
+    const currentClients = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).filter(inScope);
+    if (attempt.blocked || attempt.pending.size || Date.now() > expiresAt ||
+        currentClients.length !== clients.length || currentClients.some((client) => !clients.some((voter) => voter.id === client.id))) {
+      await release(attemptId, clients);
+      source?.postMessage(wire('ACTIVATE_RESULT', { attemptId, result: 'deferred' }));
+      return;
+    }
     await self.skipWaiting();
     source?.postMessage(wire('ACTIVATE_RESULT', { attemptId, result: 'activated' }));
   } catch {
-    await release(attemptId, clients);
+    await release(attemptId, clients).catch(() => undefined);
     source?.postMessage(wire('ACTIVATE_RESULT', { attemptId, result: 'failed' }));
+  } finally {
+    attempts.delete(attemptId);
   }
 }
 

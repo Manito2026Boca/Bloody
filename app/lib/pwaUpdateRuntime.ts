@@ -16,6 +16,7 @@ const WORKER_URL = '/sw.js';
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const BURST_THROTTLE_MS = 60 * 1000;
 const REQUEST_TIMEOUT_MS = 12000;
+const ACTIVATION_TIMEOUT_MS = 20000;
 
 function validBuild(value: unknown): value is PwaBuildIdentity {
   if (!value || typeof value !== 'object') return false;
@@ -51,9 +52,9 @@ export function createPwaUpdatePort(runningBuild: PwaBuildIdentity): PwaUpdatePo
     listeners.forEach((listener) => listener(state));
   };
 
-  function request(worker: ServiceWorker, message: PwaWireMessage, id: string): Promise<PwaWireMessage | null> {
+  function request(worker: ServiceWorker, message: PwaWireMessage, id: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<PwaWireMessage | null> {
     return new Promise((resolve) => {
-      const timer = setTimeout(() => { pending.delete(id); resolve(null); }, REQUEST_TIMEOUT_MS);
+      const timer = setTimeout(() => { pending.delete(id); resolve(null); }, timeoutMs);
       pending.set(id, (reply) => { clearTimeout(timer); pending.delete(id); resolve(reply); });
       worker.postMessage(message);
     });
@@ -223,7 +224,7 @@ export function createPwaUpdatePort(runningBuild: PwaBuildIdentity): PwaUpdatePo
       const reply = await request(registration.waiting, {
         channel: PWA_UPDATE_CHANNEL, protocolVersion: PWA_UPDATE_PROTOCOL,
         type: 'ACTIVATE_REQUEST', attemptId, targetBuildId,
-      }, attemptId);
+      }, attemptId, ACTIVATION_TIMEOUT_MS);
       const result = reply?.type === 'ACTIVATE_RESULT' && reply.attemptId === attemptId ? reply.result : 'failed';
       if (result !== 'activated') {
         targetInFlight = null;
