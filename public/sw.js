@@ -17,7 +17,12 @@ const attempts = new Map();
 const statusRequests = new Map();
 const wire = (type, fields) => ({ channel: CHANNEL, protocolVersion: WORKER_BUILD.protocolVersion, type, ...fields });
 const isWire = (message) => message?.channel === CHANNEL && message.protocolVersion === WORKER_BUILD.protocolVersion;
-const isHashedChunk = (pathname) => pathname.startsWith('/_next/static/') && /[a-f0-9]{8,}/i.test(pathname);
+const isHashedChunk = (pathname) => pathname.startsWith('/_next/static/') && /[a-f0-9]{8,}/i.test(pathname) && /\.(js|css)$/i.test(pathname);
+const isValidChunk = (response, pathname) => {
+  if (!response.ok) return false;
+  const mime = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
+  return pathname.toLowerCase().endsWith('.css') ? mime === 'text/css' : mime === 'text/javascript' || mime === 'application/javascript';
+};
 const inScope = (client) => {
   const url = new URL(client.url);
   return url.origin === self.location.origin && url.pathname.startsWith(new URL(self.registration.scope).pathname);
@@ -134,16 +139,22 @@ self.addEventListener('fetch', (event) => {
     const cache = await caches.open(chunk ? CHUNK_CACHE : CACHE_NAME);
     if (chunk) {
       const saved = await cache.match(event.request);
-      if (saved) return saved;
+      if (saved && isValidChunk(saved, requestUrl.pathname)) return saved;
+      if (saved) await cache.delete(event.request).catch(() => undefined);
     }
     try {
       const response = await fetch(event.request);
-      if ((chunk || publicAsset) && response.ok && response.type === 'basic') {
+      if (chunk && !isValidChunk(response, requestUrl.pathname)) {
+        const status = response.status >= 400 && response.status <= 599 ? response.status : 502;
+        return new Response('', { status, statusText: 'Invalid chunk response' });
+      }
+      if ((chunk && isValidChunk(response, requestUrl.pathname)) || (publicAsset && response.ok && response.type === 'basic')) {
         event.waitUntil(cache.put(event.request, response.clone()).catch(() => undefined));
       }
       return response;
     } catch {
       if (navigation) return (await (await caches.open(CACHE_NAME)).match('/offline.html')) || new Response('', { status: 503 });
+      if (chunk) return new Response('', { status: 503, statusText: 'Offline' });
       return (await cache.match(event.request)) || new Response('', { status: 503, statusText: 'Offline' });
     }
   })());
