@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPwaUpdatePortFixture } from './fixtures/pwaUpdatePort';
 import type { PwaBuildIdentity, PwaUpdateSnapshot } from '../app/lib/pwaUpdateContract';
-import { authorizePwaReload, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PwaUpdateSafetyRegistry } from '../app/lib/pwaUpdateSafety';
+import { attemptPwaReload, authorizePwaReload, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PwaUpdateSafetyRegistry } from '../app/lib/pwaUpdateSafety';
 
 const build: PwaBuildIdentity = {
   schemaVersion: 1, protocolVersion: 1, appVersion: '1', buildId: 'old', commit: 'c0', builtAt: '2026-09-26T00:00:00Z',
@@ -45,13 +45,71 @@ describe('Package B update safety', () => {
     expect(safety.unresolvedCount()).toBe(0);
     safety.reconcileOrphans();
     expect(safety.level()).toBe('saving');
-    safety.set('upload', 'critical');
+    safety.set('upload', 'dirty');
+    expect(safety.level()).toBe('dirty');
+    expect(safety.unresolvedCount()).toBe(1);
+    safety.reconcileOrphans();
+    expect(safety.level()).toBe('clean');
+    safety.set('upload', 'critical'); // A late callback after explicit review cannot re-block the page.
+    expect(safety.level()).toBe('clean');
+    const releasePending = safety.register('pending', 'saving');
+    releasePending();
+    expect(safety.unresolvedCount()).toBe(0);
+    safety.reconcileOrphans();
+    expect(safety.level()).toBe('saving');
+    safety.set('pending', 'dirty');
+    expect(safety.level()).toBe('dirty');
+    expect(safety.unresolvedCount()).toBe(1);
+    safety.reconcileOrphans();
+    expect(safety.level()).toBe('clean');
     const releaseAgain = safety.register('upload', 'clean');
-    expect(safety.level()).toBe('critical');
+    safety.set('upload', 'critical');
     releaseAgain();
     expect(safety.unresolvedCount()).toBe(1);
     safety.reconcileOrphans();
     expect(safety.level()).toBe('clean');
+  });
+
+  it('keeps an untouched generic form clean, then protects its edit and submission until explicit review', () => {
+    const safety = new PwaUpdateSafetyRegistry();
+    safety.initialize();
+    safety.register('untracked-edit', 'clean');
+    expect(safety.level()).toBe('clean');
+    safety.set('untracked-edit', 'dirty');
+    expect(safety.level()).toBe('dirty');
+    expect(safety.unresolvedCount()).toBe(0); // The draft is still on screen.
+    safety.reconcileOrphans();
+    expect(safety.level()).toBe('dirty');
+    safety.set('untracked-edit', 'saving');
+    expect(safety.level()).toBe('saving');
+    safety.markReviewable('untracked-edit');
+    expect(safety.unresolvedCount()).toBe(0); // A live submission is never reviewable.
+    safety.reconcileOrphans();
+    expect(safety.level()).toBe('saving');
+    safety.set('untracked-edit', 'dirty'); // An explicit failure signal settles the submission.
+    safety.markReviewable('untracked-edit');
+    expect(safety.unresolvedCount()).toBe(1);
+    safety.reconcileOrphans();
+    expect(safety.level()).toBe('clean');
+    expect(safety.unresolvedCount()).toBe(0);
+  });
+
+  it('revokes detached-draft review when another live edit arrives', () => {
+    const safety = new PwaUpdateSafetyRegistry();
+    safety.initialize();
+    safety.register('untracked-edit', 'clean');
+    safety.set('untracked-edit', 'dirty');
+    safety.markReviewable('untracked-edit'); // The edited control was removed.
+    expect(safety.unresolvedCount()).toBe(1);
+    safety.set('untracked-edit', 'dirty'); // Input in a newly mounted live form.
+    expect(safety.unresolvedCount()).toBe(0);
+    safety.reconcileOrphans();
+    expect(safety.level()).toBe('dirty');
+    safety.set('untracked-edit', 'saving');
+    safety.markReviewable('untracked-edit');
+    expect(safety.unresolvedCount()).toBe(0);
+    safety.reconcileOrphans();
+    expect(safety.level()).toBe('saving');
   });
 
   it('votes synchronously through the fixture port and holds edits until matching release', async () => {
@@ -93,6 +151,35 @@ describe('Package B update safety', () => {
     expect(authorizePwaReload('old', 'old', storage)).toBe(false);
     expect(authorizePwaReload('next', 'new', storage)).toBe(true);
     expect(authorizePwaReload('broken', 'new', { getItem: () => null, setItem: () => { throw new Error('denied'); } })).toBe(false);
+  });
+
+  it('reads live safety and port state before the marker and reload, even after a clean render', () => {
+    const fixture = createPwaUpdatePortFixture({ ...initial, phase: 'ready-to-reload', activeWorkerBuildId: 'new', waitingWorkerBuildId: null });
+    const safety = new PwaUpdateSafetyRegistry();
+    safety.initialize();
+    const release = safety.register('draft', 'clean');
+    const order: string[] = [];
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => { order.push('get-marker'); return values.get(key) ?? null; },
+      setItem: (key: string, value: string) => { order.push('set-marker'); values.set(key, value); },
+    };
+    const read = () => { order.push('read-live'); return { snapshot: fixture.port.snapshot(), level: safety.level(), held: safety.isHeld(), visible: true, online: true }; };
+    const reload = () => { order.push('reload'); };
+    expect(pwaReloadTarget(fixture.port.snapshot(), safety.level(), false, true, true)).toBe('new');
+    safety.set('draft', 'dirty');
+    expect(attemptPwaReload('new', read, storage, reload)).toBe('deferred');
+    expect(order).toEqual(['read-live']);
+    order.length = 0;
+    safety.set('draft', 'clean');
+    fixture.publish({ ...fixture.port.snapshot(), phase: 'deferred' });
+    expect(attemptPwaReload('new', read, storage, reload)).toBe('deferred');
+    expect(order).toEqual(['read-live']);
+    order.length = 0;
+    fixture.publish({ ...fixture.port.snapshot(), phase: 'ready-to-reload' });
+    expect(attemptPwaReload('new', read, storage, reload)).toBe('reloaded');
+    expect(order).toEqual(['read-live', 'get-marker', 'set-marker', 'get-marker', 'reload']);
+    release();
   });
 
   it('rechecks a controlled page when hidden becomes visible', () => {

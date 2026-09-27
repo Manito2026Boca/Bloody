@@ -3,7 +3,7 @@
 import { AlertCircle, Download, RefreshCw, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { PwaReadinessLevel, PwaUpdatePort, PwaUpdateSnapshot } from '../lib/pwaUpdateContract';
-import { authorizePwaReload, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PWA_RELOAD_MARKER, PwaUpdateSafetyRegistry } from '../lib/pwaUpdateSafety';
+import { attemptPwaReload, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PWA_RELOAD_MARKER, PwaUpdateSafetyRegistry } from '../lib/pwaUpdateSafety';
 
 type SafetyContext = { registry: PwaUpdateSafetyRegistry; port: PwaUpdatePort };
 const Context = createContext<SafetyContext | null>(null);
@@ -69,12 +69,22 @@ function PwaUpdateUI({ port, registry }: SafetyContext) {
   useEffect(() => {
     if (snapshot.phase === 'ready-to-reload' && target && snapshot.activeWorkerBuildId === target) registry.clearHold();
   }, [snapshot.phase, snapshot.activeWorkerBuildId, target, registry]);
+  const reloadIfSafe = useCallback((expectedTarget: string) => {
+    const result = attemptPwaReload(expectedTarget, () => ({
+      snapshot: port.snapshot(),
+      level: registry.level(),
+      held: registry.isHeld(),
+      visible: document.visibilityState === 'visible',
+      online: navigator.onLine,
+    }), sessionStorage, () => window.location.reload());
+    if (result === 'storage-failed') setLocalError('No se pudo autorizar la recarga.');
+  }, [port, registry]);
   useEffect(() => {
     if (!canReload || !target || !pageVisible || !online) return;
-    if (!authorizePwaReload(target, snapshot.runningBuild.buildId, sessionStorage)) { queueMicrotask(() => setLocalError('No se pudo autorizar la recarga.')); return; }
-    registry.clearHold();
-    window.location.reload();
-  }, [canReload, target, snapshot.runningBuild.buildId, registry, pageVisible, online]);
+    let active = true;
+    queueMicrotask(() => { if (active) reloadIfSafe(target); });
+    return () => { active = false; };
+  }, [canReload, target, pageVisible, online, reloadIfSafe]);
   const message = registry.unresolvedCount() > 0 ? 'Hay una operación sin verificar. Revisá su resultado antes de actualizar.' : versionMismatch ? 'La versión publicada cambió durante la actualización. Comprobá de nuevo antes de abrirla.' : snapshot.phase === 'failed' || localError
     ? 'No pudimos completar la actualización. Podés volver a comprobarla.'
     : snapshot.phase === 'ready-to-reload'
@@ -89,10 +99,7 @@ function PwaUpdateUI({ port, registry }: SafetyContext) {
         if (window.confirm('¿Verificaste el resultado de la operación pendiente? Al continuar, MANITO podrá actualizarse.')) registry.reconcileOrphans();
       }}>Ya revisé</button>}
       {canReload ? <button type="button" onClick={() => {
-        if (!target || registry.level() !== 'clean' || registry.isHeld() || !pageVisible || !online) return;
-        if (!authorizePwaReload(target, snapshot.runningBuild.buildId, sessionStorage)) { setLocalError('No se pudo autorizar la recarga.'); return; }
-        registry.clearHold();
-        window.location.reload();
+        if (target) reloadIfSafe(target);
       }}><RefreshCw size={16} /> Abrir versión</button> : activationTarget ? <button type="button" onClick={() => { void requestActivation(activationTarget, true); }}>Actualizar</button> : null}
       <button type="button" onClick={() => { setLocalError(null); void port.check('manual').catch(() => setLocalError('No se pudo comprobar.')); }} aria-label="Comprobar versión" title="Comprobar versión"><RefreshCw size={16} /></button>
       <button type="button" onClick={() => setDismissed(target)} aria-label="Cerrar aviso" title="Cerrar aviso"><X size={16} /></button>
@@ -132,28 +139,35 @@ export function PwaUpdateProvider({ port, children }: { port: PwaUpdatePort; chi
       if (target.closest('.pwa-update-notice, .pwa-update-startup')) return;
       if (target.closest('input, textarea, select, form, [contenteditable], button')) { event.preventDefault(); event.stopPropagation(); }
     };
-    let dirtyTarget: Element | null = null;
-    const scanUntracked = () => {
-      if (dirtyTarget && !dirtyTarget.isConnected) dirtyTarget = null;
-      registry.set('untracked-edit', dirtyTarget ? 'dirty' : document.querySelector('form:not([data-pwa-tracked]), [contenteditable="true"]:not([data-pwa-tracked])') ? 'unknown' : 'clean');
+    const dirtyTargets = new Set<Element>();
+    const scanDetachedEdits = () => {
+      for (const target of dirtyTargets) if (!target.isConnected) dirtyTargets.delete(target);
+      if (!dirtyTargets.size && registry.reasonLevel('untracked-edit') === 'dirty') registry.markReviewable('untracked-edit');
     };
+    const observer = new MutationObserver(scanDetachedEdits);
+    observer.observe(document.body, { childList: true, subtree: true });
     const onUntrackedEdit = (event: Event) => {
       const target = event.target;
-      if (!(target instanceof Element) || target.closest('[data-pwa-tracked], [data-pwa-ephemeral]')) return;
+      if (event.defaultPrevented || !(target instanceof Element) || target.closest('[data-pwa-tracked], [data-pwa-ephemeral]')) return;
       if (!target.closest('input, textarea, select, [contenteditable]')) return;
-      dirtyTarget = target;
+      if (registry.reasonLevel('untracked-edit') === 'saving') return;
+      dirtyTargets.add(target);
       registry.set('untracked-edit', 'dirty');
     };
+    const onUntrackedSubmit = (event: Event) => {
+      const target = event.target;
+      if (event.defaultPrevented || !(target instanceof HTMLFormElement) || target.closest('[data-pwa-tracked]')) return;
+      dirtyTargets.clear();
+      registry.set('untracked-edit', 'saving');
+    };
     const unregister = registry.register('untracked-edit', 'clean');
-    scanUntracked();
-    const observer = new MutationObserver(scanUntracked);
-    observer.observe(document.body, { childList: true, subtree: true });
     document.addEventListener('beforeinput', onEdit, true);
     document.addEventListener('change', onEdit, true);
     document.addEventListener('submit', onEdit, true);
     document.addEventListener('click', onEdit, true);
     document.addEventListener('input', onUntrackedEdit, true);
     document.addEventListener('change', onUntrackedEdit, true);
+    document.addEventListener('submit', onUntrackedSubmit, true);
     const startupMarker = (() => { try { return sessionStorage.getItem(PWA_RELOAD_MARKER); } catch { return null; } })();
     const unregisterStartup = registry.register('startup-check', 'clean');
     if (startupMarker === port.snapshot().runningBuild.buildId) {
@@ -161,13 +175,12 @@ export function PwaUpdateProvider({ port, children }: { port: PwaUpdatePort; chi
     } else if (startupMarker) { registry.set('startup-check', 'critical'); queueMicrotask(() => { if (alive) setStartupError(true); }); }
     void port.start({
       prepare: (request) => {
-        scanUntracked();
         const current = port.snapshot();
         return registry.prepare(request, pwaPrepareEligible(current, request.targetBuildId, document.visibilityState === 'visible', navigator.onLine, !startupMarker || startupMarker === current.runningBuild.buildId));
       },
       release: (attemptId) => registry.release(attemptId),
     }).catch(() => { if (alive) { registry.set('startup-check', 'critical'); setStartupError(true); } });
-    return () => { alive = false; port.stop(); observer.disconnect(); registry.clearHold(); unregister(); unregisterStartup(); document.removeEventListener('beforeinput', onEdit, true); document.removeEventListener('change', onEdit, true); document.removeEventListener('submit', onEdit, true); document.removeEventListener('click', onEdit, true); document.removeEventListener('input', onUntrackedEdit, true); document.removeEventListener('change', onUntrackedEdit, true); };
+    return () => { alive = false; port.stop(); observer.disconnect(); registry.clearHold(); unregister(); unregisterStartup(); document.removeEventListener('beforeinput', onEdit, true); document.removeEventListener('change', onEdit, true); document.removeEventListener('submit', onEdit, true); document.removeEventListener('click', onEdit, true); document.removeEventListener('input', onUntrackedEdit, true); document.removeEventListener('change', onUntrackedEdit, true); document.removeEventListener('submit', onUntrackedSubmit, true); };
   }, [port, registry]);
   return <Context.Provider value={{ registry, port }}>{children}<PwaUpdateUI port={port} registry={registry} />{startupError && <div className="pwa-update-startup" role="alert">La nueva versión no pudo abrirse. Comprobá la conexión y recargá manualmente cuando sea seguro.</div>}</Context.Provider>;
 }
