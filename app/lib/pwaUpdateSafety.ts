@@ -90,6 +90,28 @@ export class PwaUpdateSafetyRegistry {
   private emit() { this.version += 1; this.listeners.forEach((listener) => listener()); }
 }
 
+type UntrackedTarget = Pick<Element, 'isConnected'>;
+
+export class PwaUntrackedEditTracker {
+  private targets = new Set<UntrackedTarget>();
+
+  constructor(private registry: PwaUpdateSafetyRegistry) {}
+
+  edit(target: UntrackedTarget) {
+    this.targets.add(target);
+    this.registry.set('untracked-edit', 'dirty');
+  }
+
+  submit(form: UntrackedTarget) {
+    this.edit(form);
+  }
+
+  scanDetached() {
+    for (const target of this.targets) if (!target.isConnected) this.targets.delete(target);
+    if (!this.targets.size && this.registry.reasonLevel('untracked-edit') === 'dirty') this.registry.markReviewable('untracked-edit');
+  }
+}
+
 export const PWA_RELOAD_MARKER = 'manito:pwa:reload-target';
 
 export function pwaPrepareEligible(snapshot: PwaUpdateSnapshot, targetBuildId: string, visible: boolean, online: boolean, startupSafe: boolean) {

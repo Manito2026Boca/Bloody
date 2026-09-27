@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPwaUpdatePortFixture } from './fixtures/pwaUpdatePort';
 import type { PwaBuildIdentity, PwaUpdateSnapshot } from '../app/lib/pwaUpdateContract';
-import { attemptPwaReload, authorizePwaReload, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PwaUpdateSafetyRegistry } from '../app/lib/pwaUpdateSafety';
+import { attemptPwaReload, authorizePwaReload, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PwaUntrackedEditTracker, PwaUpdateSafetyRegistry } from '../app/lib/pwaUpdateSafety';
 
 const build: PwaBuildIdentity = {
   schemaVersion: 1, protocolVersion: 1, appVersion: '1', buildId: 'old', commit: 'c0', builtAt: '2026-09-26T00:00:00Z',
@@ -70,24 +70,28 @@ describe('Package B update safety', () => {
     expect(safety.level()).toBe('clean');
   });
 
-  it('keeps an untouched generic form clean, then protects its edit and submission until explicit review', () => {
+  it('keeps an untouched generic form clean, then protects its live edit and submit', () => {
     const safety = new PwaUpdateSafetyRegistry();
     safety.initialize();
     safety.register('untracked-edit', 'clean');
+    const tracker = new PwaUntrackedEditTracker(safety);
+    const field = { isConnected: true };
+    const form = { isConnected: true };
     expect(safety.level()).toBe('clean');
-    safety.set('untracked-edit', 'dirty');
+    tracker.edit(field);
     expect(safety.level()).toBe('dirty');
     expect(safety.unresolvedCount()).toBe(0); // The draft is still on screen.
     safety.reconcileOrphans();
     expect(safety.level()).toBe('dirty');
-    safety.set('untracked-edit', 'saving');
-    expect(safety.level()).toBe('saving');
-    safety.markReviewable('untracked-edit');
+    tracker.submit(form);
+    expect(safety.level()).toBe('dirty');
+    tracker.scanDetached();
     expect(safety.unresolvedCount()).toBe(0); // A live submission is never reviewable.
     safety.reconcileOrphans();
-    expect(safety.level()).toBe('saving');
-    safety.set('untracked-edit', 'dirty'); // An explicit failure signal settles the submission.
-    safety.markReviewable('untracked-edit');
+    expect(safety.level()).toBe('dirty');
+    field.isConnected = false;
+    form.isConnected = false;
+    tracker.scanDetached();
     expect(safety.unresolvedCount()).toBe(1);
     safety.reconcileOrphans();
     expect(safety.level()).toBe('clean');
@@ -110,6 +114,27 @@ describe('Package B update safety', () => {
     expect(safety.unresolvedCount()).toBe(0);
     safety.reconcileOrphans();
     expect(safety.level()).toBe('saving');
+  });
+
+  it('keeps an autofilled untracked submit dirty, never saving, until its form detaches', () => {
+    const safety = new PwaUpdateSafetyRegistry();
+    safety.initialize();
+    safety.register('untracked-edit', 'clean');
+    const tracker = new PwaUntrackedEditTracker(safety);
+    let connected = true;
+    const form = { get isConnected() { return connected; } };
+    expect(safety.level()).toBe('clean');
+    tracker.submit(form);
+    expect(safety.level()).toBe('dirty');
+    tracker.scanDetached();
+    expect(safety.unresolvedCount()).toBe(0);
+    safety.reconcileOrphans();
+    expect(safety.level()).toBe('dirty');
+    connected = false;
+    tracker.scanDetached();
+    expect(safety.unresolvedCount()).toBe(1);
+    safety.reconcileOrphans();
+    expect(safety.level()).toBe('clean');
   });
 
   it('votes synchronously through the fixture port and holds edits until matching release', async () => {
