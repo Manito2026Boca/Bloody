@@ -30,6 +30,11 @@ export function usePwaForm(reason: string) {
   return useMemo(() => Object.assign(new PwaFormSafetyController(surface.set), { blocked: surface.blocked }), [surface]);
 }
 
+export function pwaWaitingMessage(phase: PwaUpdateSnapshot['phase'], level: PwaReadinessLevel) {
+  if (level !== 'clean') return 'Terminá o guardá tus cambios antes de actualizar MANITO.';
+  return phase === 'deferred' ? 'La actualización espera a que terminen los cambios abiertos.' : 'Hay una nueva versión disponible.';
+}
+
 function PwaUpdateUI({ port, registry }: SafetyContext) {
   const [snapshot, setSnapshot] = useState<PwaUpdateSnapshot>(() => port.snapshot());
   const [localError, setLocalError] = useState<string | null>(null);
@@ -94,7 +99,7 @@ function PwaUpdateUI({ port, registry }: SafetyContext) {
     ? 'No pudimos completar la actualización. Podés volver a comprobarla.'
     : snapshot.phase === 'ready-to-reload'
       ? level === 'clean' ? 'Nueva versión lista para abrir.' : 'Nueva versión lista. Terminá o guardá tus cambios antes de abrirla.'
-      : snapshot.phase === 'deferred' ? 'La actualización espera a que terminen los cambios abiertos.' : 'Hay una nueva versión disponible.';
+      : pwaWaitingMessage(snapshot.phase, level);
   if (!visible || (dismissed === target && snapshot.phase !== 'failed')) return null;
   return <aside className="pwa-update-notice" role="status" aria-live="polite">
     {snapshot.phase === 'failed' || localError ? <AlertCircle size={19} /> : <Download size={19} />}

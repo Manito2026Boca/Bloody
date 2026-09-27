@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import * as ts from 'typescript';
 import { createPwaUpdatePortFixture } from './fixtures/pwaUpdatePort';
+import { pwaWaitingMessage } from '../app/components/PwaUpdateProvider';
 import type { PwaBuildIdentity, PwaUpdateSnapshot } from '../app/lib/pwaUpdateContract';
 import { attemptPwaReload, authorizePwaReload, holdUntrackedSubmit, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PwaFormSafetyController, PwaUntrackedEditTracker, PwaUpdateSafetyRegistry, syncUntrackedFormSafety } from '../app/lib/pwaUpdateSafety';
 
@@ -16,6 +17,15 @@ const initial: PwaUpdateSnapshot = {
 afterEach(() => vi.useRealTimers());
 
 describe('Package B update safety', () => {
+  it('explains blocked waiting and deferred updates without changing clean copy', () => {
+    for (const phase of ['waiting', 'deferred'] as const) {
+      for (const level of ['dirty', 'saving', 'critical', 'unknown'] as const) {
+        expect(pwaWaitingMessage(phase, level)).toContain('Terminá o guardá tus cambios');
+      }
+    }
+    expect(pwaWaitingMessage('waiting', 'clean')).toBe('Hay una nueva versión disponible.');
+    expect(pwaWaitingMessage('deferred', 'clean')).toBe('La actualización espera a que terminen los cambios abiertos.');
+  });
   it('keeps uninitialized and independent dirty, saving, critical reasons protected', () => {
     const safety = new PwaUpdateSafetyRegistry();
     expect(safety.level()).toBe('unknown');
