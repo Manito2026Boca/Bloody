@@ -7,7 +7,8 @@ describe('MANITO app entrypoint', () => {
     const page = readFileSync(join(process.cwd(), 'app/page.tsx'), 'utf8');
 
     expect(page).toContain("import ManitoV6App from './components/ManitoV6App'");
-    expect(page).toContain('return <ManitoV6App />');
+    expect(page).toContain('createPwaUpdatePort(CURRENT_PWA_BUILD)');
+    expect(page).toContain('<PwaUpdateProvider port={updatePort}><ManitoV6App /></PwaUpdateProvider>');
     expect(page).not.toContain('ManitoApp');
   });
 });
