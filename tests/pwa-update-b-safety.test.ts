@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import * as ts from 'typescript';
 import { createPwaUpdatePortFixture } from './fixtures/pwaUpdatePort';
 import type { PwaBuildIdentity, PwaUpdateSnapshot } from '../app/lib/pwaUpdateContract';
-import { attemptPwaReload, authorizePwaReload, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PwaUntrackedEditTracker, PwaUpdateSafetyRegistry } from '../app/lib/pwaUpdateSafety';
+import { attemptPwaReload, authorizePwaReload, holdUntrackedSubmit, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PwaFormSafetyController, PwaUntrackedEditTracker, PwaUpdateSafetyRegistry, syncUntrackedFormSafety } from '../app/lib/pwaUpdateSafety';
 
 const build: PwaBuildIdentity = {
   schemaVersion: 1, protocolVersion: 1, appVersion: '1', buildId: 'old', commit: 'c0', builtAt: '2026-09-26T00:00:00Z',
@@ -70,31 +72,34 @@ describe('Package B update safety', () => {
     expect(safety.level()).toBe('clean');
   });
 
-  it('keeps an untouched generic form clean, then protects its live edit and submit', () => {
+  it('blocks a mounted untracked form and keeps a submitted one non-reconcilable after detachment', () => {
     const safety = new PwaUpdateSafetyRegistry();
     safety.initialize();
+    safety.register('untracked-form', 'unknown');
     safety.register('untracked-edit', 'clean');
     const tracker = new PwaUntrackedEditTracker(safety);
     const field = { isConnected: true };
-    const form = { isConnected: true };
+    syncUntrackedFormSafety(safety, true);
+    expect(safety.level()).toBe('unknown');
+    syncUntrackedFormSafety(safety, false);
     expect(safety.level()).toBe('clean');
     tracker.edit(field);
     expect(safety.level()).toBe('dirty');
-    expect(safety.unresolvedCount()).toBe(0); // The draft is still on screen.
+    expect(safety.unresolvedCount()).toBe(0);
     safety.reconcileOrphans();
     expect(safety.level()).toBe('dirty');
-    tracker.submit(form);
-    expect(safety.level()).toBe('dirty');
-    tracker.scanDetached();
-    expect(safety.unresolvedCount()).toBe(0); // A live submission is never reviewable.
+    syncUntrackedFormSafety(safety, true);
+    holdUntrackedSubmit(safety);
+    expect(safety.level()).toBe('critical');
+    syncUntrackedFormSafety(safety, false);
     safety.reconcileOrphans();
-    expect(safety.level()).toBe('dirty');
+    expect(safety.level()).toBe('critical');
     field.isConnected = false;
-    form.isConnected = false;
     tracker.scanDetached();
     expect(safety.unresolvedCount()).toBe(1);
+    expect(safety.canReconcile()).toBe(false);
     safety.reconcileOrphans();
-    expect(safety.level()).toBe('clean');
+    expect(safety.level()).toBe('critical');
     expect(safety.unresolvedCount()).toBe(0);
   });
 
@@ -116,25 +121,92 @@ describe('Package B update safety', () => {
     expect(safety.level()).toBe('saving');
   });
 
-  it('keeps an autofilled untracked submit dirty, never saving, until its form detaches', () => {
+  it('keeps an autofilled untracked submit blocked without assuming completion', () => {
     const safety = new PwaUpdateSafetyRegistry();
     safety.initialize();
-    safety.register('untracked-edit', 'clean');
-    const tracker = new PwaUntrackedEditTracker(safety);
-    let connected = true;
-    const form = { get isConnected() { return connected; } };
-    expect(safety.level()).toBe('clean');
-    tracker.submit(form);
-    expect(safety.level()).toBe('dirty');
-    tracker.scanDetached();
+    safety.register('untracked-form', 'unknown');
+    syncUntrackedFormSafety(safety, true);
+    holdUntrackedSubmit(safety);
+    expect(safety.level()).toBe('critical');
     expect(safety.unresolvedCount()).toBe(0);
+    syncUntrackedFormSafety(safety, false);
     safety.reconcileOrphans();
-    expect(safety.level()).toBe('dirty');
-    connected = false;
-    tracker.scanDetached();
+    expect(safety.level()).toBe('critical');
+  });
+
+  it('cleans a mounted successful profile save and preserves a detached pending write', () => {
+    const safety = new PwaUpdateSafetyRegistry();
+    safety.initialize();
+    const unregisterProfile = safety.register('profile-public', 'clean');
+    const profileForm = new PwaFormSafetyController((level) => safety.set('profile-public', level));
+    profileForm.dirty();
+    profileForm.begin();
+    expect(safety.level()).toBe('saving');
+    profileForm.saved();
+    expect(safety.level()).toBe('clean');
+    unregisterProfile();
+    const unregisterUpload = safety.register('profile-document', 'clean');
+    const uploadForm = new PwaFormSafetyController((level) => safety.set('profile-document', level));
+    uploadForm.begin();
+    unregisterUpload();
+    expect(safety.level()).toBe('saving');
+    safety.reconcileOrphans();
+    expect(safety.level()).toBe('saving');
+    uploadForm.failed();
+    expect(safety.level()).toBe('critical');
     expect(safety.unresolvedCount()).toBe(1);
     safety.reconcileOrphans();
     expect(safety.level()).toBe('clean');
+  });
+
+  it('does not downgrade an active or failed form write when another edit arrives', () => {
+    const safety = new PwaUpdateSafetyRegistry();
+    safety.initialize();
+    safety.register('profile-public', 'clean');
+    const form = new PwaFormSafetyController((level) => safety.set('profile-public', level));
+    form.begin();
+    form.dirty();
+    expect(safety.level()).toBe('saving');
+    form.saved();
+    expect(safety.level()).toBe('dirty');
+    form.begin();
+    form.failed();
+    form.dirty();
+    expect(safety.level()).toBe('critical');
+  });
+
+  it('keeps overlapping form writes protected until every result is known', () => {
+    const safety = new PwaUpdateSafetyRegistry();
+    safety.initialize();
+    safety.register('profile-public', 'clean');
+    const form = new PwaFormSafetyController((level) => safety.set('profile-public', level));
+    form.begin();
+    form.begin();
+    form.saved();
+    expect(safety.level()).toBe('saving');
+    form.failed();
+    expect(safety.level()).toBe('critical');
+    form.begin();
+    expect(safety.level()).toBe('saving');
+    form.saved();
+    expect(safety.level()).toBe('clean');
+  });
+
+  it('marks every form owned by the in-provider app surfaces as tracked', () => {
+    const files = ['ManitoV6App.tsx', 'ProtectionManito.tsx', 'RecurringServicesPanel.tsx', 'Workroom.tsx'];
+    for (const file of files) {
+      const source = ts.createSourceFile(file, readFileSync(new URL(`../app/components/${file}`, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+      const untracked: number[] = [];
+      const visit = (node: ts.Node) => {
+        if (ts.isJsxOpeningElement(node) && node.tagName.getText(source) === 'form' &&
+          !node.attributes.properties.some((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === 'data-pwa-tracked')) {
+          untracked.push(source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+      expect(untracked, file).toEqual([]);
+    }
   });
 
   it('votes synchronously through the fixture port and holds edits until matching release', async () => {

@@ -7,7 +7,7 @@ import { changeRecurringPlanStatus, listRecurringPlans, updateRecurringPlan, lis
 import type { V6Order, V6PublicProfessional, V6RecurringServicePlan } from '../lib/v6Types';
 import styles from './RecurringServicesPanel.module.css';
 import { MatchingLocation } from './MatchingLocation';
-import { usePwaSurface } from './PwaUpdateProvider';
+import { usePwaForm, usePwaSurface } from './PwaUpdateProvider';
 
 const frequencies = { weekly: 'Cada semana', biweekly: 'Cada 2 semanas', monthly: 'Cada mes' };
 const states = { active: 'Activo', paused: 'Pausado', cancelled: 'Cancelado' };
@@ -39,8 +39,8 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
   clientOrders: V6Order[]; onOrders: () => void; onClose: () => void;
 }) {
   const actionSafety = usePwaSurface('recurring-actions', 'clean');
-  const createSafety = usePwaSurface('recurring-create', 'clean');
-  const editSafety = usePwaSurface('recurring-edit', 'clean');
+  const createSafety = usePwaForm('recurring-create');
+  const editSafety = usePwaForm('recurring-edit');
   const editDirtyRef = useRef(false);
   const root = useRef<HTMLElement>(null);
   const [plans, setPlans] = useState<V6RecurringServicePlan[]>([]);
@@ -83,13 +83,13 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
     {message && <p role="status">{message}</p>}
     {loading ? <p>Cargando servicios...</p> : plans.length === 0 && <p>No tenés servicios recurrentes.</p>}
     <button type="button" disabled={busy} title="Actualizar" onClick={() => run(reload, '')}><RefreshCw size={16} /> Actualizar</button>
-    {sources.length > 0 && <form className={styles.form} data-pwa-tracked onChangeCapture={() => createSafety.set('dirty')} onSubmit={event => {
+    {sources.length > 0 && <form className={styles.form} data-pwa-tracked onChangeCapture={() => createSafety.dirty()} onSubmit={event => {
       event.preventDefault();
       if (source) {
-        createSafety.set('saving');
+        createSafety.begin();
         void run(() => createV6RecurringServicePlan({ sourceOrderId: source, frequency }),
           'Plan creado. Cada visita necesita aceptación profesional; no se cobra automáticamente.')
-          .then(ok => createSafety.set(ok ? 'clean' : 'dirty'));
+          .then(ok => { if (ok) createSafety.saved(); else createSafety.failed(); });
       }
     }}>
       <label>Repetir un servicio<select required value={source} onChange={e => setSource(e.target.value)}>
@@ -120,7 +120,7 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
         <button type="button" disabled={busy} onClick={() => {
           if (editDirtyRef.current && !window.confirm('¿Descartar los cambios del plan?')) return;
           editDirtyRef.current = false;
-          editSafety.set('clean');
+          editSafety.discard();
           setEditingLocation(plan.location_id || '');
           setEditing(editing === plan.id ? null : plan.id);
         }}><Pencil size={16} /> Editar</button>
@@ -131,12 +131,12 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
         <button type="button" disabled={busy} onClick={() => run(() => changeRecurringPlanStatus(plan.id, 'cancel'), 'Plan cancelado. Conservamos los pedidos y el historial.')}>Confirmar cancelación</button>
         <button type="button" onClick={() => setConfirmCancel(null)}>Volver</button>
       </div>}
-      {editing === plan.id && <form className={styles.form} data-pwa-tracked onChangeCapture={() => { editDirtyRef.current = true; editSafety.set('dirty'); }} onSubmit={event => {
+      {editing === plan.id && <form className={styles.form} data-pwa-tracked onChangeCapture={() => { editDirtyRef.current = true; editSafety.dirty(); }} onSubmit={event => {
         event.preventDefault(); const data = new FormData(event.currentTarget);
         const preferred = String(data.get('preferred') || '');
         const date = String(data.get('date') || '');
         const address = String(data.get('address'));
-        editSafety.set('saving');
+        editSafety.begin();
         void run(() => updateRecurringPlan(plan.id, {
           frequency: data.get('frequency') as V6RecurringServicePlan['frequency'],
           description: String(data.get('description')), address,
@@ -146,14 +146,14 @@ export function RecurringServicesPanel({ clientOrders, onOrders, onClose }: {
           ...(address !== plan.address || editingLocation !== (plan.location_id || '') ? { client_lat: null, client_lng: null } : {}),
           ...(date ? { scheduled_at: new Date(date + ':00-03:00').toISOString() } : {}),
         }), 'Plan actualizado. Los pedidos ya creados no cambiaron.')
-          .then(ok => { if (ok) editDirtyRef.current = false; editSafety.set(ok ? 'clean' : 'dirty'); });
+          .then(ok => { if (ok) { editDirtyRef.current = false; editSafety.saved(); } else editSafety.failed(); });
       }}>
         <label>Frecuencia<select name="frequency" defaultValue={plan.frequency}>{Object.entries(frequencies).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
         <label>Nuevo día y horario (Argentina)<input name="date" type="datetime-local" /></label>
         <label>Duración estimada (minutos)<input name="duration" type="number" min="1" max="1440" required defaultValue={plan.estimated_duration_minutes} /></label>
         <label>Descripción<textarea name="description" required minLength={2} defaultValue={plan.description} /></label>
         <label>Dirección y ciudad<input name="address" required minLength={2} defaultValue={plan.address} /></label>
-        <MatchingLocation value={editingLocation} onChange={value => { setEditingLocation(value); editDirtyRef.current = true; editSafety.set('dirty'); }} />
+        <MatchingLocation value={editingLocation} onChange={value => { setEditingLocation(value); editDirtyRef.current = true; editSafety.dirty(); }} />
         <label>Profesional preferido<select name="preferred" defaultValue={plan.preferred_professional_id || ''}>
           <option value="">Sin preferido</option>
           {plan.preferred_professional_id && !professionals.some(p => p.profile.id === plan.preferred_professional_id) &&

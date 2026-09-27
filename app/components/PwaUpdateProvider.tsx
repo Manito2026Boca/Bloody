@@ -3,7 +3,7 @@
 import { AlertCircle, Download, RefreshCw, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { PwaReadinessLevel, PwaUpdatePort, PwaUpdateSnapshot } from '../lib/pwaUpdateContract';
-import { attemptPwaReload, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PWA_RELOAD_MARKER, PwaUntrackedEditTracker, PwaUpdateSafetyRegistry } from '../lib/pwaUpdateSafety';
+import { attemptPwaReload, holdUntrackedSubmit, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PWA_RELOAD_MARKER, PwaFormSafetyController, PwaUntrackedEditTracker, PwaUpdateSafetyRegistry, syncUntrackedFormSafety } from '../lib/pwaUpdateSafety';
 
 type SafetyContext = { registry: PwaUpdateSafetyRegistry; port: PwaUpdatePort };
 const Context = createContext<SafetyContext | null>(null);
@@ -23,6 +23,11 @@ export function usePwaSurface(reason: string, initial: PwaReadinessLevel = 'clea
     set: (level: PwaReadinessLevel) => registry.set(key, level),
     blocked: () => registry.isHeld(),
   }), [registry, key]);
+}
+
+export function usePwaForm(reason: string) {
+  const surface = usePwaSurface(reason, 'clean');
+  return useMemo(() => Object.assign(new PwaFormSafetyController(surface.set), { blocked: surface.blocked }), [surface]);
 }
 
 function PwaUpdateUI({ port, registry }: SafetyContext) {
@@ -72,7 +77,7 @@ function PwaUpdateUI({ port, registry }: SafetyContext) {
   const reloadIfSafe = useCallback((expectedTarget: string) => {
     const result = attemptPwaReload(expectedTarget, () => ({
       snapshot: port.snapshot(),
-      level: registry.level(),
+      level: document.querySelector('form:not([data-pwa-tracked])') ? 'unknown' : registry.level(),
       held: registry.isHeld(),
       visible: document.visibilityState === 'visible',
       online: navigator.onLine,
@@ -95,8 +100,13 @@ function PwaUpdateUI({ port, registry }: SafetyContext) {
     {snapshot.phase === 'failed' || localError ? <AlertCircle size={19} /> : <Download size={19} />}
     <div><strong>Actualización de MANITO</strong><p>{message}</p><small>En uso: {snapshot.runningBuild.appVersion} · Publicada: {snapshot.publishedBuild?.appVersion || 'sin verificar'}</small><details><summary>Detalles de versión</summary><small>Build en uso: {snapshot.runningBuild.buildId}<br />Build publicado: {snapshot.publishedBuild?.buildId || 'sin verificar'}<br />Worker activo: {snapshot.activeWorkerBuildId || 'sin controlar'}<br />Última comprobación: {snapshot.lastCheckedAt ? new Date(snapshot.lastCheckedAt).toLocaleString('es-AR') : 'pendiente'}{snapshot.error ? <><br />Estado: {snapshot.error}</> : null}</small></details></div>
     <div className="pwa-update-actions">
-      {registry.unresolvedCount() > 0 && <button type="button" onClick={() => {
-        if (window.confirm('¿Verificaste el resultado de la operación pendiente? Al continuar, MANITO podrá actualizarse.')) registry.reconcileOrphans();
+      {registry.canReconcile() && <button type="button" onClick={() => {
+        syncUntrackedFormSafety(registry, !!document.querySelector('form:not([data-pwa-tracked])'));
+        if (!registry.canReconcile()) return;
+        if (window.confirm('¿Verificaste el resultado de la operación pendiente? Al continuar, MANITO podrá actualizarse.')) {
+          syncUntrackedFormSafety(registry, !!document.querySelector('form:not([data-pwa-tracked])'));
+          if (registry.canReconcile()) registry.reconcileOrphans();
+        }
       }}>Ya revisé</button>}
       {canReload ? <button type="button" onClick={() => {
         if (target) reloadIfSafe(target);
@@ -140,7 +150,11 @@ export function PwaUpdateProvider({ port, children }: { port: PwaUpdatePort; chi
       if (target.closest('input, textarea, select, form, [contenteditable], button')) { event.preventDefault(); event.stopPropagation(); }
     };
     const untracked = new PwaUntrackedEditTracker(registry);
-    const observer = new MutationObserver(() => untracked.scanDetached());
+    const scanUntracked = () => {
+      untracked.scanDetached();
+      syncUntrackedFormSafety(registry, !!document.querySelector('form:not([data-pwa-tracked])'));
+    };
+    const observer = new MutationObserver(scanUntracked);
     observer.observe(document.body, { childList: true, subtree: true });
     const onUntrackedEdit = (event: Event) => {
       const target = event.target;
@@ -151,9 +165,11 @@ export function PwaUpdateProvider({ port, children }: { port: PwaUpdatePort; chi
     const onUntrackedSubmit = (event: Event) => {
       const target = event.target;
       if (event.defaultPrevented || !(target instanceof HTMLFormElement) || target.closest('[data-pwa-tracked]')) return;
-      untracked.submit(target);
+      holdUntrackedSubmit(registry);
     };
     const unregister = registry.register('untracked-edit', 'clean');
+    const unregisterForm = registry.register('untracked-form', 'unknown');
+    scanUntracked();
     document.addEventListener('beforeinput', onEdit, true);
     document.addEventListener('change', onEdit, true);
     document.addEventListener('submit', onEdit, true);
@@ -168,12 +184,13 @@ export function PwaUpdateProvider({ port, children }: { port: PwaUpdatePort; chi
     } else if (startupMarker) { registry.set('startup-check', 'critical'); queueMicrotask(() => { if (alive) setStartupError(true); }); }
     void port.start({
       prepare: (request) => {
+        scanUntracked();
         const current = port.snapshot();
         return registry.prepare(request, pwaPrepareEligible(current, request.targetBuildId, document.visibilityState === 'visible', navigator.onLine, !startupMarker || startupMarker === current.runningBuild.buildId));
       },
       release: (attemptId) => registry.release(attemptId),
     }).catch(() => { if (alive) { registry.set('startup-check', 'critical'); setStartupError(true); } });
-    return () => { alive = false; port.stop(); observer.disconnect(); registry.clearHold(); unregister(); unregisterStartup(); document.removeEventListener('beforeinput', onEdit, true); document.removeEventListener('change', onEdit, true); document.removeEventListener('submit', onEdit, true); document.removeEventListener('click', onEdit, true); document.removeEventListener('input', onUntrackedEdit, true); document.removeEventListener('change', onUntrackedEdit, true); document.removeEventListener('submit', onUntrackedSubmit, true); };
+    return () => { alive = false; port.stop(); observer.disconnect(); registry.clearHold(); unregister(); unregisterForm(); unregisterStartup(); document.removeEventListener('beforeinput', onEdit, true); document.removeEventListener('change', onEdit, true); document.removeEventListener('submit', onEdit, true); document.removeEventListener('click', onEdit, true); document.removeEventListener('input', onUntrackedEdit, true); document.removeEventListener('change', onUntrackedEdit, true); document.removeEventListener('submit', onUntrackedSubmit, true); };
   }, [port, registry]);
   return <Context.Provider value={{ registry, port }}>{children}<PwaUpdateUI port={port} registry={registry} />{startupError && <div className="pwa-update-startup" role="alert">La nueva versión no pudo abrirse. Comprobá la conexión y recargá manualmente cuando sea seguro.</div>}</Context.Provider>;
 }
