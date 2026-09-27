@@ -76,7 +76,9 @@ describe('BRAND-002 asset contracts', () => {
   });
 
   it('invalidates the old PWA shell and precaches only new brand assets', () => {
-    expect(worker).toContain("const CACHE_NAME = 'manito-shell-brand-reference-v1'");
+    expect(worker).toContain('const CACHE_NAME = `manito-shell-${WORKER_BUILD.buildId}`');
+    expect(worker).toContain("'/offline.html'");
+    expect(worker).not.toContain("  '/',");
     expect(worker).toContain('/brand/manito-reference-horizontal.png');
     expect(worker).toContain('/brand/manito-reference-app-icon.png');
     for (const path of oldAssets) expect(worker).not.toContain(path);
