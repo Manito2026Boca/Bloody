@@ -76,6 +76,7 @@ export class PwaUpdateSafetyRegistry {
       return level === 'dirty' || level === 'critical';
     })).size;
   }
+  canReconcile() { return this.reasons.get('untracked-form') === 'clean' && this.unresolvedCount() > 0; }
   reconcileOrphans() {
     for (const reason of new Set([...this.orphaned, ...this.reviewable])) {
       const level = this.reasons.get(reason);
@@ -102,13 +103,59 @@ export class PwaUntrackedEditTracker {
     this.registry.set('untracked-edit', 'dirty');
   }
 
-  submit(form: UntrackedTarget) {
-    this.edit(form);
-  }
-
   scanDetached() {
     for (const target of this.targets) if (!target.isConnected) this.targets.delete(target);
     if (!this.targets.size && this.registry.reasonLevel('untracked-edit') === 'dirty') this.registry.markReviewable('untracked-edit');
+  }
+}
+
+export function syncUntrackedFormSafety(registry: PwaUpdateSafetyRegistry, mounted: boolean) {
+  if (registry.reasonLevel('untracked-form') !== 'critical') registry.set('untracked-form', mounted ? 'unknown' : 'clean');
+}
+
+export function holdUntrackedSubmit(registry: PwaUpdateSafetyRegistry) {
+  registry.set('untracked-form', 'critical');
+}
+
+export class PwaFormSafetyController {
+  private pending = 0;
+  private failedState = false;
+  private changedWhileSaving = false;
+
+  constructor(private setLevel: (level: PwaReadinessLevel) => void) {}
+
+  dirty() {
+    if (this.pending) { this.changedWhileSaving = true; return; }
+    if (this.failedState) return;
+    this.setLevel('dirty');
+  }
+
+  begin() {
+    if (this.pending++ === 0) {
+      this.failedState = false;
+      this.changedWhileSaving = false;
+      this.setLevel('saving');
+    }
+  }
+
+  saved() {
+    if (!this.pending || --this.pending) return;
+    this.setLevel(this.failedState ? 'critical' : this.changedWhileSaving ? 'dirty' : 'clean');
+    this.changedWhileSaving = false;
+  }
+
+  failed() {
+    if (!this.pending) return;
+    this.pending -= 1;
+    this.failedState = true;
+    this.changedWhileSaving = false;
+    this.setLevel('critical');
+  }
+
+  discard() {
+    if (this.pending || this.failedState) return;
+    this.changedWhileSaving = false;
+    this.setLevel('clean');
   }
 }
 

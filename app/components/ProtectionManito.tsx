@@ -1,12 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { FileText, RefreshCw, Send, ShieldCheck, Upload } from 'lucide-react';
 import { addV6Complaint, getV6MediaSignedUrl, listV6Complaints, removeV6Channel, reviewV6OrderComplaint } from '../lib/v6Api';
 import { getV6ComplaintContext, listV6ComplaintEvidence, respondToV6Complaint, subscribeV6Complaints, uploadV6ComplaintEvidence } from '../lib/v6ProtectionApi';
 import { canOpenProtection, claimLabels, complaintStatusLabels, isMonetaryResolution, isTerminalComplaint, protectionDeadline, resolutionLabels } from '../lib/v6Protection';
 import { approvedExtrasTotal } from '../lib/economics';
-import { usePwaSurface } from './PwaUpdateProvider';
+import { usePwaForm, usePwaSurface } from './PwaUpdateProvider';
 import type { V6AdminComplaintReview, V6ClaimType, V6Complaint, V6ComplaintContext, V6ComplaintEvidence, V6Order, V6OrderPhoto, V6Profile, V6ResolutionType } from '../lib/v6Types';
 
 const date = (value: string | number) => new Date(value).toLocaleString('es-AR');
@@ -53,6 +53,8 @@ function CaseSummary({ item }: { item: V6Complaint }) {
 function ParticipantCase({ item, order, profile, refresh, notify }: {
   item: V6Complaint; order: V6Order; profile: V6Profile; refresh: () => Promise<void>; notify: (text: string) => void;
 }) {
+  const responseForm = usePwaForm(`protection-response:${item.id}`);
+  const uploadForm = usePwaForm(`protection-upload:${item.id}`);
   const [files, setFiles] = useState<V6ComplaintEvidence[]>([]);
   const [response, setResponse] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -65,24 +67,28 @@ function ParticipantCase({ item, order, profile, refresh, notify }: {
     return () => removeV6Channel(channel);
   }, [order.id, reloadFiles]);
   async function submit(event: FormEvent, action: 'respond' | 'upload') {
-    event.preventDefault(); if (busy) return; setBusy(true); setError('');
+    event.preventDefault(); if (busy) return;
+    const safety = action === 'respond' ? responseForm : uploadForm;
+    if (safety.blocked()) return;
+    safety.begin(); setBusy(true); setError('');
     try {
       if (action === 'respond') await respondToV6Complaint(item.id, response);
       else if (file) { await uploadV6ComplaintEvidence(item.id, profile.id, file); setFile(null); await reloadFiles(); }
       await refresh(); notify(action === 'respond' ? 'Tu respuesta quedó registrada.' : 'Evidencia agregada al caso.');
-    } catch (caught) { setError(message(caught)); } finally { setBusy(false); }
+      safety.saved();
+    } catch (caught) { safety.failed(); setError(message(caught)); } finally { setBusy(false); }
   }
   return <article className="v6-protection-case">
     {order.professional_id === profile.id && <p>El cliente reportó un problema.</p>}
     <CaseSummary item={item} />
     <EvidenceLinks files={files} />
     {!isTerminalComplaint(item.status) && order.professional_id === profile.id && !item.professional_responded_at &&
-      <form className="v6-inline-form" onSubmit={(event) => void submit(event, 'respond')}>
+      <form className="v6-inline-form" data-pwa-tracked onChangeCapture={() => responseForm.dirty()} onSubmit={(event) => void submit(event, 'respond')}>
         <label className="v6-field"><span>Tu respuesta</span><textarea required minLength={10} maxLength={5000} value={response} onChange={(event) => setResponse(event.target.value)} /></label>
         <button className="v6-secondary" disabled={busy} type="submit"><Send size={16} aria-hidden="true" /> Enviar respuesta</button>
       </form>}
     {!isTerminalComplaint(item.status) && order.client_id === profile.id && files.length < 6 &&
-      <form className="v6-inline-form" onSubmit={(event) => void submit(event, 'upload')}>
+      <form className="v6-inline-form" data-pwa-tracked onChangeCapture={() => uploadForm.dirty()} onSubmit={(event) => void submit(event, 'upload')}>
         <label className="v6-field"><span>Evidencia del problema</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
         <button className="v6-secondary" type="submit" disabled={busy || !file}><Upload size={16} aria-hidden="true" /> Agregar evidencia</button>
       </form>}
@@ -91,7 +97,9 @@ function ParticipantCase({ item, order, profile, refresh, notify }: {
 }
 
 export function ProtectionPanel({ order, profile, notify }: { order: V6Order; profile: V6Profile; notify: (text: string) => void }) {
-  usePwaSurface(`protection-case:${order.id}`, 'unknown');
+  const readSafety = usePwaSurface(`protection-case:${order.id}`, 'unknown');
+  const openForm = usePwaForm(`protection-open:${order.id}`);
+  const mounted = useRef(false);
   const [cases, setCases] = useState<V6Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -100,16 +108,24 @@ export function ProtectionPanel({ order, profile, notify }: { order: V6Order; pr
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
-  const refresh = useCallback(async () => { setCases(await listV6Complaints(order.id)); setLoading(false); }, [order.id]);
+  const refresh = useCallback(async () => {
+    const nextCases = await listV6Complaints(order.id);
+    if (!mounted.current) return;
+    setCases(nextCases);
+    setLoading(false);
+    readSafety.set('clean');
+  }, [order.id, readSafety]);
   useEffect(() => {
+    mounted.current = true;
     void refresh().catch((caught) => { setError(message(caught)); setLoading(false); });
     const channel = subscribeV6Complaints(order.id, () => { void refresh().catch((caught) => setError(message(caught))); });
     const timer = window.setInterval(() => setNow(Date.now()), 30000);
-    return () => { removeV6Channel(channel); window.clearInterval(timer); };
+    return () => { mounted.current = false; removeV6Channel(channel); window.clearInterval(timer); };
   }, [order.id, refresh]);
   const deadline = protectionDeadline(order);
   async function open(event: FormEvent) {
-    event.preventDefault(); if (busy) return; setBusy(true); setError('');
+    event.preventDefault(); if (busy || openForm.blocked()) return;
+    openForm.begin(); setBusy(true); setError('');
     let created = false;
     try {
       const item = await addV6Complaint({ orderId: order.id, reason: type, detail });
@@ -117,7 +133,8 @@ export function ProtectionPanel({ order, profile, notify }: { order: V6Order; pr
       if (file) { await uploadV6ComplaintEvidence(item.id, profile.id, file); setFile(null); }
       notify('Estamos revisando tu caso.');
       await refresh();
-    } catch (caught) { setError(`${created ? 'El caso quedó abierto. Podés volver a adjuntar la evidencia desde el caso. ' : ''}${message(caught)}`); }
+      openForm.saved();
+    } catch (caught) { openForm.failed(); setError(`${created ? 'El caso quedó abierto. Podés volver a adjuntar la evidencia desde el caso. ' : ''}${message(caught)}`); }
     finally { setBusy(false); }
   }
   return <section className="v6-protection compact">
@@ -127,7 +144,7 @@ export function ProtectionPanel({ order, profile, notify }: { order: V6Order; pr
     {loading && <p role="status">Cargando casos...</p>}
     {cases.map((item) => <ParticipantCase key={item.id} item={item} order={order} profile={profile} refresh={refresh} notify={notify} />)}
     {!loading && !error && canOpenProtection(order, profile.id, cases, now) &&
-      <form className="v6-inline-form" onSubmit={(event) => void open(event)}>
+      <form className="v6-inline-form" data-pwa-tracked onChangeCapture={() => openForm.dirty()} onSubmit={(event) => void open(event)}>
         <h3>Solicitar revisión</h3>
         <label className="v6-field"><span>Tipo de problema</span><select value={type} onChange={(event) => setType(event.target.value as V6ClaimType)}>{Object.entries(claimLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
         <label className="v6-field"><span>Qué pasó</span><textarea required minLength={type === 'other' ? 20 : 10} maxLength={5000} value={detail} onChange={(event) => setDetail(event.target.value)} /></label>

@@ -10,7 +10,7 @@ import { RecurringServicesPanel, RecurringAdminPanel } from './RecurringServices
 import { NotificationHistory, NotificationQuickPanel } from './NotificationCenter';
 import { ProfessionalTrustSignals } from './ProfessionalTrustSignals';
 import { WorkroomList, WorkroomSheet } from './Workroom';
-import { PwaVersionDetails, usePwaSurface } from './PwaUpdateProvider';
+import { PwaVersionDetails, usePwaForm, usePwaSurface } from './PwaUpdateProvider';
 import {
   ExperienceSwitch,
   ManitoBottomNavigation,
@@ -2535,6 +2535,7 @@ function SetupScreen({ onConnected }: { onConnected: () => void }) {
 }
 
 function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
+  const authForm = usePwaForm('auth-form');
   const [mode, setMode] = useState<AuthMode>('login');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -2592,6 +2593,8 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (authForm.blocked()) return;
+    authForm.begin();
     setError(null);
     setLocalNotice(null);
     setSubmitting(true);
@@ -2605,6 +2608,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         if (resetError) throw resetError;
         setLocalNotice('Te mandamos un link para crear una contraseña nueva.');
         setNotice('Revisá tu email para recuperar el acceso.');
+        authForm.saved();
         return;
       }
 
@@ -2617,16 +2621,20 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
           if (isEmailNotConfirmedError(loginError)) {
             setAwaitingConfirmation(true);
             setLocalNotice('Tu correo todavía no fue confirmado.');
+            authForm.saved();
             return;
           }
           throw loginError;
         }
+        authForm.saved();
         return;
       }
 
       const passwordError = passwordSecurityMessage(password, cleanEmail);
       if (passwordError) {
         setError(passwordError);
+        authForm.saved();
+        authForm.dirty();
         return;
       }
 
@@ -2650,7 +2658,9 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
         setLocalNotice('Cuenta creada. Te mandamos un email para confirmar y entrar a MANITO.');
         setNotice('Cuenta creada. Revisá tu email para confirmar el acceso.');
       }
+      authForm.saved();
     } catch (caught) {
+      authForm.failed();
       setError(friendlyAuthError(caught, 'No se pudo ingresar.'));
     } finally {
       setSubmitting(false);
@@ -2713,7 +2723,7 @@ function AuthScreen({ setNotice }: { setNotice: (message: string) => void }) {
               Cambiar correo o volver
             </button>
           </section>
-        ) : <form className="v6-stack" onSubmit={submit}>
+        ) : <form className="v6-stack" data-pwa-tracked onChangeCapture={() => authForm.dirty()} onSubmit={submit}>
           {mode === 'signup' && (
             <>
               <label className="v6-field">
@@ -2843,7 +2853,7 @@ function ClientHome({
   onAddressesChange: (addresses: V6ClientAddress[]) => void;
 }) {
   const initialAddress = editingOrder ? splitStoredAddress(editingOrder.address, profile.city) : null;
-  const requestSafety = usePwaSurface(`request:${profile.id}`, 'clean');
+  const requestSafety = usePwaForm(`request:${profile.id}`);
   const defaultAddress = accountAddresses.find((item) => item.is_default) || accountAddresses[0] || null;
   const [description, setDescription] = useState(editingOrder?.description || 'Necesito un plomero.');
   const [address, setAddress] = useState(initialAddress?.line || defaultAddress?.line || '');
@@ -3131,7 +3141,7 @@ function ClientHome({
       return;
     }
     setCreatingOrder(true);
-    requestSafety.set('saving');
+    requestSafety.begin();
     try {
       const orderAddress = formatAddress(address, addressCity);
       const orderDescription = description.trim();
@@ -3237,9 +3247,10 @@ function ClientHome({
       setRequestStep('need');
       onEditingComplete();
       onNavigate('orders');
-      requestSafety.set(photoUploadFailed || recurringPlanFailed ? 'dirty' : 'clean');
+      if (photoUploadFailed || recurringPlanFailed) requestSafety.failed();
+      else requestSafety.saved();
     } catch (caught) {
-      requestSafety.set('dirty');
+      requestSafety.failed();
       setError(caught instanceof Error ? caught.message : 'No se pudo publicar.');
     } finally {
       setCreatingOrder(false);
@@ -3573,7 +3584,7 @@ function ClientHome({
         : 'MANITO buscará un profesional disponible para aceptar el trabajo.';
 
     return (
-      <section className="v6-request-shell" ref={requestFormRef} onClickCapture={() => requestSafety.set('dirty')}>
+      <section className="v6-request-shell" ref={requestFormRef} onClickCapture={() => requestSafety.dirty()}>
         <header className="v6-request-header">
           <button className="v6-back-button" type="button" onClick={previousRequestStep} aria-label="Volver">
             <ArrowLeft size={20} aria-hidden="true" />
@@ -3586,7 +3597,7 @@ function ClientHome({
 
         <RequestProgress steps={requestStepLabels} current={requestStepIndex} />
 
-        <form className="v6-request-form" data-pwa-tracked onChangeCapture={() => requestSafety.set('dirty')} onSubmit={createOrder}>
+        <form className="v6-request-form" data-pwa-tracked onChangeCapture={() => requestSafety.dirty()} onSubmit={createOrder}>
           {requestStep === 'need' && (
             <section className="v6-request-stage">
               <div className="v6-stage-heading">
@@ -4091,7 +4102,7 @@ function ClientHome({
                 ? 'Enviamos una solicitud para el día y horario que elijas. El profesional debe aceptarla para confirmarla.'
                 : 'Publicás una solicitud de presupuesto. No se asigna profesional ni se cobra hasta que elijas una propuesta.'}
           </p>
-          <form className="v6-stack" onSubmit={createOrder}>
+          <form className="v6-stack" data-pwa-tracked onChangeCapture={() => requestSafety.dirty()} onSubmit={createOrder}>
             <label className="v6-field">
               <span>{mode === 'quote' ? 'Describí el alcance del trabajo' : 'Qué necesitás'}</span>
               <textarea value={description} onChange={(event) => setDescription(event.target.value)} required />
@@ -5385,6 +5396,12 @@ function OrderCard({
     ? order.professional || order.reserved_professional
     : order.client;
   const actionSafety = usePwaSurface(`order-action:${order.id}`, 'clean');
+  const pinForm = usePwaForm(`order-pin:${order.id}`);
+  const evidenceForm = usePwaForm(`order-evidence:${order.id}`);
+  const proposalForm = usePwaForm(`order-proposal:${order.id}`);
+  const extraForm = usePwaForm(`order-extra:${order.id}`);
+  const ratingForm = usePwaForm(`order-rating:${order.id}`);
+  const cancelForm = usePwaForm(`order-cancel:${order.id}`);
   async function guardedAction<T>(action: () => Promise<T>): Promise<T> {
     if (actionSafety.blocked()) throw new Error('La actualización está preparando la página. Reintentá en un momento.');
     actionSafety.set('critical');
@@ -5618,17 +5635,18 @@ function OrderCard({
       setPinActionError('Ingresá el PIN de 4 números que te muestra el cliente.');
       return;
     }
+    if (nextAction.kind === 'complete_with_pin' && order.service?.requires_completion_evidence && !photos.some((photo) => photo.stage === 'after')) {
+      setError('Agregá al menos una foto del trabajo terminado antes de finalizar.');
+      return;
+    }
     if (advancingOrder.current) return;
     advancingOrder.current = true;
     setPinActionError(null);
+    if (needsPin) pinForm.begin();
     try {
       if (nextAction.kind === 'start_with_pin') {
         await guardedAction(() => startV6Order(order.id, pinValue));
       } else if (nextAction.kind === 'complete_with_pin') {
-        if (order.service?.requires_completion_evidence && !photos.some((photo) => photo.stage === 'after')) {
-          setError('Agregá al menos una foto del trabajo terminado antes de finalizar.');
-          return;
-        }
         await guardedAction(() => completeTrackedV6Order(order.id, pinValue));
       } else {
         await guardedAction(() => advanceV6Order(order.id));
@@ -5637,7 +5655,9 @@ function OrderCard({
       setPinEntryOpen(false);
       setPinValue('');
       setNotice('Estado actualizado.');
+      if (needsPin) pinForm.saved();
     } catch (caught) {
+      if (needsPin) pinForm.failed();
       actionSafety.set('critical');
       const message = caught instanceof Error ? caught.message : 'No se pudo avanzar.';
       if (nextAction.kind === 'start_with_pin' || nextAction.kind === 'complete_with_pin') setPinActionError(message);
@@ -5663,12 +5683,15 @@ function OrderCard({
       `${phaseWarning ? `${phaseWarning}\n\n` : ''}¿Cancelar este servicio?`,
     );
     if (!confirmed) return;
+    cancelForm.begin();
     try {
       await guardedAction(() => cancelV6Order(order.id, cancellationReason, cancellationNote));
       setOrders(await listV6Orders());
       setNotice('Servicio cancelado.');
       setShowCancellationForm(false);
+      cancelForm.saved();
     } catch (caught) {
+      cancelForm.failed();
       actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo cancelar.');
     }
@@ -5736,6 +5759,7 @@ function OrderCard({
       setError('Indicá una duración estimada entre 15 minutos y 24 horas.');
       return;
     }
+    proposalForm.begin();
     try {
       await guardedAction(() => sendV6OrderProposal({
         orderId: order.id,
@@ -5751,7 +5775,9 @@ function OrderCard({
       }));
       await refreshCommercialData();
       setNotice('Presupuesto enviado.');
+      proposalForm.saved();
     } catch (caught) {
+      proposalForm.failed();
       actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo enviar presupuesto.');
     }
@@ -5846,6 +5872,7 @@ function OrderCard({
     const professionalId = order.professional_id;
     extraRequestInFlight.current = true;
     setSubmittingExtra(true);
+    extraForm.begin();
     try {
       await guardedAction(() => addV6OrderExtra({
         orderId: order.id,
@@ -5855,7 +5882,9 @@ function OrderCard({
       }));
       await refreshCommercialData();
       setNotice('Adicional enviado para aprobación.');
+      extraForm.saved();
     } catch (caught) {
+      extraForm.failed();
       actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo crear adicional.');
     } finally {
@@ -5881,6 +5910,7 @@ function OrderCard({
       setError('Este pedido no tiene profesional asignado.');
       return;
     }
+    ratingForm.begin();
     try {
       const saved = await addV6Rating({
         orderId: order.id,
@@ -5890,7 +5920,9 @@ function OrderCard({
       setRating(saved);
       setNotice('Calificación enviada.');
       setRatingComment('');
+      ratingForm.saved();
     } catch (caught) {
+      ratingForm.failed();
       setError(caught instanceof Error ? caught.message : 'No se pudo calificar.');
     }
   }
@@ -5902,6 +5934,7 @@ function OrderCard({
       return;
     }
     setUploadingEvidence(true);
+    evidenceForm.begin();
     try {
       await guardedAction(async () => {
         const filePath = await uploadV6OrderEvidenceFile({
@@ -5926,7 +5959,9 @@ function OrderCard({
       setEvidenceFile(null);
       event.currentTarget.reset();
       setNotice('Evidencia agregada al seguimiento.');
+      evidenceForm.saved();
     } catch (caught) {
+      evidenceForm.failed();
       actionSafety.set('critical');
       setError(caught instanceof Error ? caught.message : 'No se pudo subir la evidencia.');
     } finally {
@@ -6045,7 +6080,7 @@ function OrderCard({
         )}
 
         {profile.role === 'professional' && pinEntryOpen && (nextAction.kind === 'start_with_pin' || nextAction.kind === 'complete_with_pin') && (
-          <form className="v6-pin-entry" onSubmit={(event) => { event.preventDefault(); void advance(); }}>
+          <form className="v6-pin-entry" data-pwa-tracked onChangeCapture={() => pinForm.dirty()} onSubmit={(event) => { event.preventDefault(); void advance(); }}>
             <label className="v6-field">
               <span>{nextAction.kind === 'start_with_pin' ? 'PIN de inicio' : 'PIN de finalización'}</span>
               <input
@@ -6061,7 +6096,7 @@ function OrderCard({
             </label>
             <div className="v6-actions compact">
               <button className="v6-primary" type="submit">Validar PIN</button>
-              <button className="v6-secondary" type="button" onClick={() => { setPinEntryOpen(false); setPinValue(''); setPinActionError(null); }}>Cancelar</button>
+              <button className="v6-secondary" type="button" onClick={() => { pinForm.discard(); setPinEntryOpen(false); setPinValue(''); setPinActionError(null); }}>Cancelar</button>
             </div>
           </form>
         )}
@@ -6361,7 +6396,7 @@ function OrderCard({
         </div>
       )}
       {canUploadEvidence && (
-        <form className="v6-inline-form v6-evidence-form" onSubmit={uploadOrderEvidence}>
+        <form className="v6-inline-form v6-evidence-form" data-pwa-tracked onChangeCapture={() => evidenceForm.dirty()} onSubmit={uploadOrderEvidence}>
           <div className="v6-section-head compact">
             <h2>Seguimiento visual</h2>
             <span>{photos.length} fotos</span>
@@ -6437,7 +6472,7 @@ function OrderCard({
         </div>
       )}
       {profile.role === 'professional' && order.mode === 'quote' && isOpenOpportunityStatus(order.status) && (
-        <form className="v6-inline-form v6-quote-form" onSubmit={sendProposal}>
+        <form className="v6-inline-form v6-quote-form" data-pwa-tracked onChangeCapture={() => proposalForm.dirty()} onSubmit={sendProposal}>
           <label>
             <span>Mano de obra</span>
             <input value={proposalLabor} onChange={(event) => setProposalLabor(event.target.value)} inputMode="numeric" />
@@ -6489,7 +6524,7 @@ function OrderCard({
         </section>
       )}
       {profile.role === 'professional' && order.professional_id === profile.id && ['en_sitio', 'trabajando'].includes(order.status) && (
-        <form className="v6-inline-form" onSubmit={createExtra}>
+        <form className="v6-inline-form" data-pwa-tracked onChangeCapture={() => extraForm.dirty()} onSubmit={createExtra}>
           <input value={extraTitle} onChange={(event) => setExtraTitle(event.target.value)} aria-label="Detalle adicional" />
           <input value={extraAmount} onChange={(event) => setExtraAmount(event.target.value)} aria-label="Monto adicional" />
           <button className="v6-secondary" type="submit" disabled={submittingExtra}>{submittingExtra ? 'Enviando...' : 'Pedir adicional'}</button>
@@ -6507,7 +6542,7 @@ function OrderCard({
       )}
       {profile.role === 'client' && order.status === 'completed' && order.professional_id && !rating && (
         <div className="v6-aftercare">
-          <form className="v6-inline-form" onSubmit={submitRating}>
+          <form className="v6-inline-form" data-pwa-tracked onChangeCapture={() => ratingForm.dirty()} onSubmit={submitRating}>
             <select value={ratingStars} onChange={(event) => setRatingStars(Number(event.target.value))} aria-label="Estrellas">
               {[5, 4, 3, 2, 1].map((value) => (
                 <option value={value} key={value}>{value} estrellas</option>
@@ -6522,7 +6557,7 @@ function OrderCard({
         <p className="v6-note">Tu calificacion de {rating.stars} estrellas quedo registrada.</p>
       )}
       {showCancellationForm && canCancelOrder && (
-        <form className="v6-inline-form" onSubmit={cancel}>
+        <form className="v6-inline-form" data-pwa-tracked onChangeCapture={() => cancelForm.dirty()} onSubmit={cancel}>
           <select
             value={cancellationReason}
             onChange={(event) => setCancellationReason(event.target.value as V6CancellationReason)}
@@ -6562,6 +6597,26 @@ function OrderCard({
       </div>
     </article>
   );
+}
+
+function DocumentEvidenceForm({ item, current, link, saving, onLinkChange, onSave, renderEvidence }: {
+  item: { kind: string; label: string };
+  current?: V6ProfessionalDocument;
+  link: string;
+  saving: boolean;
+  onLinkChange: (value: string) => void;
+  onSave: (event: FormEvent<HTMLFormElement>, kind: string, label: string, safety: ReturnType<typeof usePwaForm>) => Promise<void>;
+  renderEvidence: (path: string | null, label: string) => ReactNode;
+}) {
+  const formSafety = usePwaForm(`profile-document:${item.kind}`);
+  const uploaded = current?.status === 'uploaded' || current?.status === 'approved';
+  return <form className="v6-upload-card" data-pwa-tracked onChangeCapture={() => formSafety.dirty()} onSubmit={(event) => { void onSave(event, item.kind, item.label, formSafety); }}>
+    <div className="v6-upload-head"><strong>{item.label}</strong><span data-state={uploaded ? 'uploaded' : 'pending'}>{uploaded ? 'Cargado' : 'Pendiente'}</span></div>
+    {renderEvidence(current?.file_path || null, 'Evidencia')}
+    <label className="v6-field"><span>Archivo</span><input name={`${item.kind}-file`} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" /></label>
+    <label className="v6-field"><span>Link opcional</span><input value={link} onChange={(event) => onLinkChange(event.target.value)} placeholder="https://drive.google.com/..." /></label>
+    <button className="v6-secondary" type="submit" disabled={saving}>{saving ? 'Guardando...' : 'Guardar documento'}</button>
+  </form>;
 }
 
 function ProfilePanel({
@@ -6635,8 +6690,20 @@ function ProfilePanel({
   const specialtySafety = usePwaSurface(`specialties:${profile.id}`, 'clean');
   const profileWriteSafety = usePwaSurface(`profile-write:${profile.id}`, 'clean');
   const documentSafety = usePwaSurface(`documents:${profile.id}`, 'clean');
+  const documentLinkSafety = usePwaSurface(`document-links:${profile.id}`, 'clean');
   const portfolioSafety = usePwaSurface(`portfolio:${profile.id}`, 'clean');
   const onboardingSafety = usePwaSurface(`onboarding:${profile.id}`, 'clean');
+  const personalForm = usePwaForm(`profile-personal:${profile.id}`);
+  const professionalForm = usePwaForm(`profile-public:${profile.id}`);
+  const portfolioForm = usePwaForm(`profile-portfolio:${profile.id}`);
+  const identityDraftSafety = usePwaSurface(`profile-identity-draft:${profile.id}`, 'clean');
+  const documentLinksRef = useRef<Record<string, string>>({});
+  function updateDocumentLink(kind: string, value: string) {
+    const next = { ...documentLinksRef.current, [kind]: value };
+    documentLinksRef.current = next;
+    setDocumentLinks(next);
+    documentLinkSafety.set(Object.values(next).some((link) => link.trim()) ? 'dirty' : 'clean');
+  }
   const catalogSavingRef = useRef(false);
   const serviceEditorHistoryRef = useRef(false);
   const ignoreServiceEditorPopRef = useRef(false);
@@ -6838,11 +6905,15 @@ function ProfilePanel({
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (personalForm.blocked()) return;
+    personalForm.begin();
     try {
       const changedProfile = await updateV6Profile(profile.id, { full_name: fullName, phone, city });
       setProfile(changedProfile);
       setNotice('Perfil actualizado.');
+      personalForm.saved();
     } catch (caught) {
+      personalForm.failed();
       setError(caught instanceof Error ? caught.message : 'No se pudo guardar perfil.');
     }
   }
@@ -7030,6 +7101,8 @@ function ProfilePanel({
 
   async function saveProfessionalSurface(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (professionalForm.blocked()) return;
+    professionalForm.begin();
     profileWriteSafety.set('saving');
     try {
       const nextProfile = await upsertV6ProfessionalProfile({
@@ -7061,8 +7134,10 @@ function ProfilePanel({
       setOnboarding(nextOnboarding);
       setNotice('Perfil profesional guardado.');
       profileWriteSafety.set('clean');
+      professionalForm.saved();
     } catch (caught) {
       profileWriteSafety.set('critical');
+      professionalForm.failed();
       setError(caught instanceof Error ? caught.message : 'Aplicá la migración V7 para guardar alta profesional.');
     }
   }
@@ -7113,7 +7188,7 @@ function ProfilePanel({
     }
   }
 
-  async function saveDocumentEvidence(event: FormEvent<HTMLFormElement>, kind: string, label: string) {
+  async function saveDocumentEvidence(event: FormEvent<HTMLFormElement>, kind: string, label: string, formSafety: ReturnType<typeof usePwaForm>) {
     event.preventDefault();
     const fileInput = new FormData(event.currentTarget).get(`${kind}-file`);
     const file = fileInput instanceof File && fileInput.size > 0 ? fileInput : null;
@@ -7122,6 +7197,8 @@ function ProfilePanel({
       setError(`Agregá una foto o un link para ${label}.`);
       return;
     }
+    if (formSafety.blocked()) return;
+    formSafety.begin();
     setSavingDocumentKind(kind);
     documentSafety.set('critical');
     try {
@@ -7141,12 +7218,14 @@ function ProfilePanel({
         observation: link ? 'Link aportado por el profesional.' : file?.name || null,
       });
       setDocuments(await listV6ProfessionalDocuments(profile.id));
-      setDocumentLinks((currentLinks) => ({ ...currentLinks, [kind]: '' }));
+      if ((documentLinksRef.current[kind] || '').trim() === link) updateDocumentLink(kind, '');
       event.currentTarget.reset();
       setNotice(`${label} guardado para revisión.`);
       documentSafety.set('clean');
+      formSafety.saved();
     } catch (caught) {
       documentSafety.set('critical');
+      formSafety.failed();
       setError(uploadErrorMessage(caught));
     } finally {
       setSavingDocumentKind(null);
@@ -7218,6 +7297,8 @@ function ProfilePanel({
       setError('Ponele un título al trabajo del portfolio.');
       return;
     }
+    if (portfolioForm.blocked()) return;
+    portfolioForm.begin();
     setSavingPortfolio(true);
     portfolioSafety.set('critical');
     try {
@@ -7242,8 +7323,10 @@ function ProfilePanel({
       event.currentTarget.reset();
       setNotice('Portfolio actualizado.');
       portfolioSafety.set('clean');
+      portfolioForm.saved();
     } catch (caught) {
       portfolioSafety.set('critical');
+      portfolioForm.failed();
       setError(uploadErrorMessage(caught));
     } finally {
       setSavingPortfolio(false);
@@ -7391,7 +7474,7 @@ function ProfilePanel({
       {professionalStep === 1 && (
           <section className="v6-card">
             <h2>Perfil público</h2>
-            <form className="v6-stack" onSubmit={saveProfessionalSurface}>
+            <form className="v6-stack" data-pwa-tracked onChangeCapture={() => professionalForm.dirty()} onSubmit={saveProfessionalSurface}>
               <label className="v6-field">
                 <span>Título</span>
                 <input value={headline} onChange={(event) => setHeadline(event.target.value)} />
@@ -7427,7 +7510,7 @@ function ProfilePanel({
       {professionalStep === 1 && (
       <section className="v6-card">
         <h2>Datos personales</h2>
-        <form className="v6-stack" onSubmit={saveProfile}>
+        <form className="v6-stack" data-pwa-tracked onChangeCapture={() => personalForm.dirty()} onSubmit={saveProfile}>
           <label className="v6-field">
             <span>Nombre</span>
             <input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
@@ -7445,7 +7528,7 @@ function ProfilePanel({
               <span>DNI</span>
               <input
                 value={documentNumber}
-                onChange={(event) => setDocumentNumber(event.target.value)}
+                onChange={(event) => { setDocumentNumber(event.target.value); identityDraftSafety.set(event.target.value || birthDate ? 'dirty' : 'clean'); }}
                 inputMode="numeric"
                 placeholder="Para el alta profesional"
               />
@@ -7454,7 +7537,7 @@ function ProfilePanel({
               <span>Fecha de nacimiento</span>
               <input
                 value={birthDate}
-                onChange={(event) => setBirthDate(event.target.value)}
+                onChange={(event) => { setBirthDate(event.target.value); identityDraftSafety.set(event.target.value || documentNumber ? 'dirty' : 'clean'); }}
                 type="date"
               />
             </label>
@@ -7473,46 +7556,16 @@ function ProfilePanel({
               Subí fotos JPG, PNG, WebP o PDF. También podés pegar un link de Drive o carpeta compartida.
             </p>
             <div className="v6-upload-list">
-              {requiredDocuments.map((item) => {
-                const current = documents.find((document) => document.kind === item.kind);
-                const uploaded = current?.status === 'uploaded' || current?.status === 'approved';
-                return (
-                  <form
-                    className="v6-upload-card"
-                    key={item.kind}
-                    onSubmit={(event) => saveDocumentEvidence(event, item.kind, item.label)}
-                  >
-                    <div className="v6-upload-head">
-                      <strong>{item.label}</strong>
-                      <span data-state={uploaded ? 'uploaded' : 'pending'}>
-                        {uploaded ? 'Cargado' : 'Pendiente'}
-                      </span>
-                    </div>
-                    {renderEvidence(current?.file_path || null, 'Evidencia')}
-                    <label className="v6-field">
-                      <span>Archivo</span>
-                      <input name={`${item.kind}-file`} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" />
-                    </label>
-                    <label className="v6-field">
-                      <span>Link opcional</span>
-                      <input
-                        value={documentLinks[item.kind] || ''}
-                        onChange={(event) =>
-                          setDocumentLinks((links) => ({ ...links, [item.kind]: event.target.value }))
-                        }
-                        placeholder="https://drive.google.com/..."
-                      />
-                    </label>
-                    <button
-                      className="v6-secondary"
-                      type="submit"
-                      disabled={savingDocumentKind === item.kind}
-                    >
-                      {savingDocumentKind === item.kind ? 'Guardando...' : 'Guardar documento'}
-                    </button>
-                  </form>
-                );
-              })}
+              {requiredDocuments.map((item) => <DocumentEvidenceForm
+                key={item.kind}
+                item={item}
+                current={documents.find((document) => document.kind === item.kind)}
+                link={documentLinks[item.kind] || ''}
+                saving={savingDocumentKind === item.kind}
+                onLinkChange={(value) => updateDocumentLink(item.kind, value)}
+                onSave={saveDocumentEvidence}
+                renderEvidence={renderEvidence}
+              />)}
             </div>
           </section>
       )}
@@ -7520,7 +7573,7 @@ function ProfilePanel({
       {professionalStep === 4 && (
           <section className="v6-card">
             <h2>Portfolio</h2>
-            <form className="v6-stack" onSubmit={savePortfolio}>
+            <form className="v6-stack" data-pwa-tracked onChangeCapture={() => portfolioForm.dirty()} onSubmit={savePortfolio}>
               <label className="v6-field">
                 <span>Título del trabajo</span>
                 <input value={portfolioTitle} onChange={(event) => setPortfolioTitle(event.target.value)} />
@@ -7796,8 +7849,8 @@ function AccountPanel({
   const accountPreferencesSafety = usePwaSurface(`account-preferences:${profile.id}`, 'clean');
   const accountDefaultSafety = usePwaSurface(`account-default-address:${profile.id}`, 'clean');
   const accountPaymentSafety = usePwaSurface(`account-payment:${profile.id}`, 'clean');
-  const accountDraftSafety = usePwaSurface(`account-draft:${profile.id}`, 'clean');
-  const addressSafety = usePwaSurface(`account-address:${profile.id}`, 'clean');
+  const accountDraftSafety = usePwaForm(`account-draft:${profile.id}`);
+  const addressSafety = usePwaForm(`account-address:${profile.id}`);
   const addressDraftDirtyRef = useRef(false);
   const referralCode = `MANITO-${normalizeText(profile.full_name || profile.email || profile.id)
     .replace(/[^a-z0-9]+/g, '')
@@ -7854,6 +7907,7 @@ function AccountPanel({
 
   async function saveAccountPreferences() {
     if (savingSecurityPreferences) return;
+    accountDraftSafety.begin();
     accountPreferencesSafety.set('saving');
     setSavingSecurityPreferences(true);
     try {
@@ -7874,9 +7928,10 @@ function AccountPanel({
       }
       setNotice('Cuenta actualizada con privacidad protegida.');
       accountPreferencesSafety.set('clean');
-      accountDraftSafety.set('clean');
+      accountDraftSafety.saved();
     } catch (caught) {
       accountPreferencesSafety.set('critical');
+      accountDraftSafety.failed();
       setNotice(caught instanceof Error ? caught.message : 'No se pudo guardar seguridad de cuenta.');
     } finally {
       setSavingSecurityPreferences(false);
@@ -7890,7 +7945,8 @@ function AccountPanel({
       setNotice('Escribí dirección y ciudad.');
       return;
     }
-    addressSafety.set('saving');
+    if (addressSafety.blocked()) return;
+    addressSafety.begin();
     setSavingLocation(true);
     try {
       const geocoded = await geocodeManualLocation(addressLine.trim(), addressCity.trim()).catch(() => null);
@@ -7914,9 +7970,9 @@ function AccountPanel({
       onAddressesChange(await listV6ClientAddresses(profile.id));
       setNotice('Dirección predeterminada actualizada.');
       addressDraftDirtyRef.current = false;
-      addressSafety.set('clean');
+      addressSafety.saved();
     } catch (caught) {
-      addressSafety.set('critical');
+      addressSafety.failed();
       setNotice(caught instanceof Error ? caught.message : 'No se pudo guardar la ubicación.');
     } finally {
       setSavingLocation(false);
@@ -7926,7 +7982,7 @@ function AccountPanel({
   function editAddress(item?: V6ClientAddress) {
     if (savingLocation || (addressDraftDirtyRef.current && !window.confirm('¿Descartar los cambios de la dirección?'))) return;
     addressDraftDirtyRef.current = false;
-    addressSafety.set('clean');
+    addressSafety.discard();
     setAddressId(item?.id || '');
     setAddressLabel(item?.label || (addresses.length ? 'Otro' : 'Casa'));
     setAddressLine(item?.line || '');
@@ -8062,7 +8118,7 @@ function AccountPanel({
           ))}
         </div>
         {!addresses.length && <div className="v6-empty-inline"><strong>Todavía no guardaste una dirección.</strong><p>Agregá Casa o usá el GPS para empezar.</p></div>}
-        <form className="v6-stack" data-pwa-tracked onChangeCapture={() => { addressDraftDirtyRef.current = true; addressSafety.set('dirty'); }} onSubmit={saveLocation}>
+        <form className="v6-stack" data-pwa-tracked onChangeCapture={() => { addressDraftDirtyRef.current = true; addressSafety.dirty(); }} onSubmit={saveLocation}>
           <div className="v6-field-grid-two">
             <label className="v6-field"><span>Nombre</span><input value={addressLabel} onChange={(event) => setAddressLabel(event.target.value)} placeholder="Casa" required /></label>
             <label className="v6-field"><span>Ciudad</span><input value={addressCity} onChange={(event) => setAddressCity(event.target.value)} placeholder="Mar del Plata" required /></label>
@@ -8093,7 +8149,7 @@ function AccountPanel({
       </section>}
       <section className="v6-card">
         <h2>Datos de cuenta</h2>
-        <div className="v6-stack" data-pwa-tracked onChangeCapture={() => accountDraftSafety.set('dirty')}>
+        <div className="v6-stack" data-pwa-tracked onChangeCapture={() => accountDraftSafety.dirty()}>
           <label className="v6-field">
             <span>Tipo</span>
             <select
@@ -8621,6 +8677,7 @@ function HeaderLocationSheet({
   onSave: (input: { id?: string; label: string; line: string; city: string; lat: null; lng: null }) => Promise<void>;
   setError: (message: string) => void;
 }) {
+  const locationForm = usePwaForm('header-location');
   const current = addresses.find((item) => item.is_default) || addresses[0] || null;
   const [label, setLabel] = useState(current?.label || 'Casa');
   const [city, setCity] = useState(current?.city || '');
@@ -8633,10 +8690,14 @@ function HeaderLocationSheet({
       setError('Ingresá dirección y ciudad.');
       return;
     }
+    if (locationForm.blocked()) return;
+    locationForm.begin();
     setSaving(true);
     try {
       await onSave({ id: current?.id, label: label.trim() || 'Casa', line: line.trim(), city: city.trim(), lat: null, lng: null });
+      locationForm.saved();
     } catch (caught) {
+      locationForm.failed();
       setError(caught instanceof Error ? caught.message : 'No pudimos guardar la ubicación.');
     } finally {
       setSaving(false);
@@ -8655,7 +8716,7 @@ function HeaderLocationSheet({
           <span><strong>{savingPhoneLocation ? 'Buscando ubicación...' : 'Usar ubicación del teléfono'}</strong><small>Te pediremos permiso sólo ahora.</small></span>
         </button>
         <div className="v6-divider-label"><span>o ingresala manualmente</span></div>
-        <form className="v6-stack" onSubmit={submit}>
+        <form className="v6-stack" data-pwa-tracked onChangeCapture={() => locationForm.dirty()} onSubmit={submit}>
           <label className="v6-field"><span>Nombre</span><input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Casa" required /></label>
           <label className="v6-field"><span>Dirección</span><input value={line} onChange={(event) => setLine(event.target.value)} placeholder="Calle y número" required /></label>
           <label className="v6-field"><span>Ciudad</span><input value={city} onChange={(event) => setCity(event.target.value)} placeholder="Ej: Mar del Plata" required /></label>
