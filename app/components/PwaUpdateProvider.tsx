@@ -3,7 +3,7 @@
 import { AlertCircle, Download, RefreshCw, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { PwaReadinessLevel, PwaUpdatePort, PwaUpdateSnapshot } from '../lib/pwaUpdateContract';
-import { attemptPwaReload, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PWA_RELOAD_MARKER, PwaUpdateSafetyRegistry } from '../lib/pwaUpdateSafety';
+import { attemptPwaReload, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PWA_RELOAD_MARKER, PwaUntrackedEditTracker, PwaUpdateSafetyRegistry } from '../lib/pwaUpdateSafety';
 
 type SafetyContext = { registry: PwaUpdateSafetyRegistry; port: PwaUpdatePort };
 const Context = createContext<SafetyContext | null>(null);
@@ -139,26 +139,19 @@ export function PwaUpdateProvider({ port, children }: { port: PwaUpdatePort; chi
       if (target.closest('.pwa-update-notice, .pwa-update-startup')) return;
       if (target.closest('input, textarea, select, form, [contenteditable], button')) { event.preventDefault(); event.stopPropagation(); }
     };
-    const dirtyTargets = new Set<Element>();
-    const scanDetachedEdits = () => {
-      for (const target of dirtyTargets) if (!target.isConnected) dirtyTargets.delete(target);
-      if (!dirtyTargets.size && registry.reasonLevel('untracked-edit') === 'dirty') registry.markReviewable('untracked-edit');
-    };
-    const observer = new MutationObserver(scanDetachedEdits);
+    const untracked = new PwaUntrackedEditTracker(registry);
+    const observer = new MutationObserver(() => untracked.scanDetached());
     observer.observe(document.body, { childList: true, subtree: true });
     const onUntrackedEdit = (event: Event) => {
       const target = event.target;
       if (event.defaultPrevented || !(target instanceof Element) || target.closest('[data-pwa-tracked], [data-pwa-ephemeral]')) return;
       if (!target.closest('input, textarea, select, [contenteditable]')) return;
-      if (registry.reasonLevel('untracked-edit') === 'saving') return;
-      dirtyTargets.add(target);
-      registry.set('untracked-edit', 'dirty');
+      untracked.edit(target);
     };
     const onUntrackedSubmit = (event: Event) => {
       const target = event.target;
       if (event.defaultPrevented || !(target instanceof HTMLFormElement) || target.closest('[data-pwa-tracked]')) return;
-      dirtyTargets.clear();
-      registry.set('untracked-edit', 'saving');
+      untracked.submit(target);
     };
     const unregister = registry.register('untracked-edit', 'clean');
     document.addEventListener('beforeinput', onEdit, true);
