@@ -1,8 +1,12 @@
 import type { Metadata, Viewport } from 'next';
+import { resolveDomainOrigins } from './lib/domainMigrationContract';
 import './globals.css';
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://bloody-eta.vercel.app'),
+  metadataBase: new URL(resolveDomainOrigins({
+    configuredAppOrigin: process.env.NEXT_PUBLIC_APP_URL,
+    environment: process.env.NODE_ENV,
+  }).appOrigin),
   title: 'MANITO',
   applicationName: 'MANITO',
   description:

@@ -207,6 +207,7 @@ import type {
 import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 import { friendlyAuthError, isEmailNotConfirmedError } from '../lib/authMessages';
 import { buildAuthCallbackUrl, type AuthEmailFlow } from '../lib/authCallback';
+import { resolveDomainOrigins } from '../lib/domainMigrationContract';
 import { isRecoverableMissingProfileError } from '../lib/profileRecovery';
 import {
   authoritativeRequestCoordinates,
@@ -282,8 +283,6 @@ type ServiceGroup = {
 };
 
 const statusFlow = orderStatusFlow;
-const deployedAppUrl =
-  'https://bloody-eta.vercel.app';
 const onlineCardEnabled = false;
 const paymentOptionIcons: Record<PaymentMethod, ReactNode> = {
   card: <CreditCard size={17} aria-hidden="true" />,
@@ -1334,13 +1333,11 @@ function savedAddressesKey(profileId: string) {
 }
 
 function getAuthRedirectUrl() {
-  if (typeof window === 'undefined') return deployedAppUrl;
-  const configuredUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (configuredUrl) return configuredUrl;
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return deployedAppUrl;
-  }
-  return window.location.origin;
+  return resolveDomainOrigins({
+    configuredAppOrigin: process.env.NEXT_PUBLIC_APP_URL,
+    runtimeOrigin: typeof window === 'undefined' ? undefined : window.location.origin,
+    environment: process.env.NODE_ENV,
+  }).appOrigin;
 }
 
 function getAuthCallbackUrl(flow: AuthEmailFlow) {
