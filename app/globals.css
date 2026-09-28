@@ -3573,10 +3573,18 @@ a.v6-evidence-link {
 .pwa-update-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 4px 8px; border: 1px solid #c5d3d0; border-radius: 4px; background: #fff; color: #124f48; cursor: pointer; }
 .pwa-update-actions button:disabled { opacity: .5; cursor: default; }
 .pwa-update-startup { border-left-color: #a44b30; font-size: 13px; }
-.pwa-version-panel dl { margin: 0; display: grid; gap: 5px; font-size: 12px; }
-.pwa-version-panel dl > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; }
-.pwa-version-panel dt { color: #53635f; }
-.pwa-version-panel dd { margin: 0; overflow-wrap: anywhere; }
+.pwa-version-link { display: block; width: max-content; max-width: 100%; min-height: 44px; margin: 8px auto 0; padding: 10px 12px; border: 0; background: transparent; color: #53635f; font-size: 12px; cursor: pointer; }
+.pwa-version-link:hover { text-decoration: underline; }
+.pwa-diagnostics-modal { z-index: 1201; }
+.pwa-diagnostics-sheet { max-height: calc(100dvh - 24px); overflow-y: auto; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+.pwa-diagnostics-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pwa-diagnostics-head h2 { margin: 0; font-size: 18px; }
+.pwa-diagnostics-sheet dl { display: grid; gap: 10px; margin: 0; font-size: 13px; }
+.pwa-diagnostics-sheet dl > div { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(0, 1.4fr); gap: 12px; }
+.pwa-diagnostics-sheet dt { color: #53635f; }
+.pwa-diagnostics-sheet dd { margin: 0; overflow-wrap: anywhere; }
+.pwa-diagnostics-sheet > button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; }
+.pwa-diagnostics-sheet > p { margin: 0; font-size: 12px; }
 @media (max-width: 719px) { .pwa-update-notice, .pwa-update-startup { bottom: calc(78px + env(safe-area-inset-bottom)); } }
 @media (max-width: 520px) { .pwa-update-notice { flex-wrap: wrap; } .pwa-update-actions { width: 100%; justify-content: flex-end; } }
 

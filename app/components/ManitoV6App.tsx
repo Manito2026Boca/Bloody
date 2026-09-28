@@ -8084,7 +8084,6 @@ function AccountPanel({
         <h1>{profile.full_name || 'Usuario MANITO'}</h1>
         <p>{profile.email} · cuenta MANITO</p>
       </section>
-      <PwaVersionDetails />
       {showRecurring && <RecurringServicesPanel
         clientOrders={clientOrders}
         onOrders={() => onNavigate('orders')}
@@ -8330,6 +8329,7 @@ function AccountPanel({
           <Settings size={17} aria-hidden="true" /> Cambiar backend
         </button>
       </section>
+      <PwaVersionDetails />
     </>
   );
 }

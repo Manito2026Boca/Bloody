@@ -1,8 +1,9 @@
 'use client';
 
-import { AlertCircle, Download, RefreshCw, X } from 'lucide-react';
+import { AlertCircle, Copy, Download, RefreshCw, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { PwaReadinessLevel, PwaUpdatePort, PwaUpdateSnapshot } from '../lib/pwaUpdateContract';
+import { formatPwaDiagnostic, pwaUpdateStatus } from '../lib/pwaDiagnostics';
 import { attemptPwaReload, holdUntrackedSubmit, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PWA_RELOAD_MARKER, PwaFormSafetyController, PwaUntrackedEditTracker, PwaUpdateSafetyRegistry, syncUntrackedFormSafety } from '../lib/pwaUpdateSafety';
 
 type SafetyContext = { registry: PwaUpdateSafetyRegistry; port: PwaUpdatePort };
@@ -127,18 +128,41 @@ export function PwaVersionDetails() {
   if (!context) throw new Error('PwaUpdateProvider is required');
   const { port } = context;
   const [snapshot, setSnapshot] = useState<PwaUpdateSnapshot>(() => port.snapshot());
-  const [checking, setChecking] = useState(false);
-  const [checkError, setCheckError] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('');
   useEffect(() => port.subscribe(setSnapshot), [port]);
-  return <section className="v6-card pwa-version-panel">
-    <div className="v6-section-head"><h2>Versión de MANITO</h2><button className="v6-icon-button" type="button" disabled={checking} title="Comprobar versión" aria-label="Comprobar versión" onClick={() => {
-      setChecking(true);
-      setCheckError(false);
-      void port.check('manual').catch(() => setCheckError(true)).finally(() => setChecking(false));
-    }}><RefreshCw size={17} /></button></div>
-    <dl><div><dt>En uso</dt><dd>{snapshot.runningBuild.appVersion} · {snapshot.runningBuild.buildId}</dd></div><div><dt>Publicada</dt><dd>{snapshot.publishedBuild ? `${snapshot.publishedBuild.appVersion} · ${snapshot.publishedBuild.buildId}` : 'Sin verificar'}</dd></div><div><dt>Worker activo</dt><dd>{snapshot.activeWorkerBuildId || 'Sin controlar'}</dd></div><div><dt>Última comprobación</dt><dd>{snapshot.lastCheckedAt ? new Date(snapshot.lastCheckedAt).toLocaleString('es-AR') : 'Pendiente'}</dd></div></dl>
-    {(snapshot.error || checkError) && <p role="status">Estado: {snapshot.error || 'No se pudo comprobar la versión.'}</p>}
-  </section>;
+  useEffect(() => {
+    if (!open) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [open]);
+  const close = () => { setOpen(false); setCopyStatus(''); };
+  return <>
+    <button className="pwa-version-link" type="button" onClick={() => setOpen(true)} aria-label={`Información técnica de MANITO, versión ${snapshot.runningBuild.appVersion}`}>
+      MANITO · v{snapshot.runningBuild.appVersion}
+    </button>
+    {open && <div className="v6-modal pwa-diagnostics-modal" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
+      <section className="v6-sheet pwa-diagnostics-sheet" role="dialog" aria-modal="true" aria-label="Información técnica">
+        <div className="pwa-diagnostics-head"><h2>Información técnica</h2><button className="v6-icon-button" type="button" title="Cerrar" aria-label="Cerrar información técnica" onClick={close}><X size={20} /></button></div>
+        <dl>
+          <div><dt>Versión</dt><dd>{snapshot.runningBuild.appVersion}</dd></div>
+          <div><dt>Build</dt><dd>{snapshot.runningBuild.buildId.slice(0, 8)}</dd></div>
+          <div><dt>Commit</dt><dd>{snapshot.runningBuild.commit.slice(0, 7)}</dd></div>
+          <div><dt>Worker</dt><dd>{snapshot.activeWorkerBuildId ? 'Activo' : 'Sin controlar'}</dd></div>
+          <div><dt>Estado</dt><dd>{pwaUpdateStatus(snapshot)}</dd></div>
+          <div><dt>Comprobado</dt><dd>{snapshot.lastCheckedAt ? new Date(snapshot.lastCheckedAt).toLocaleString('es-AR') : 'Pendiente'}</dd></div>
+        </dl>
+        <button className="v6-secondary" type="button" onClick={() => {
+          if (!navigator.clipboard?.writeText) { setCopyStatus('No pudimos copiar el diagnóstico.'); return; }
+          void navigator.clipboard.writeText(formatPwaDiagnostic(snapshot))
+            .then(() => setCopyStatus('Diagnóstico copiado.'))
+            .catch(() => setCopyStatus('No pudimos copiar el diagnóstico.'));
+        }}><Copy size={16} aria-hidden="true" /> Copiar diagnóstico</button>
+        {copyStatus && <p role="status" className="v6-muted">{copyStatus}</p>}
+      </section>
+    </div>}
+  </>;
 }
 
 export function PwaUpdateProvider({ port, children }: { port: PwaUpdatePort; children: ReactNode }) {
