@@ -2,8 +2,59 @@ import type { PwaPrepareRequest, PwaPrepareResult, PwaReadinessLevel, PwaUpdateS
 
 const priority: Record<PwaReadinessLevel, number> = { unknown: 1, clean: 0, dirty: 2, saving: 3, critical: 4 };
 
+const surfaceLabels: Record<string, string> = {
+  'app-route': 'Sesión y pantalla',
+  'phone-location': 'Ubicación',
+  'auth-form': 'Acceso',
+  request: 'Solicitud',
+  'professional-actions': 'Acciones profesionales',
+  'orders-list-actions': 'Trabajos',
+  'order-action': 'Trabajo',
+  'order-pin': 'PIN del trabajo',
+  'order-evidence': 'Evidencia',
+  'order-proposal': 'Presupuesto',
+  'order-extra': 'Adicional',
+  'order-rating': 'Calificación',
+  'order-cancel': 'Cancelación',
+  'profile-document': 'Documento profesional',
+  specialties: 'Especialidades',
+  'profile-write': 'Perfil profesional',
+  documents: 'Documentos',
+  'document-links': 'Documentos',
+  portfolio: 'Portfolio',
+  onboarding: 'Alta profesional',
+  'profile-personal': 'Datos personales',
+  'profile-public': 'Perfil profesional',
+  'profile-portfolio': 'Portfolio',
+  'profile-identity-draft': 'Identidad profesional',
+  'account-preferences': 'Preferencias de cuenta',
+  'account-default-address': 'Dirección predeterminada',
+  'account-payment': 'Medio de pago',
+  'account-draft': 'Datos de cuenta',
+  'account-address': 'Dirección',
+  'header-location': 'Ubicación',
+  'protection-response': 'Protección MANITO',
+  'protection-upload': 'Evidencia de protección',
+  'protection-case': 'Caso de protección',
+  'protection-open': 'Solicitud de revisión',
+  'recurring-actions': 'Plan recurrente',
+  'recurring-create': 'Plan recurrente',
+  'recurring-edit': 'Plan recurrente',
+  'workroom-message': 'Mensaje',
+  'untracked-edit': 'Edición pendiente',
+  'untracked-form': 'Formulario abierto',
+  'startup-check': 'Inicio de la app',
+};
+
+export type PwaSafeBlocker = { surface: string; level: PwaReadinessLevel; registeredAt: string; detached: boolean };
+
+export function pwaAuthenticatedRouteReadiness(loading: boolean, profileLoading: boolean, hasSession: boolean, hasProfile: boolean): PwaReadinessLevel {
+  return !loading && !profileLoading && hasSession && hasProfile ? 'clean' : 'unknown';
+}
+
 export class PwaUpdateSafetyRegistry {
   private reasons = new Map<string, PwaReadinessLevel>();
+  private registeredAt = new Map<string, string>();
   private orphaned = new Set<string>();
   private reviewable = new Set<string>();
   private reconciled = new Set<string>();
@@ -15,14 +66,17 @@ export class PwaUpdateSafetyRegistry {
 
   initialize() { this.initialized = true; this.emit(); }
   register(reason: string, level: PwaReadinessLevel = 'unknown') {
-    if (!this.reasons.has(reason)) this.reasons.set(reason, level);
+    if (!this.reasons.has(reason)) {
+      this.reasons.set(reason, level);
+      this.registeredAt.set(reason, new Date().toISOString());
+    }
     this.orphaned.delete(reason);
     this.reconciled.delete(reason);
     this.emit();
     return () => {
       const current = this.reasons.get(reason);
       if (current === 'saving' || current === 'critical') this.orphaned.add(reason);
-      else { this.reasons.delete(reason); this.orphaned.delete(reason); this.reviewable.delete(reason); }
+      else { this.reasons.delete(reason); this.registeredAt.delete(reason); this.orphaned.delete(reason); this.reviewable.delete(reason); }
       this.emit();
     };
   }
@@ -31,7 +85,7 @@ export class PwaUpdateSafetyRegistry {
       if (this.reconciled.has(reason)) return;
       throw new Error(`Unregistered PWA safety reason: ${reason}`);
     }
-    if (level === 'clean' && this.orphaned.has(reason)) { this.reasons.delete(reason); this.orphaned.delete(reason); this.reviewable.delete(reason); this.emit(); return; }
+    if (level === 'clean' && this.orphaned.has(reason)) { this.reasons.delete(reason); this.registeredAt.delete(reason); this.orphaned.delete(reason); this.reviewable.delete(reason); this.emit(); return; }
     const clearedReview = this.reviewable.delete(reason);
     if (this.reasons.get(reason) === level) { if (clearedReview) this.emit(); return; }
     this.reasons.set(reason, level);
@@ -41,6 +95,14 @@ export class PwaUpdateSafetyRegistry {
     if (!this.initialized) return 'unknown';
     return [...this.reasons.values()].reduce<PwaReadinessLevel>((worst, current) =>
       priority[current] > priority[worst] ? current : worst, 'clean');
+  }
+  blockers(): PwaSafeBlocker[] {
+    return [...this.reasons].filter(([, level]) => level !== 'clean').map(([reason, level]) => ({
+      surface: surfaceLabels[reason.split(':', 1)[0]] || 'Otra operación',
+      level,
+      registeredAt: this.registeredAt.get(reason) || '',
+      detached: this.orphaned.has(reason),
+    })).sort((a, b) => priority[b.level] - priority[a.level]);
   }
   isHeld() {
     if (this.hold && this.hold.expiresAt <= Date.now()) this.clearHold();
@@ -81,7 +143,7 @@ export class PwaUpdateSafetyRegistry {
     for (const reason of new Set([...this.orphaned, ...this.reviewable])) {
       const level = this.reasons.get(reason);
       if (level !== 'dirty' && level !== 'critical') continue;
-      if (this.orphaned.has(reason)) { this.reasons.delete(reason); this.reconciled.add(reason); }
+      if (this.orphaned.has(reason)) { this.reasons.delete(reason); this.registeredAt.delete(reason); this.reconciled.add(reason); }
       else this.reasons.set(reason, 'clean');
       this.orphaned.delete(reason);
       this.reviewable.delete(reason);
@@ -179,6 +241,18 @@ export function pwaReloadTarget(snapshot: PwaUpdateSnapshot, level: PwaReadiness
   if (!target || target === snapshot.runningBuild.buildId) return null;
   if (snapshot.publishedBuild && snapshot.publishedBuild.buildId !== target) return null;
   return target;
+}
+
+export function pwaUpdateAction(snapshot: PwaUpdateSnapshot, level: PwaReadinessLevel, held: boolean, visible: boolean, online: boolean): 'open' | 'activate' | 'discover' | 'busy' | 'blocked' | 'none' {
+  if (pwaReloadTarget(snapshot, level, held, visible, online)) return 'open';
+  if (pwaActivationTarget(snapshot, level, held, visible, online)) return 'activate';
+  if (snapshot.phase === 'checking' || snapshot.phase === 'downloading' || snapshot.phase === 'activating') return 'busy';
+  if (snapshot.phase === 'failed') return 'discover';
+  if (snapshot.phase === 'ready-to-reload' && snapshot.publishedBuild && snapshot.publishedBuild.buildId !== snapshot.activeWorkerBuildId) return 'discover';
+  if (snapshot.phase === 'ready-to-reload') return 'blocked';
+  if (snapshot.waitingWorkerBuildId && snapshot.waitingWorkerBuildId === snapshot.publishedBuild?.buildId) return 'blocked';
+  if (snapshot.publishedBuild && snapshot.publishedBuild.buildId !== snapshot.runningBuild.buildId) return 'discover';
+  return 'none';
 }
 
 export function authorizePwaReload(targetBuildId: string, runningBuildId: string, storage: Pick<Storage, 'getItem' | 'setItem'>) {

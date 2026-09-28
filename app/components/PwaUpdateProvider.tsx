@@ -4,7 +4,7 @@ import { AlertCircle, Copy, Download, RefreshCw, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { PwaReadinessLevel, PwaUpdatePort, PwaUpdateSnapshot } from '../lib/pwaUpdateContract';
 import { formatPwaDiagnostic, pwaUpdateStatus } from '../lib/pwaDiagnostics';
-import { attemptPwaReload, holdUntrackedSubmit, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, PWA_RELOAD_MARKER, PwaFormSafetyController, PwaUntrackedEditTracker, PwaUpdateSafetyRegistry, syncUntrackedFormSafety } from '../lib/pwaUpdateSafety';
+import { attemptPwaReload, holdUntrackedSubmit, pwaActivationTarget, pwaPrepareEligible, pwaReloadTarget, pwaUpdateAction, PWA_RELOAD_MARKER, PwaFormSafetyController, PwaUntrackedEditTracker, PwaUpdateSafetyRegistry, syncUntrackedFormSafety } from '../lib/pwaUpdateSafety';
 
 type SafetyContext = { registry: PwaUpdateSafetyRegistry; port: PwaUpdatePort };
 const Context = createContext<SafetyContext | null>(null);
@@ -36,6 +36,17 @@ export function pwaWaitingMessage(phase: PwaUpdateSnapshot['phase'], level: PwaR
   return phase === 'deferred' ? 'La actualización espera a que terminen los cambios abiertos.' : 'Hay una nueva versión disponible.';
 }
 
+function blockerMessage(level: PwaReadinessLevel, surface: string) {
+  if (level === 'saving') return `Esperá a que termine de guardarse ${surface.toLowerCase()}.`;
+  if (level === 'critical') return `Revisá la operación pendiente en ${surface.toLowerCase()} antes de actualizar.`;
+  if (level === 'dirty') return `Terminá o guardá los cambios en ${surface.toLowerCase()} antes de actualizar.`;
+  return `${surface} todavía se está cargando. La actualización esperará.`;
+}
+
+const blockerLevelLabel: Record<PwaReadinessLevel, string> = {
+  clean: 'listo', unknown: 'cargando', dirty: 'cambios sin guardar', saving: 'guardando', critical: 'resultado por verificar',
+};
+
 function PwaUpdateUI({ port, registry }: SafetyContext) {
   const [snapshot, setSnapshot] = useState<PwaUpdateSnapshot>(() => port.snapshot());
   const [localError, setLocalError] = useState<string | null>(null);
@@ -44,6 +55,7 @@ function PwaUpdateUI({ port, registry }: SafetyContext) {
   const [online, setOnline] = useState(true);
   useSyncExternalStore((notify) => registry.subscribe(notify), () => registry.revision(), () => 0);
   const level = registry.level();
+  const blockers = registry.blockers();
   const activationRef = useRef({ key: '', pending: false });
   useEffect(() => port.subscribe(setSnapshot), [port]);
   useEffect(() => {
@@ -60,6 +72,7 @@ function PwaUpdateUI({ port, registry }: SafetyContext) {
   const visible = snapshot.phase === 'failed' || snapshot.phase === 'deferred' || snapshot.phase === 'waiting' || snapshot.phase === 'ready-to-reload' || (newer && snapshot.phase !== 'activating');
   const activationTarget = pwaActivationTarget(snapshot, level, registry.isHeld(), pageVisible, online);
   const canReload = !!target && pwaReloadTarget(snapshot, level, registry.isHeld(), pageVisible, online) === target;
+  const action = pwaUpdateAction(snapshot, level, registry.isHeld(), pageVisible, online);
   const requestActivation = useCallback(async (targetId: string, manual: boolean) => {
     if (activationRef.current.pending || pwaActivationTarget(snapshot, registry.level(), registry.isHeld(), pageVisible, online) !== targetId) return;
     const key = `${targetId}:${snapshot.phase}:${snapshot.lastCheckedAt || ''}`;
@@ -96,7 +109,7 @@ function PwaUpdateUI({ port, registry }: SafetyContext) {
     queueMicrotask(() => { if (active) reloadIfSafe(target); });
     return () => { active = false; };
   }, [canReload, target, pageVisible, online, reloadIfSafe]);
-  const message = registry.unresolvedCount() > 0 ? 'Hay una operación sin verificar. Revisá su resultado antes de actualizar.' : versionMismatch ? 'La versión publicada cambió durante la actualización. Comprobá de nuevo antes de abrirla.' : snapshot.phase === 'failed' || localError
+  const message = registry.unresolvedCount() > 0 ? 'Hay una operación sin verificar. Revisá su resultado antes de actualizar.' : versionMismatch ? 'La versión publicada cambió durante la actualización. Comprobá de nuevo antes de abrirla.' : blockers.length ? blockerMessage(blockers[0].level, blockers[0].surface) : snapshot.phase === 'failed' || localError
     ? 'No pudimos completar la actualización. Podés volver a comprobarla.'
     : snapshot.phase === 'ready-to-reload'
       ? level === 'clean' ? 'Nueva versión lista para abrir.' : 'Nueva versión lista. Terminá o guardá tus cambios antes de abrirla.'
@@ -104,7 +117,7 @@ function PwaUpdateUI({ port, registry }: SafetyContext) {
   if (!visible || (dismissed === target && snapshot.phase !== 'failed')) return null;
   return <aside className="pwa-update-notice" role="status" aria-live="polite">
     {snapshot.phase === 'failed' || localError ? <AlertCircle size={19} /> : <Download size={19} />}
-    <div><strong>Actualización de MANITO</strong><p>{message}</p><small>En uso: {snapshot.runningBuild.appVersion} · Publicada: {snapshot.publishedBuild?.appVersion || 'sin verificar'}</small><details><summary>Detalles de versión</summary><small>Build en uso: {snapshot.runningBuild.buildId}<br />Build publicado: {snapshot.publishedBuild?.buildId || 'sin verificar'}<br />Worker activo: {snapshot.activeWorkerBuildId || 'sin controlar'}<br />Última comprobación: {snapshot.lastCheckedAt ? new Date(snapshot.lastCheckedAt).toLocaleString('es-AR') : 'pendiente'}{snapshot.error ? <><br />Estado: {snapshot.error}</> : null}</small></details></div>
+    <div><strong>Actualización de MANITO</strong><p>{message}</p><small>En uso: {snapshot.runningBuild.appVersion} · Publicada: {snapshot.publishedBuild?.appVersion || 'sin verificar'}</small><details><summary>Detalles de versión</summary><small>Build en uso: {snapshot.runningBuild.buildId}<br />Build publicado: {snapshot.publishedBuild?.buildId || 'sin verificar'}<br />Worker activo: {snapshot.activeWorkerBuildId || 'sin controlar'}<br />Worker en espera: {snapshot.waitingWorkerBuildId || 'ninguno'}<br />Bloqueos: {blockers.length}<br />Última comprobación: {snapshot.lastCheckedAt ? new Date(snapshot.lastCheckedAt).toLocaleString('es-AR') : 'pendiente'}{snapshot.error ? <><br />Estado: {snapshot.error}</> : null}</small></details></div>
     <div className="pwa-update-actions">
       {registry.canReconcile() && <button type="button" onClick={() => {
         syncUntrackedFormSafety(registry, !!document.querySelector('form:not([data-pwa-tracked])'));
@@ -114,10 +127,9 @@ function PwaUpdateUI({ port, registry }: SafetyContext) {
           if (registry.canReconcile()) registry.reconcileOrphans();
         }
       }}>Ya revisé</button>}
-      {canReload ? <button type="button" onClick={() => {
+      {action === 'open' ? <button type="button" onClick={() => {
         if (target) reloadIfSafe(target);
-      }}><RefreshCw size={16} /> Abrir versión</button> : activationTarget ? <button type="button" onClick={() => { void requestActivation(activationTarget, true); }}>Actualizar</button> : null}
-      <button type="button" onClick={() => { setLocalError(null); void port.check('manual').catch(() => setLocalError('No se pudo comprobar.')); }} aria-label="Comprobar versión" title="Comprobar versión"><RefreshCw size={16} /></button>
+      }}><RefreshCw size={16} /> Abrir versión</button> : action === 'activate' && activationTarget ? <button type="button" onClick={() => { void requestActivation(activationTarget, true); }}>Actualizar MANITO</button> : action === 'discover' ? <button type="button" onClick={() => { setLocalError(null); void port.check('manual').catch(() => setLocalError('No se pudo comprobar.')); }}><RefreshCw size={16} /> {snapshot.phase === 'failed' ? 'Volver a comprobar' : 'Buscar actualización'}</button> : action === 'busy' ? <span className="pwa-update-waiting">Preparando actualización…</span> : action === 'blocked' ? <span className="pwa-update-waiting">Actualización en espera</span> : null}
       <button type="button" onClick={() => setDismissed(target)} aria-label="Cerrar aviso" title="Cerrar aviso"><X size={16} /></button>
     </div>
   </aside>;
@@ -126,11 +138,28 @@ function PwaUpdateUI({ port, registry }: SafetyContext) {
 export function PwaVersionDetails() {
   const context = useContext(Context);
   if (!context) throw new Error('PwaUpdateProvider is required');
-  const { port } = context;
+  const { port, registry } = context;
   const [snapshot, setSnapshot] = useState<PwaUpdateSnapshot>(() => port.snapshot());
   const [open, setOpen] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
+  const [workerLifecycle, setWorkerLifecycle] = useState<{ installing: string; waiting: boolean; active: boolean; controller: boolean } | null>(null);
+  useSyncExternalStore((notify) => registry.subscribe(notify), () => registry.revision(), () => 0);
+  const blockers = registry.blockers();
   useEffect(() => port.subscribe(setSnapshot), [port]);
+  useEffect(() => {
+    if (!open || !('serviceWorker' in navigator)) return;
+    let alive = true;
+    void navigator.serviceWorker.getRegistration().then((registration) => {
+      if (!alive) return;
+      setWorkerLifecycle({
+        installing: registration?.installing?.state || 'ninguno',
+        waiting: Boolean(registration?.waiting),
+        active: Boolean(registration?.active),
+        controller: Boolean(navigator.serviceWorker.controller),
+      });
+    }).catch(() => { if (alive) setWorkerLifecycle(null); });
+    return () => { alive = false; };
+  }, [open, snapshot]);
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
@@ -148,14 +177,19 @@ export function PwaVersionDetails() {
         <dl>
           <div><dt>Versión</dt><dd>{snapshot.runningBuild.appVersion}</dd></div>
           <div><dt>Build</dt><dd>{snapshot.runningBuild.buildId.slice(0, 8)}</dd></div>
+          <div><dt>Publicada</dt><dd>{snapshot.publishedBuild?.buildId.slice(0, 8) || 'Sin verificar'}</dd></div>
           <div><dt>Commit</dt><dd>{snapshot.runningBuild.commit.slice(0, 7)}</dd></div>
-          <div><dt>Worker</dt><dd>{snapshot.activeWorkerBuildId ? 'Activo' : 'Sin controlar'}</dd></div>
+          <div><dt>Worker activo</dt><dd>{snapshot.activeWorkerBuildId?.slice(0, 8) || 'Sin controlar'}</dd></div>
+          <div><dt>Worker esperando</dt><dd>{snapshot.waitingWorkerBuildId?.slice(0, 8) || 'Ninguno'}</dd></div>
           <div><dt>Estado</dt><dd>{pwaUpdateStatus(snapshot)}</dd></div>
+          <div><dt>Bloqueos</dt><dd>{blockers.length}</dd></div>
           <div><dt>Comprobado</dt><dd>{snapshot.lastCheckedAt ? new Date(snapshot.lastCheckedAt).toLocaleString('es-AR') : 'Pendiente'}</dd></div>
         </dl>
+        {blockers.length > 0 && <ul className="pwa-diagnostics-blockers">{blockers.map((blocker, index) => <li key={index}>{blocker.surface}: {blockerLevelLabel[blocker.level]}{blocker.detached ? ' · pantalla cerrada' : ''}{blocker.registeredAt ? ` · desde ${new Date(blocker.registeredAt).toLocaleString('es-AR')}` : ''}</li>)}</ul>}
+        {workerLifecycle && <p className="pwa-diagnostics-lifecycle">Instalando: {workerLifecycle.installing} · En espera: {workerLifecycle.waiting ? 'sí' : 'no'} · Registrado activo: {workerLifecycle.active ? 'sí' : 'no'} · Controlando esta pantalla: {workerLifecycle.controller ? 'sí' : 'no'}</p>}
         <button className="v6-secondary" type="button" onClick={() => {
           if (!navigator.clipboard?.writeText) { setCopyStatus('No pudimos copiar el diagnóstico.'); return; }
-          void navigator.clipboard.writeText(formatPwaDiagnostic(snapshot))
+          void navigator.clipboard.writeText(formatPwaDiagnostic(snapshot, blockers))
             .then(() => setCopyStatus('Diagnóstico copiado.'))
             .catch(() => setCopyStatus('No pudimos copiar el diagnóstico.'));
         }}><Copy size={16} aria-hidden="true" /> Copiar diagnóstico</button>

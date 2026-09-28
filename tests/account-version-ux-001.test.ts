@@ -64,9 +64,14 @@ describe('Account version diagnostics', () => {
       commit: build.commit,
       builtAt: build.builtAt,
       activeWorkerBuildId: build.buildId,
+      waitingWorkerBuildId: null,
+      publishedBuildId: build.buildId,
+      updatePhase: 'waiting',
       updatePending: true,
       updateStatus: 'Pendiente',
       lastCheckedAt: '2026-09-27T19:12:50.140Z',
+      blockerCount: 0,
+      blockers: [],
     });
     expect(JSON.stringify(diagnostic)).not.toMatch(/private|sensitive/);
   });

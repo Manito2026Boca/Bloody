@@ -11,6 +11,7 @@ import { NotificationHistory, NotificationQuickPanel } from './NotificationCente
 import { ProfessionalTrustSignals } from './ProfessionalTrustSignals';
 import { WorkroomList, WorkroomSheet } from './Workroom';
 import { PwaVersionDetails, usePwaForm, usePwaSurface } from './PwaUpdateProvider';
+import { pwaAuthenticatedRouteReadiness } from '../lib/pwaUpdateSafety';
 import {
   ExperienceSwitch,
   ManitoBottomNavigation,
@@ -1629,8 +1630,8 @@ export default function ManitoV6App() {
   const [clientProblemQuery, setClientProblemQuery] = useState('');
   const [focusedOrderId, setFocusedOrderId] = useState<string | null>(null);
   useEffect(() => {
-    routeSafety.set(!loading && !!session && !!profile && !isAdmin ? 'clean' : 'unknown');
-  }, [loading, session, profile, isAdmin, routeSafety]);
+    routeSafety.set(pwaAuthenticatedRouteReadiness(loading, profileLoading, !!session, !!profile));
+  }, [loading, profileLoading, session, profile, routeSafety]);
   const lastAuthUser = useRef<string | null>(null);
   const handledPushNotification = useRef<string | null>(null);
   const dataLoadEpoch = useRef(0);

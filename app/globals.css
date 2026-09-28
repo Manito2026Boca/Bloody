@@ -3569,9 +3569,10 @@ a.v6-evidence-link {
 .pwa-update-notice small { display: block; color: #53635f; font-size: 11px; }
 .pwa-update-notice details { margin-top: 5px; font-size: 11px; }
 .pwa-update-notice details small { overflow-wrap: anywhere; line-height: 1.45; }
-.pwa-update-actions { display: flex; align-items: center; gap: 4px; }
+.pwa-update-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .pwa-update-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 4px 8px; border: 1px solid #c5d3d0; border-radius: 4px; background: #fff; color: #124f48; cursor: pointer; }
 .pwa-update-actions button:disabled { opacity: .5; cursor: default; }
+.pwa-update-waiting { font-size: 12px; color: #53635f; }
 .pwa-update-startup { border-left-color: #a44b30; font-size: 13px; }
 .pwa-version-link { display: block; width: max-content; max-width: 100%; min-height: 44px; margin: 8px auto 0; padding: 10px 12px; border: 0; background: transparent; color: #53635f; font-size: 12px; cursor: pointer; }
 .pwa-version-link:hover { text-decoration: underline; }
@@ -3585,6 +3586,8 @@ a.v6-evidence-link {
 .pwa-diagnostics-sheet dd { margin: 0; overflow-wrap: anywhere; }
 .pwa-diagnostics-sheet > button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; }
 .pwa-diagnostics-sheet > p { margin: 0; font-size: 12px; }
+.pwa-diagnostics-blockers { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.pwa-diagnostics-lifecycle { overflow-wrap: anywhere; color: #53635f; }
 @media (max-width: 719px) { .pwa-update-notice, .pwa-update-startup { bottom: calc(78px + env(safe-area-inset-bottom)); } }
 @media (max-width: 520px) { .pwa-update-notice { flex-wrap: wrap; } .pwa-update-actions { width: 100%; justify-content: flex-end; } }
 
