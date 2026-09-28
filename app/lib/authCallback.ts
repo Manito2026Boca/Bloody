@@ -1,4 +1,14 @@
+import { authReturnOrigin, type DomainOrigins } from './domainMigrationContract';
+
 export type AuthEmailFlow = 'signup' | 'recovery';
+
+export function buildSameOriginAuthCallbackUrl(
+  currentOrigin: string,
+  flow: AuthEmailFlow,
+  origins: DomainOrigins,
+) {
+  return buildAuthCallbackUrl(authReturnOrigin(currentOrigin, origins), flow);
+}
 
 export function buildAuthCallbackUrl(appUrl: string, flow: AuthEmailFlow) {
   const callback = new URL('/auth/callback', appUrl.endsWith('/') ? appUrl : `${appUrl}/`);

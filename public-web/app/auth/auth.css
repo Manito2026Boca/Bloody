@@ -1,0 +1,5 @@
+body:has(.v6-confirm-card) .site-header,
+body:has(.v6-confirm-card) .site-footer,
+body:has(.v6-confirm-card) .skip-link {
+  display: none;
+}
