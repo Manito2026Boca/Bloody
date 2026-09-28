@@ -86,9 +86,11 @@ export async function retireLegacyWebPushForCurrentDevice(newAppVerified: boolea
   const registration = await navigator.serviceWorker.getRegistration('/');
   const subscription = await registration?.pushManager.getSubscription();
   if (!subscription) return false;
-  const { error } = await getV6Supabase().rpc('retire_current_legacy_push_subscription', {
+  const { data, error } = await getV6Supabase().rpc('retire_current_legacy_push_subscription', {
     p_endpoint: subscription.endpoint,
   });
   if (error) throw error;
-  return subscription.unsubscribe();
+  if (data !== true) return false;
+  const browserRemoved = await subscription.unsubscribe().catch(() => false);
+  return browserRemoved ? 'retired' as const : 'server-retired' as const;
 }

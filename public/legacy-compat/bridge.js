@@ -8,7 +8,7 @@
     const target = new URL(appOrigin);
     if (target.protocol !== 'https:' || target.origin !== appOrigin || target.origin === location.origin) throw new Error('origin');
     const url = new URL(location.href);
-    if (url.pathname !== '/continuar' || url.hash) throw new Error('route');
+    if ((url.pathname !== '/continuar' && url.pathname !== '/continuar/') || url.hash) throw new Error('route');
     const keys = [...url.searchParams.keys()];
     if (keys.length === 1 && keys[0] === 'notification' && uuid.test(url.searchParams.get('notification') || '')) {
       target.searchParams.set('notification', url.searchParams.get('notification'));

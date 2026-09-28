@@ -206,8 +206,10 @@ import type {
 } from '../lib/v6Types';
 import { V6_MODE_LABEL, V6_STATUS_LABEL } from '../lib/v6Types';
 import { friendlyAuthError, isEmailNotConfirmedError } from '../lib/authMessages';
-import { buildAuthCallbackUrl, type AuthEmailFlow } from '../lib/authCallback';
-import { resolveDomainOrigins } from '../lib/domainMigrationContract';
+import { buildSameOriginAuthCallbackUrl, type AuthEmailFlow } from '../lib/authCallback';
+import { resolveDomainOrigins, PUBLIC_ORIGIN, type IntentContext, type ServiceIntentMode } from '../lib/domainMigrationContract';
+import { consumePendingDomainIntent, storeIncomingDomainIntent } from '../lib/domainIntentSession';
+import { LegacyMigrationBridge } from './LegacyMigrationBridge';
 import { isRecoverableMissingProfileError } from '../lib/profileRecovery';
 import {
   authoritativeRequestCoordinates,
@@ -1332,16 +1334,12 @@ function savedAddressesKey(profileId: string) {
   return `manito_v6_addresses:${profileId}`;
 }
 
-function getAuthRedirectUrl() {
-  return resolveDomainOrigins({
-    configuredAppOrigin: process.env.NEXT_PUBLIC_APP_URL,
-    runtimeOrigin: typeof window === 'undefined' ? undefined : window.location.origin,
-    environment: process.env.NODE_ENV,
-  }).appOrigin;
-}
-
 function getAuthCallbackUrl(flow: AuthEmailFlow) {
-  return buildAuthCallbackUrl(getAuthRedirectUrl(), flow);
+  return buildSameOriginAuthCallbackUrl(window.location.origin, flow, resolveDomainOrigins({
+    configuredAppOrigin: process.env.NEXT_PUBLIC_APP_URL,
+    runtimeOrigin: window.location.origin,
+    environment: process.env.NODE_ENV,
+  }));
 }
 
 function profileNameFromSession(user: Session['user']) {
@@ -1624,6 +1622,8 @@ export default function ManitoV6App() {
   const [locationEditorOpen, setLocationEditorOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<V6Order | null>(null);
   const [clientSelectedService, setClientSelectedService] = useState<V6Service | null>(null);
+  const [clientIntentMode, setClientIntentMode] = useState<ServiceIntentMode | null>(null);
+  const [legacyBridgeContext, setLegacyBridgeContext] = useState<IntentContext | null>(null);
   const [clientProblemQuery, setClientProblemQuery] = useState('');
   const [focusedOrderId, setFocusedOrderId] = useState<string | null>(null);
   useEffect(() => {
@@ -1644,6 +1644,26 @@ export default function ManitoV6App() {
     setIsStandalone(isInstalledDisplayMode());
     setInstallPlatform(detectPwaInstallPlatform(window.navigator.userAgent, window.navigator.maxTouchPoints));
     setInstallDismissed(pwaInstallDismissed(window.localStorage.getItem(PWA_INSTALL_DISMISS_KEY)));
+    const origins = resolveDomainOrigins({
+      configuredAppOrigin: process.env.NEXT_PUBLIC_APP_URL,
+      runtimeOrigin: window.location.origin,
+      environment: process.env.NODE_ENV,
+    });
+    if (window.location.origin === PUBLIC_ORIGIN && origins.appOrigin !== PUBLIC_ORIGIN) {
+      setLegacyBridgeContext({ origins, knownServices: new Set(serviceGroups.flatMap((group) => group.slugs)) });
+    }
+    if (window.location.origin === origins.appOrigin) {
+      const knownServices = new Set(serviceGroups.flatMap((group) => group.slugs));
+      let result;
+      try {
+        result = storeIncomingDomainIntent(window.location.href, { origins, knownServices }, window.sessionStorage);
+      } catch { return; }
+      if (result.ok && result.intent.kind !== 'notification') {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.search = '';
+        window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.hash}`);
+      }
+    }
   }, []);
 
   const loadData = useCallback(async (user: Session['user']) => {
@@ -1807,6 +1827,7 @@ export default function ManitoV6App() {
           setLocationEditorOpen(false);
           setEditingOrder(null);
           setClientSelectedService(null);
+          setClientIntentMode(null);
           setClientProblemQuery('');
           setFocusedOrderId(null);
           setTab('home');
@@ -1902,6 +1923,69 @@ export default function ManitoV6App() {
     if (!profile || webPushState() !== 'enabled') return;
     void syncExistingWebPush().catch(() => undefined);
   }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile || profileLoading || services.length === 0) return;
+    const origins = resolveDomainOrigins({
+      configuredAppOrigin: process.env.NEXT_PUBLIC_APP_URL,
+      runtimeOrigin: window.location.origin,
+      environment: process.env.NODE_ENV,
+    });
+    if (window.location.origin !== origins.appOrigin) return;
+    let intent;
+    try {
+      intent = consumePendingDomainIntent({
+        origins,
+        knownServices: new Set(services.map((service) => service.slug)),
+      }, window.sessionStorage);
+    } catch { return; }
+    if (!intent || intent.kind === 'notification') return;
+    if (intent.kind === 'service') {
+      const service = services.find((item) => item.slug === intent.service);
+      if (!service) return;
+      setAppMode('client');
+      setClientSelectedService(service);
+      setClientIntentMode(intent.mode || null);
+      setTab('home');
+      return;
+    }
+    if (intent.kind === 'professional') {
+      setAppMode('professional');
+      setTab('home');
+      return;
+    }
+    void (async () => {
+      try {
+        const availableOrders = await listV6Orders();
+        const order = availableOrders.find((item) => item.id === intent.orderId);
+        if (!order) {
+          setNotice('Este trabajo no está disponible para esta cuenta. Revisá tus trabajos.');
+          setTab('orders');
+          return;
+        }
+        setOrders(availableOrders);
+        setAppMode(order.professional_id === profile.id || order.manual_requested_professional_id === profile.id
+          ? 'professional' : 'client');
+        if (intent.kind === 'workroom') {
+          const rooms = await listV6Workrooms();
+          const room = rooms.find((item) => item.order_id === order.id);
+          if (!room) {
+            setNotice('La conversación no está disponible ahora. Abrí el trabajo para volver a intentar.');
+            setFocusedOrderId(order.id);
+            setTab('orders');
+            return;
+          }
+          openWorkroom(order, room.id);
+        } else {
+          setFocusedOrderId(order.id);
+          setTab('orders');
+        }
+      } catch {
+        setNotice('No pudimos abrir ese trabajo. Buscalo en Trabajos para volver a intentar.');
+        setTab('orders');
+      }
+    })();
+  }, [profile, profileLoading, services, openWorkroom]);
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -2222,6 +2306,7 @@ export default function ManitoV6App() {
 
   return (
     <main className={`v6-app ${tab === 'home' && appMode === 'client' && clientSelectedService ? 'v6-request-active' : ''}`}>
+      {legacyBridgeContext && <LegacyMigrationBridge context={legacyBridgeContext} compact />}
       <header className="v6-top">
         <div className="v6-top-brand">
           <Image
@@ -2314,6 +2399,7 @@ export default function ManitoV6App() {
               publicProfessionals={publicProfessionals}
               clientOrders={clientOrders}
               selectedService={clientSelectedService}
+              intentMode={clientIntentMode}
               setSelectedService={setClientSelectedService}
               problemQuery={clientProblemQuery}
               setProblemQuery={setClientProblemQuery}
@@ -2818,6 +2904,7 @@ function ClientHome({
   publicProfessionals,
   clientOrders,
   selectedService,
+  intentMode,
   setSelectedService,
   problemQuery,
   setProblemQuery,
@@ -2837,6 +2924,7 @@ function ClientHome({
   publicProfessionals: V6PublicProfessional[];
   clientOrders: V6Order[];
   selectedService: V6Service | null;
+  intentMode: ServiceIntentMode | null;
   setSelectedService: (service: V6Service | null) => void;
   problemQuery: string;
   setProblemQuery: (query: string) => void;
@@ -2863,6 +2951,11 @@ function ClientHome({
   const requiredSpecialtyId = requiredSpecialty?.service_id === selectedService?.id ? requiredSpecialty?.id ?? null : null;
   const [eligibleResult, setEligibleResult] = useState<{ key: string; ids: string[] }>({ key: '', ids: [] });
   const [mode, setMode] = useState<V6Mode>(editingOrder?.mode || 'immediate');
+  useEffect(() => {
+    if (!editingOrder && intentMode) {
+      setMode(intentMode === 'ahora' ? 'immediate' : intentMode === 'programar' ? 'scheduled' : 'quote');
+    }
+  }, [editingOrder, intentMode]);
   const [modeChosen, setModeChosen] = useState(Boolean(editingOrder));
   const [requestStep, setRequestStep] = useState<RequestStep>('need');
   const [showAllServices, setShowAllServices] = useState(false);

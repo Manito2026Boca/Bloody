@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import Script from 'next/script';
 import './globals.css';
 import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
@@ -31,6 +32,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return <html lang="es-AR"><body>
+    <Script src="/legacy-compat/entry.js" strategy="beforeInteractive" />
     <a className="skip-link" href="#contenido">Saltar al contenido</a>
     <SiteHeader />
     <main id="contenido">{children}</main>

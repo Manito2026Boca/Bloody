@@ -20,6 +20,9 @@ describe('legacy PWA bridge', () => {
     expect(legacyEntry(`${root}/`, domainMigrationIntentContext).showBridge).toBe(false);
     expect(legacyEntry(`${root}/`, domainMigrationIntentContext, true).showBridge).toBe(true);
     expect(legacyEntry('https://evil.test/?source=pwa', domainMigrationIntentContext).showBridge).toBe(false);
+    expect(legacyEntry(`${root}/continuar/`, domainMigrationIntentContext).destination)
+      .toBe(`${domainMigrationOrigins.appOrigin}/`);
+    expect(asset('bridge.js')).toContain("url.pathname !== '/continuar/'");
   });
 
   it('keeps a separate legacy identity and a configurable static route', () => {
