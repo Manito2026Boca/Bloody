@@ -5,6 +5,7 @@ import Image from 'next/image';
 import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { confirmationLinkErrorMessage, readAuthEmailFlow } from '../lib/authCallback';
+import { resolveDomainOrigins } from '../lib/domainMigrationContract';
 import { completeV6Profile } from '../lib/v6Api';
 import { MIN_PASSWORD_LENGTH, passwordHelpText, passwordSecurityMessage } from '../lib/security';
 import { getV6Supabase } from '../lib/v6Supabase';
@@ -53,18 +54,29 @@ function friendlyConfirmationError(error: unknown) {
 
 export default function AuthConfirmationScreen({
   canVerifyToken = false,
+  embedded = false,
 }: {
   canVerifyToken?: boolean;
+  embedded?: boolean;
 }) {
   const [state, setState] = useState<ConfirmationState>('loading');
   const [message, setMessage] = useState('Estamos validando tu cuenta.');
   const [newPassword, setNewPassword] = useState('');
   const [passwordSaving, setPasswordSaving] = useState(false);
-
-  const appUrl = '/';
+  const [newAppUrl, setNewAppUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
+
+    const origins = resolveDomainOrigins({
+      configuredAppOrigin: process.env.NEXT_PUBLIC_APP_URL,
+      runtimeOrigin: window.location.origin,
+      environment: process.env.NODE_ENV,
+    });
+    if (origins.legacyAuthOrigins.includes(window.location.origin) &&
+      window.location.origin !== origins.appOrigin) {
+      setNewAppUrl(origins.appOrigin);
+    }
 
     async function confirm() {
       try {
@@ -207,8 +219,10 @@ export default function AuthConfirmationScreen({
     }
   }
 
+  const Container = embedded ? 'div' : 'main';
+
   return (
-    <main className="v6-app v6-center">
+    <Container className="v6-app v6-center">
       <section className="v6-card v6-confirm-card">
         <Image
           className="v6-logo-image v6-logo-image-center"
@@ -259,12 +273,12 @@ export default function AuthConfirmationScreen({
               {passwordSaving ? 'Guardando...' : 'Guardar contraseña'}
             </button>
           </form>
-        ) : (
-          <a className="v6-primary v6-link-button" href={appUrl}>
+        ) : state === 'loading' ? null : (
+          <a className="v6-primary v6-link-button" href={newAppUrl || '/'}>
             Entrar a MANITO
           </a>
         )}
       </section>
-    </main>
+    </Container>
   );
 }
