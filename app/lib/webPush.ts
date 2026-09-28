@@ -1,4 +1,5 @@
 import { getV6Supabase } from './v6Supabase';
+import { PUBLIC_ORIGIN, resolveDomainOrigins } from './domainMigrationContract';
 
 export type WebPushState = 'unsupported' | 'default' | 'denied' | 'enabled';
 
@@ -20,11 +21,20 @@ export function webPushState(): WebPushState {
 async function registerSubscription(subscription: PushSubscription) {
   const json = subscription.toJSON();
   if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) throw new Error('La suscripción del navegador está incompleta.');
-  const { error } = await getV6Supabase().rpc('register_push_subscription', {
+  const origins = resolveDomainOrigins({
+    configuredAppOrigin: process.env.NEXT_PUBLIC_APP_URL,
+    runtimeOrigin: window.location.origin,
+    environment: process.env.NODE_ENV === 'production' ? 'production' : 'development',
+  });
+  const origin = window.location.origin === PUBLIC_ORIGIN ? 'legacy' :
+    window.location.origin === origins.appOrigin ? 'app' : null;
+  if (!origin) throw new Error('Origen de avisos no permitido.');
+  const { error } = await getV6Supabase().rpc('register_push_subscription_with_origin', {
     p_endpoint: json.endpoint,
     p_p256dh: json.keys.p256dh,
     p_auth: json.keys.auth,
     p_user_agent: navigator.userAgent,
+    p_origin: origin,
   });
   if (error) throw error;
 }
@@ -66,4 +76,19 @@ export async function disableWebPushForCurrentDevice() {
     // Browser unsubscribe still prevents this device from receiving the old account's push.
   }
   await subscription.unsubscribe().catch(() => false);
+}
+
+export async function retireLegacyWebPushForCurrentDevice(newAppVerified: boolean) {
+  if (!newAppVerified || window.location.origin !== PUBLIC_ORIGIN) {
+    throw new Error('Comprobá primero los avisos de la nueva app desde este dispositivo.');
+  }
+  if (webPushState() === 'unsupported') return false;
+  const registration = await navigator.serviceWorker.getRegistration('/');
+  const subscription = await registration?.pushManager.getSubscription();
+  if (!subscription) return false;
+  const { error } = await getV6Supabase().rpc('retire_current_legacy_push_subscription', {
+    p_endpoint: subscription.endpoint,
+  });
+  if (error) throw error;
+  return subscription.unsubscribe();
 }
