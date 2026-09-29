@@ -5,6 +5,7 @@ const config: NextConfig = {
   trailingSlash: true,
   poweredByHeader: false,
   images: { unoptimized: true },
+  assetPrefix: process.env.NODE_ENV === 'production' ? '/_public-web' : undefined,
 };
 
 export default config;

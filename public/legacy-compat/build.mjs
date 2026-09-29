@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { access, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -42,6 +42,17 @@ for (const path of [...files.keys(), ...brandFiles.map((name) => `brand/${name}`
   }
   throw new Error(`Public-web output path collision: ${path}`);
 }
+const publicChunks = join(output, '_next');
+await access(publicChunks);
+const isolatedChunks = join(output, '_public-web', '_next');
+try {
+  await access(isolatedChunks);
+  throw new Error('Public-web chunk namespace already exists.');
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
+}
+await mkdir(dirname(isolatedChunks), { recursive: true });
+await rename(publicChunks, isolatedChunks);
 for (const [path, content] of files) {
   const destination = join(output, path);
   await mkdir(dirname(destination), { recursive: true });

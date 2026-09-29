@@ -55,6 +55,29 @@ describe('legacy PWA bridge', () => {
     expect(run('/?source=pwa&next=https://evil.test')).not.toHaveBeenCalled();
   });
 
+  it('lets a safe marketing window vote without approving Auth or unsaved forms', () => {
+    const vote = (path: string, hasForm: boolean, visible = true) => {
+      let onMessage: (event: any) => void = () => undefined;
+      const postMessage = vi.fn();
+      runInNewContext(asset('entry.js'), {
+        location: { href: `${domainMigrationOrigins.publicOrigin}${path}`, pathname: path, replace: vi.fn() },
+        URL, Date, document: { visibilityState: visible ? 'visible' : 'hidden',
+          querySelector: () => hasForm ? {} : null },
+        navigator: { onLine: true, standalone: false,
+          serviceWorker: { addEventListener: (_: string, handler: (event: any) => void) => { onMessage = handler; } } },
+        matchMedia: () => ({ matches: false }),
+      });
+      onMessage({ data: { channel: 'manito:pwa:update', protocolVersion: 1, type: 'PREPARE',
+        request: { attemptId: 'a', targetBuildId: 'new-build', expiresAt: Date.now() + 10000 } },
+        source: { postMessage } });
+      return postMessage.mock.calls[0][0].result;
+    };
+    expect(vote('/', false)).toBe('ready');
+    expect(vote('/', true)).toBe('blocked');
+    expect(vote('/', false, false)).toBe('blocked');
+    expect(vote('/auth/callback', false)).toBe('blocked');
+  });
+
   it('requires every window to vote before activating, including unknown marketing windows', async () => {
     const handlers: Record<string, (event: any) => void> = {};
     const client = { id: 'marketing', url: `${domainMigrationOrigins.publicOrigin}/`, postMessage: vi.fn() };

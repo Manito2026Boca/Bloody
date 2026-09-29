@@ -1,4 +1,18 @@
 (() => {
+  navigator.serviceWorker?.addEventListener('message', (event) => {
+    const message = event.data;
+    if (message?.channel !== 'manito:pwa:update' || message.protocolVersion !== 1 ||
+        message.type !== 'PREPARE') return;
+    const request = message.request;
+    const ready = document.visibilityState === 'visible' && navigator.onLine &&
+      !location.pathname.startsWith('/auth/') &&
+      !document.querySelector('form, [contenteditable]') && request?.expiresAt > Date.now();
+    event.source?.postMessage({
+      channel: 'manito:pwa:update', protocolVersion: 1, type: 'PREPARE_REPLY',
+      attemptId: request?.attemptId, targetBuildId: request?.targetBuildId,
+      result: ready ? 'ready' : 'blocked',
+    });
+  });
   const url = new URL(location.href);
   if (url.pathname !== '/') return;
   const keys = [...url.searchParams.keys()];

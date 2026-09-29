@@ -3,6 +3,16 @@
   "buildCommand": "npm run build",
   "installCommand": "npm ci",
   "outputDirectory": "out",
+  "rewrites": [
+    {
+      "source": "/_next/static/:path*",
+      "destination": "https://bloody-eta.vercel.app/_next/static/:path*"
+    },
+    {
+      "source": "/_next/image",
+      "destination": "https://bloody-eta.vercel.app/_next/image"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
