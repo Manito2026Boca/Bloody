@@ -1,5 +1,7 @@
 'use client';
 
+import { AdminProviderIdentity } from './AdminProviderIdentity';
+
 import {
   ArrowLeft,
   BadgeCheck,
@@ -392,6 +394,7 @@ export function AdminVerificationInbox({ setNotice }: { setNotice: (message: str
                 </div>
               </section>
 
+              <AdminProviderIdentity key={detail.professional_id} professionalId={detail.professional_id} serviceNames={Object.fromEntries(detail.services.map((service) => [service.service_id, service.service_name]))} />
               <section className="admin-detail-section">
                 <h3>Perfil y actividad</h3>
                 <dl className="admin-fact-grid">
@@ -414,7 +417,7 @@ export function AdminVerificationInbox({ setNotice }: { setNotice: (message: str
                     <article className="admin-document-row" key={requirement.kind}>
                       <div className="admin-document-main">
                         <FileText size={20} aria-hidden="true" />
-                        <div><strong>{requirement.label}</strong><span>{document ? documentStatusLabel(document.status) : 'Faltante'} · {requirement.category === 'identity' ? 'Identidad' : 'Profesional'}</span></div>
+                        <div><strong>{requirement.kind === 'insurance' ? 'Seguro' : requirement.label}</strong><span>{document ? documentStatusLabel(document.status) : 'Faltante'} · {requirement.category === 'identity' ? 'Identidad' : 'Profesional'}</span></div>
                         <small className={`admin-status ${document?.status || 'incomplete'}`}>{document ? documentStatusLabel(document.status) : 'Faltante'}</small>
                       </div>
                       {document ? <>

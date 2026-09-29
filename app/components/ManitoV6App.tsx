@@ -11,6 +11,9 @@ import { NotificationHistory, NotificationQuickPanel } from './NotificationCente
 import { ProfessionalTrustSignals } from './ProfessionalTrustSignals';
 import { WorkroomList, WorkroomSheet } from './Workroom';
 import { PwaVersionDetails, usePwaForm, usePwaSurface } from './PwaUpdateProvider';
+import { ProviderIdentityPanel } from './ProviderIdentityPanel';
+import { getMyProviderIdentity, getMyProviderActivityRequirements } from '../lib/providerIdentityApi';
+import type { OwnProviderIdentity, ActivityRequirement } from '../lib/providerIdentity';
 import { pwaAuthenticatedRouteReadiness } from '../lib/pwaUpdateSafety';
 import {
   ExperienceSwitch,
@@ -458,7 +461,7 @@ const requiredDocuments = [
   { kind: 'dni_back', label: 'DNI dorso' },
   { kind: 'selfie', label: 'Selfie de verificación' },
   { kind: 'tax', label: 'Constancia fiscal' },
-  { kind: 'insurance', label: 'Seguro o matrícula' },
+  { kind: 'insurance', label: 'Seguro' },
 ];
 const serviceGroups: ServiceGroup[] = [
   { id: 'all', label: 'Todos', slugs: [] },
@@ -4890,6 +4893,7 @@ function ProfessionalHome({
   const [professionalProfile, setProfessionalProfile] = useState<V6ProfessionalProfile | null>(null);
   const [onboarding, setOnboarding] = useState<V6ProfessionalOnboarding | null>(null);
   const [professionalStateLoading, setProfessionalStateLoading] = useState(true);
+  const [providerIdentity, setProviderIdentity] = useState<OwnProviderIdentity | null>(null);
   const [showAllOpportunities, setShowAllOpportunities] = useState(false);
   const homeActionSafety = usePwaSurface(`professional-actions:${profile.id}`, 'clean');
   async function guardedHomeAction<T>(action: () => Promise<T>) {
@@ -4902,17 +4906,29 @@ function ProfessionalHome({
 
   useEffect(() => {
     let active = true;
-    void Promise.allSettled([
+    let pending = false;
+    const reloadOperationalState = () => {
+      if (pending || !active || document.visibilityState === 'hidden') return;
+      pending = true;
+      void Promise.allSettled([
       getV6ProfessionalProfile(profile.id),
       getV6ProfessionalOnboarding(profile.id),
-    ]).then(([profileResult, onboardingResult]) => {
+      getMyProviderIdentity(),
+    ]).then(([profileResult, onboardingResult, identityResult]) => {
       if (!active) return;
       setProfessionalProfile(profileResult.status === 'fulfilled' ? profileResult.value : null);
       setOnboarding(onboardingResult.status === 'fulfilled' ? onboardingResult.value : null);
+      setProviderIdentity(identityResult.status === 'fulfilled' ? identityResult.value : null);
       setProfessionalStateLoading(false);
-    });
+      }).finally(() => { pending = false; });
+    };
+    reloadOperationalState();
+    window.addEventListener('focus', reloadOperationalState);
+    document.addEventListener('visibilitychange', reloadOperationalState);
     return () => {
       active = false;
+      window.removeEventListener('focus', reloadOperationalState);
+      document.removeEventListener('visibilitychange', reloadOperationalState);
     };
   }, [profile.id]);
 
@@ -5013,10 +5029,14 @@ function ProfessionalHome({
     return new Date(order.scheduled_at).toDateString() === new Date().toDateString();
   }).length;
   const onboardingStatus = onboarding?.status || 'draft';
-  const canOperate = onboardingStatus === 'approved' || professionalProfile?.verified === true;
+  const identityReady = providerIdentity?.status === 'QA' || (providerIdentity?.status === 'VERIFIED' && providerIdentity.operational_status === 'ENABLED');
+  const canOperate = identityReady && (onboardingStatus === 'approved' || professionalProfile?.verified === true);
 
   function onboardingCopy() {
     if (professionalStateLoading) return { title: 'Revisando tu estado profesional', body: 'Estamos cargando tu habilitación.', action: null };
+    if (!identityReady && (onboardingStatus === 'approved' || professionalProfile?.verified)) {
+      return { title: 'Revisa tu identidad profesional', body: 'Antes de recibir nuevos trabajos, MANITO necesita vincular tu CUIT y revisar la documentacion. Tus trabajos ya contratados siguen disponibles.', action: 'Ver identidad' };
+    }
     if (onboardingStatus === 'submitted' || onboardingStatus === 'in_review') {
       return { title: 'Tu perfil está en revisión', body: 'Te avisaremos cuando termine la revisión. Podés consultar lo enviado desde tu perfil.', action: 'Ver estado' };
     }
@@ -6743,6 +6763,20 @@ function ProfilePanel({
   const [paymentAccount, setPaymentAccount] = useState<V6ProfessionalPaymentAccount | null>(null);
   const [onboarding, setOnboarding] = useState<V6ProfessionalOnboarding | null>(null);
   const [documents, setDocuments] = useState<V6ProfessionalDocument[]>([]);
+  const [activityRequirements, setActivityRequirements] = useState<ActivityRequirement[]>([]);
+  const requiredDocumentsForProfile = useMemo(() => {
+    const additional = [...new Set(activityRequirements.flatMap((item) => item.credential_kinds))]
+      .filter((kind) => !requiredDocuments.some((document) => document.kind === kind))
+      .map((kind) => ({ kind, label: `Credencial de actividad: ${kind.replaceAll('_', ' ')}` }));
+    return [...requiredDocuments, ...additional];
+  }, [activityRequirements]);
+  useEffect(() => {
+    let active = true;
+    void getMyProviderActivityRequirements().then((next) => { if (active) setActivityRequirements(next); }).catch(() => {
+      if (active) setError('No pudimos cargar los requisitos de tus actividades. Volve a intentar desde el perfil.');
+    });
+    return () => { active = false; };
+  }, [profile.id, proServices, setError]);
   const [portfolio, setPortfolio] = useState<V6PortfolioItem[]>([]);
   const [professionalStep, setProfessionalStep] = useState(1);
   const [headline, setHeadline] = useState('Técnico para urgencias del hogar');
@@ -6907,7 +6941,7 @@ function ProfilePanel({
       ),
     [documents],
   );
-  const completedDocuments = requiredDocuments.filter((item) =>
+  const completedDocuments = requiredDocumentsForProfile.filter((item) =>
     uploadedDocumentKinds.has(item.kind),
   ).length;
   const hasPayoutDetails = Boolean(
@@ -6919,7 +6953,7 @@ function ProfilePanel({
         servicesCount: proServices.length,
         specialtiesCount: proSpecialties.length,
         completedDocumentsCount: completedDocuments,
-        requiredDocumentsCount: requiredDocuments.length,
+        requiredDocumentsCount: requiredDocumentsForProfile.length,
         fullName,
         phone,
         city,
@@ -6938,6 +6972,7 @@ function ProfilePanel({
       bio,
       city,
       completedDocuments,
+      requiredDocumentsForProfile.length,
       fullName,
       hasPayoutDetails,
       headline,
@@ -7452,7 +7487,7 @@ function ProfilePanel({
                 <BadgeCheck size={17} aria-hidden="true" /> Checklist de alta
               </span>
               <small>
-                {completedRequirementCount}/{onboardingRequirements.length} requisitos · {completedDocuments}/{requiredDocuments.length} documentos · paso interno {onboarding?.current_step || 1}/16
+                {completedRequirementCount}/{onboardingRequirements.length} requisitos · {completedDocuments}/{requiredDocumentsForProfile.length} documentos · paso interno {onboarding?.current_step || 1}/16
               </small>
             </div>
             {missingRequirements.length > 0 && (
@@ -7562,6 +7597,7 @@ function ProfilePanel({
         </>
       )}
 
+      {professionalStep === 1 && <ProviderIdentityPanel key={profile.id} profileId={profile.id} />}
       {professionalStep === 1 && (
           <section className="v6-card">
             <h2>Perfil público</h2>
@@ -7647,7 +7683,7 @@ function ProfilePanel({
               Subí fotos JPG, PNG, WebP o PDF. También podés pegar un link de Drive o carpeta compartida.
             </p>
             <div className="v6-upload-list">
-              {requiredDocuments.map((item) => <DocumentEvidenceForm
+              {requiredDocumentsForProfile.map((item) => <DocumentEvidenceForm
                 key={item.kind}
                 item={item}
                 current={documents.find((document) => document.kind === item.kind)}
