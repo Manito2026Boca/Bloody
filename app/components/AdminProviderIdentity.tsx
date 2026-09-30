@@ -6,6 +6,7 @@ import type { ActivityRequirement, AdminProviderIdentity as Review, ArcaResult }
 import { ManualArcaVerifier } from '../lib/providerIdentityVerifier';
 import { configureProviderActivity, getAdminProviderIdentity, revealProviderCuit, reviewProviderIdentity } from '../lib/providerIdentityApi';
 import { usePwaForm } from './PwaUpdateProvider';
+import { AdminActivityReview } from './AdminActivityReview';
 
 export function AdminProviderIdentity({ professionalId, serviceNames }: { professionalId: string; serviceNames: Record<number, string> }) {
   const [review, setReview] = useState<Review | null>(null);
@@ -75,6 +76,7 @@ export function AdminProviderIdentity({ professionalId, serviceNames }: { profes
       <details><summary>Historial privado de identidad</summary>{claim.events.map((event, index) => <p key={index}>{event.type} · {event.reason} · {new Date(event.at).toLocaleString('es-AR')} · operador {event.actor || 'Sistema'}</p>)}</details>
     </div>)}
     {review?.activities.map((activity) => <ActivityConfiguration key={`${activity.service_id}:${activity.specialty_id}:${activity.level}`} activity={activity} serviceName={serviceNames[activity.service_id] || 'Servicio'} busy={busy} save={(next) => write(() => configureProviderActivity(next))} />)}
+    {review && <AdminActivityReview key={professionalId} professionalId={professionalId} activities={review.activities} serviceNames={serviceNames} />}
   </section>;
 }
 

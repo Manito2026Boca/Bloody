@@ -14,6 +14,7 @@ import { PwaVersionDetails, usePwaForm, usePwaSurface } from './PwaUpdateProvide
 import { ProviderIdentityPanel } from './ProviderIdentityPanel';
 import { getMyProviderIdentity, getMyProviderActivityRequirements } from '../lib/providerIdentityApi';
 import type { OwnProviderIdentity, ActivityRequirement } from '../lib/providerIdentity';
+import { providerDocuments } from '../lib/providerActivity';
 import { pwaAuthenticatedRouteReadiness } from '../lib/pwaUpdateSafety';
 import {
   ExperienceSwitch,
@@ -456,13 +457,6 @@ function timeInputValue(value?: string | null, fallback = '08:00') {
   return value.slice(0, 5);
 }
 
-const requiredDocuments = [
-  { kind: 'dni_front', label: 'DNI frente' },
-  { kind: 'dni_back', label: 'DNI dorso' },
-  { kind: 'selfie', label: 'Selfie de verificación' },
-  { kind: 'tax', label: 'Constancia fiscal' },
-  { kind: 'insurance', label: 'Seguro' },
-];
 const serviceGroups: ServiceGroup[] = [
   { id: 'all', label: 'Todos', slugs: [] },
   {
@@ -6764,19 +6758,14 @@ function ProfilePanel({
   const [onboarding, setOnboarding] = useState<V6ProfessionalOnboarding | null>(null);
   const [documents, setDocuments] = useState<V6ProfessionalDocument[]>([]);
   const [activityRequirements, setActivityRequirements] = useState<ActivityRequirement[]>([]);
-  const requiredDocumentsForProfile = useMemo(() => {
-    const additional = [...new Set(activityRequirements.flatMap((item) => item.credential_kinds))]
-      .filter((kind) => !requiredDocuments.some((document) => document.kind === kind))
-      .map((kind) => ({ kind, label: `Credencial de actividad: ${kind.replaceAll('_', ' ')}` }));
-    return [...requiredDocuments, ...additional];
-  }, [activityRequirements]);
+  const requiredDocumentsForProfile = useMemo(() => providerDocuments(activityRequirements), [activityRequirements]);
   useEffect(() => {
     let active = true;
     void getMyProviderActivityRequirements().then((next) => { if (active) setActivityRequirements(next); }).catch(() => {
       if (active) setError('No pudimos cargar los requisitos de tus actividades. Volve a intentar desde el perfil.');
     });
     return () => { active = false; };
-  }, [profile.id, proServices, setError]);
+  }, [profile.id, proServices, proSpecialties, setError]);
   const [portfolio, setPortfolio] = useState<V6PortfolioItem[]>([]);
   const [professionalStep, setProfessionalStep] = useState(1);
   const [headline, setHeadline] = useState('Técnico para urgencias del hogar');
@@ -7693,6 +7682,11 @@ function ProfilePanel({
                 onSave={saveDocumentEvidence}
                 renderEvidence={renderEvidence}
               />)}
+              <DocumentEvidenceForm item={{ kind: 'insurance', label: 'Seguro (opcional)' }}
+                current={documents.find((document) => document.kind === 'insurance')}
+                link={documentLinks.insurance || ''} saving={savingDocumentKind === 'insurance'}
+                onLinkChange={(value) => updateDocumentLink('insurance', value)}
+                onSave={saveDocumentEvidence} renderEvidence={renderEvidence} />
             </div>
           </section>
       )}
@@ -7892,7 +7886,7 @@ function ProfilePanel({
                 <BadgeCheck size={17} aria-hidden="true" /> Resumen de alta
               </span>
               <small>
-                {proServices.length} rubros · {proSpecialties.length} especialidades · {completedDocuments}/{requiredDocuments.length} documentos · {portfolio.length} trabajos en portfolio
+                {proServices.length} rubros · {proSpecialties.length} especialidades · {completedDocuments}/{requiredDocumentsForProfile.length} documentos · {portfolio.length} trabajos en portfolio
               </small>
             </div>
             <div className="v6-step-grid">

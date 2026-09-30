@@ -14,10 +14,12 @@ let own={status:'UNVERIFIED',masked_cuit:null,can_submit:true};
 const claim={id:'fixture-claim',type:'INITIAL',status:'PENDING',masked_cuit:'**-********-7',fiscal_status:'PENDING',operational_status:'RESTRICTED',source:null,verified_at:null,verified_by:null,canonical_profile_id:null,conflicting_claims:1,events:[]};
 export async function getMyProviderIdentity(){return own}
 export async function submitProviderIdentity(){own={status:'PENDING',masked_cuit:'**-********-7',can_submit:false};return {received:true}}
-export async function getAdminProviderIdentity(){return {claims:[claim],activities:[{service_id:1,specialty_id:null,level:null,credential_kinds:[]}]}}
+export async function getAdminProviderIdentity(){return {claims:[claim],activities:[{service_id:1,specialty_id:null,level:'LEVEL_2',credential_kinds:['gas_installer_registration']}]}}
 export async function revealProviderCuit(){return '99000000007'}
 export async function reviewProviderIdentity(id,action,result){if(action==='ARCA')claim.fiscal_status=result==='FOUND'?'VERIFIED':'NEEDS_REVIEW'}
 export async function configureProviderActivity(){}
+export async function getProviderActivityReviews(){return []}
+export async function reviewProviderActivityDocument(){}
 `;
 const bundle = await build({ stdin: { contents: `
 import React from 'react'; import {createRoot} from 'react-dom/client';
@@ -30,7 +32,7 @@ createRoot(document.getElementById('root')).render(admin?<AdminProviderIdentity 
     builder.onResolve({ filter: /providerIdentityApi$/ }, () => ({ path: 'rpc', namespace: 'fixture' }));
     builder.onResolve({ filter: /\/v6Api$/ }, () => ({ path: 'preferences', namespace: 'fixture' }));
     builder.onResolve({ filter: /PwaUpdateProvider$/ }, () => ({ path: 'safety', namespace: 'fixture' }));
-    builder.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({ contents: path === 'rpc' ? rpc : path === 'preferences' ? 'export async function getV6UserSecurityPreferences(){return null}' : 'export function usePwaForm(){return {blocked:()=>false,dirty(){},begin(){},saved(){},failed(){}}}', loader: 'js' }));
+    builder.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({ contents: path === 'rpc' ? rpc : path === 'preferences' ? 'export async function getV6UserSecurityPreferences(){return null}; export async function listV6ProfessionalDocuments(){return [{id:"fixture-doc",kind:"gas_installer_registration",status:"approved",file_path:"fixture/gas"}]}' : 'export function usePwaForm(){return {blocked:()=>false,dirty(){},begin(){},saved(){},failed(){}}}', loader: 'js' }));
   },
 }] });
 const stylesheet = readdirSync('.next/static/chunks').filter((name) => name.endsWith('.css')).map((name) => readFileSync(`.next/static/chunks/${name}`, 'utf8')).join('\n');
@@ -66,6 +68,14 @@ try {
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `admin overflow ${width}`);
     await page.getByRole('button', { name: 'Guardar requisitos' }).scrollIntoViewIfNeeded();
     assert(await page.getByRole('button', { name: 'Guardar requisitos' }).isVisible());
+    const sector = page.locator('form').filter({ has: page.getByRole('heading', { name: /Matrícula de instalador de gas/ }) });
+    await sector.getByLabel('Número de matrícula / documento / registro').fill('Synthetic registration');
+    await sector.getByLabel('Organismo o registro').fill('Synthetic registry');
+    await sector.getByLabel('Observación de revisión').fill('Synthetic review');
+    await sector.getByLabel('Decisión').selectOption('APPROVED');
+    await sector.getByRole('button', { name: 'Registrar revisión sectorial' }).click();
+    await sector.getByText('Revisión registrada.').waitFor();
+    await page.screenshot({ path: resolve(output, `sector-${width}.png`), fullPage: true });
     assert.deepEqual(errors, [], `runtime errors ${width}`);
     await page.close();
   }

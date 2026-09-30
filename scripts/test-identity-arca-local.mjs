@@ -12,6 +12,9 @@ try {
   await db.exec(readFileSync('supabase/tests/identity_arca_001_fixture.sql', 'utf8'));
   await db.exec(readFileSync('supabase/migrations/20260929194755_identity_arca_001.sql', 'utf8'));
   await db.exec(readFileSync('supabase/tests/identity_arca_001.sql', 'utf8'));
+  await db.exec(readFileSync('supabase/tests/identity_arca_001b_fixture.sql', 'utf8'));
+  await db.exec(readFileSync('supabase/migrations/20260930033618_identity_arca_001b_activity_matrix.sql', 'utf8'));
+  await db.exec(readFileSync('supabase/tests/identity_arca_001b.sql', 'utf8'));
   console.log('IDENTITY-ARCA local PostgreSQL smoke: PASS (isolated fixture; not Supabase integration or multi-session concurrency)');
 } catch (error) {
   // Do not dump query contents or parameters on failure.

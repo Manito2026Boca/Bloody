@@ -73,6 +73,23 @@ try {
   const binding = admission.query("select public.review_provider_identity((select id from private.provider_identity_claims where claimant_profile_id=$1),'ACCEPT',null,true)", [claimant]).then(() => false, () => true);
   await setup.query('select pg_sleep(0.1)'); await review.query('commit');
   assert(await binding, 'concurrent document rejection prevents canonical linking');
+  await setup.query(readFileSync('supabase/tests/identity_arca_001b_fixture.sql', 'utf8'));
+  await setup.query(readFileSync('supabase/migrations/20260930033618_identity_arca_001b_activity_matrix.sql', 'utf8'));
+  await setup.query(readFileSync('supabase/tests/identity_arca_001b.sql', 'utf8'));
+  await setup.query("select set_config('request.jwt.claim.sub',$1,false)", [ADMIN]);
+  const gas = await setup.query("select s.id as service_id,d.id as document_id from public.services s,public.professional_documents d where s.slug='gas' and d.kind='gas_installer_registration'");
+  const pro = '00000000-0000-0000-0000-000000000006';
+  await setup.query("select public.review_provider_activity_document($1,$2,'gas_installer_registration',$3,'APPROVED',$4)",
+    [pro, gas.rows[0].service_id, gas.rows[0].document_id, { registration_number: 'Fixture', registry: 'Fixture registry', observation: 'Synthetic review' }]);
+  await review.query('begin');
+  await review.query("select set_config('request.jwt.claim.sub',$1,true)", [ADMIN]);
+  await review.query("select public.review_provider_activity_document($1,$2,'gas_installer_registration',$3,'REJECTED',$4)",
+    [pro, gas.rows[0].service_id, gas.rows[0].document_id, { observation: 'Synthetic revocation' }]);
+  let settled = false;
+  const sectorAdmission = admission.query("insert into public.orders(professional_id,client_id,service_id,mode,status) values($1,$2,$3,'immediate','pending_client_confirmation')",
+    [pro, CLIENT, gas.rows[0].service_id]).then(() => { settled = true; return false; }, () => { settled = true; return true; });
+  await setup.query('select pg_sleep(0.1)'); assert.equal(settled, false, 'sector review serializes admission');
+  await review.query('commit'); assert(await sectorAdmission, 'sector revocation denies waiting admission');
   console.log('Identity PostgreSQL concurrency: PASS (12 sessions, one identity/multiple claims, suspension reservation, config/admission serialization, document rejection/linking).');
 } catch (error) {
   console.error('Identity PostgreSQL concurrency: FAIL', error.code || 'TEST_ERROR', String(error.message).replace(/\d{11}/g, '[redacted]'));
