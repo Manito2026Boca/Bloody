@@ -2989,7 +2989,9 @@ function ClientHome({
     specialties.find((item) => item.id === editingOrder?.required_specialty_id) || null,
   );
   const requiredSpecialtyId = requiredSpecialty?.service_id === selectedService?.id ? requiredSpecialty?.id ?? null : null;
-  const [eligibleResult, setEligibleResult] = useState<{ key: string; ids: string[] }>({ key: '', ids: [] });
+  const [eligibleResult, setEligibleResult] = useState<{
+    key: string; ids: string[]; status: 'unevaluated' | 'loading' | 'success' | 'error';
+  }>({ key: '', ids: [], status: 'unevaluated' });
   const [mode, setMode] = useState<V6Mode>(editingOrder?.mode || 'immediate');
   useEffect(() => {
     if (!editingOrder && intentMode) {
@@ -3050,15 +3052,21 @@ function ClientHome({
     scheduled_at: mode === 'scheduled' && scheduledAt ? new Date(scheduledAt).toISOString() : null,
     estimated_duration_minutes: scheduledReservationDurationMinutes });
   useEffect(() => {
+    if (!selectedService) return;
     let alive = true;
+    setEligibleResult({ key: eligibilityKey, ids: [], status: 'loading' });
     const timer = setTimeout(() => {
-      void getV6Supabase().rpc('list_eligible_request_professionals', { p_data: JSON.parse(eligibilityKey) })
-        .then(({ data, error }) => {
-          if (alive) setEligibleResult({ key: eligibilityKey, ids: error ? [] : data || [] });
-        });
+      void (async () => {
+        try {
+          const { data, error } = await getV6Supabase().rpc('list_eligible_request_professionals', { p_data: JSON.parse(eligibilityKey) });
+          if (alive) setEligibleResult({ key: eligibilityKey, ids: error ? [] : data || [], status: error ? 'error' : 'success' });
+        } catch {
+          if (alive) setEligibleResult({ key: eligibilityKey, ids: [], status: 'error' });
+        }
+      })();
     }, 200);
     return () => { alive = false; clearTimeout(timer); };
-  }, [eligibilityKey]);
+  }, [eligibilityKey, selectedService?.id]);
   const rankedProfessionals = useMemo(
     () =>
       professionalCandidatesForService({
@@ -3074,6 +3082,10 @@ function ClientHome({
   );
   const candidateProfessionals = rankedProfessionals.filter(candidate =>
     eligibleResult.key === eligibilityKey && eligibleResult.ids.includes(candidate.professional.profile.id));
+  const eligibilityStatus = eligibleResult.key === eligibilityKey ? eligibleResult.status : 'unevaluated';
+  const eligibilitySummary = eligibilityStatus === 'success'
+    ? `${candidateProfessionals.length} compatibles`
+    : eligibilityStatus === 'error' ? 'No pudimos verificar compatibilidad' : 'Compatibilidad por verificar';
   const selectedProfessionalCandidate =
     candidateProfessionals.find((candidate) => candidate.professional.profile.id === selectedProfessionalId) ||
     candidateProfessionals[0] ||
@@ -3540,11 +3552,9 @@ function ClientHome({
     setNotice(
       nextMode !== mode
         ? `${label} no soporta esa modalidad. Te pasé a ${contractModeOptions.find((item) => item.id === nextMode)?.title}.`
-        : candidate && nextMode !== 'quote'
-        ? `${label} seleccionado. Te muestro profesionales compatibles reales.`
         : nextMode === 'quote'
           ? `${label} seleccionado. Publicá una solicitud para comparar propuestas.`
-          : `${label} seleccionado. Publicalo en automático hasta que haya profesionales disponibles.`,
+          : `${label} seleccionado. Completá los datos para verificar profesionales compatibles.`,
     );
     scrollToRequestForm();
   }
@@ -3712,7 +3722,9 @@ function ClientHome({
     const modeOption = contractModeOptions.find((item) => item.id === mode);
     const expectedNextStep = mode === 'quote'
       ? 'Los profesionales compatibles podrán enviarte propuestas para comparar.'
-      : mode === 'scheduled'
+      : effectiveAssignmentMode === 'manual' && selectedProfessionalCandidate
+        ? `La solicitud se enviará a ${publicProfessionalName(selectedProfessionalCandidate.professional)}. Si acepta, vas a revisar el precio antes de contratar.`
+        : mode === 'scheduled'
         ? 'La solicitud quedará pendiente hasta que un profesional confirme el horario.'
         : 'MANITO buscará un profesional disponible para aceptar el trabajo.';
 
@@ -3958,7 +3970,7 @@ function ClientHome({
               )}
               {mode !== 'quote' ? (
                 <>
-                  <div className="v6-section-head compact"><h2>Asignación</h2><span>{candidateProfessionals.length} compatibles</span></div>
+                  <div className="v6-section-head compact"><h2>Asignación</h2><span role="status">{eligibilityStatus === 'loading' ? 'Verificando compatibilidad...' : eligibilitySummary}</span></div>
                   <div className="v6-choice-grid">
                     <button type="button" className="v6-choice" aria-pressed={effectiveAssignmentMode === 'auto'} onClick={() => setAssignmentMode('auto')}>
                       <Users size={18} aria-hidden="true" /> Búsqueda automática
@@ -3981,13 +3993,14 @@ function ClientHome({
                       ))}
                     </div>
                   )}
-                  {!candidateProfessionals.length && (
+                  {eligibilityStatus === 'success' && !candidateProfessionals.length && (
                     <div className="v6-empty-inline">
                       <strong>No encontramos profesionales compatibles con estos criterios.</strong>
                       <p>Podés publicar en automático o cambiar ubicación, especialidad o fecha.</p>
                       <button className="v6-secondary" type="button" onClick={() => setRequestStep('need')}>Editar búsqueda</button>
                     </div>
                   )}
+                  {eligibilityStatus === 'error' && <p className="v6-note" role="status">No pudimos verificar quiénes son compatibles. No significa que no haya profesionales. Podés revisar los datos o continuar con búsqueda automática.</p>}
                   <div className="v6-section-head compact"><h2>Medio de pago</h2><span>Preferencia para este trabajo</span></div>
                   <div className="v6-choice-grid three">
                     {paymentOptions.map((option) => (
@@ -4117,7 +4130,7 @@ function ClientHome({
                   <ProfessionalTrustSignals data={recommendedProfessional.professional.professional_profile} />
                 </>
               ) : (
-                <small>Sin profesionales disponibles para elegir ahora. Podés publicarlo en automático.</small>
+                <small>Completá ubicación y especialidad para consultar profesionales compatibles.</small>
               )}
               {recommendedSpecialties[0] && (
                 <small>Especialidad sugerida: {recommendedSpecialties[0].specialty.name}</small>
@@ -4428,7 +4441,7 @@ function ClientHome({
                 ))}
               </div>
             )}
-            {mode !== 'quote' && !candidateProfessionals.length && selectedService && (
+            {mode !== 'quote' && eligibilityStatus === 'success' && !candidateProfessionals.length && selectedService && (
               <div className="v6-mode-fallback">
                 <p className="v6-muted">
                   {mode === 'immediate'
