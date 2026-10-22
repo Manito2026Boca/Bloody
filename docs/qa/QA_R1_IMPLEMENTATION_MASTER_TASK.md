@@ -53,6 +53,13 @@ Derive own pending-client-confirmation reservations from existing activeOrders a
 `price_confirmation_professional_id`. Show separately in Hoy with existing detail
 access, not as contracted execution. Foreign/resolved/expired data must not appear
 as actionable; do not duplicate once contracted. Preserve Trabajos and existing notice.
+Architect review clarification: a local deadline does not remove an own reservation
+while backend status remains pending. It changes only copy to "Plazo terminado.
+Actualizando estado", retaining detail access and no new action or mutating call.
+Refunded/partially-refunded/not-required payments get neutral guidance, not a debt
+or confirmation inferred from historical records. Fulfilled empty payment lists
+do not prove debt. Rating CTA requires a successful current-order rating load;
+this is not a new payment prerequisite.
 
 ### B4: N6 measured containment
 

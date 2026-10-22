@@ -5085,8 +5085,7 @@ function ProfessionalHome({
       window.removeEventListener('focus', updateClock);
     };
   }, [activeOrders, profile.id, reservationClock]);
-  const pendingReservations = ownReservations.filter(order => !order.price_confirmation_deadline_at ||
-    Date.parse(order.price_confirmation_deadline_at) > Math.max(reservationClock, Date.now()));
+  const pendingReservations = ownReservations;
   const contractedOrders = activeOrders.filter((order) =>
     order.professional_id === profile.id && !['completed', 'cancelled'].includes(order.status));
   const focusOrder = contractedOrders
@@ -5226,7 +5225,9 @@ function ProfessionalHome({
               <strong>{serviceDisplayName(order.service)}</strong>
               <p>Esperando confirmación del Cliente. El trabajo todavía no está contratado.</p>
               <span>Precio propuesto: {estimatedMoney(order.price_confirmation_proposed_amount)}</span>
-              {order.price_confirmation_deadline_at && <small>Reserva hasta {shortDateTime(order.price_confirmation_deadline_at)}</small>}
+              {order.price_confirmation_deadline_at && <small>{Date.parse(order.price_confirmation_deadline_at) <= Math.max(reservationClock, Date.now())
+                ? 'Plazo terminado. Actualizando estado.'
+                : `Reserva hasta ${shortDateTime(order.price_confirmation_deadline_at)}`}</small>}
               <button className="v6-secondary" type="button" onClick={() => onOpenOrder(order)}>Ver reserva</button>
             </article>
           ))}
@@ -6209,10 +6210,16 @@ function OrderCard({
   const paymentConfirmed = payments.some((payment) => payment.status === 'approved' || payment.status === 'confirmed');
   const paymentReported = latestPayment?.status === 'reported';
   const paymentDisputed = latestPayment?.status === 'disputed' || latestPayment?.status === 'rejected';
+  const paymentFactsKnown = paymentsLoadedFor === order.id && payments.length > 0;
+  const neutralPaymentState = ['not_required', 'refunded', 'partially_refunded'].includes(order.payment_status || '')
+    || latestPayment?.source_type === 'refund' || ['refunded', 'partially_refunded'].includes(latestPayment?.status || '');
   const completionContext: OrderCompletionContext = {
-    payment: paymentsLoadedFor === order.id
-      ? paymentDisputed ? 'disputed' : paymentConfirmed || order.payment_status === 'paid' ? 'confirmed' : paymentReported ? 'reported' : 'pending'
-      : order.payment_status === 'paid' ? 'confirmed' : undefined,
+    payment: neutralPaymentState ? undefined
+      : paymentFactsKnown && paymentDisputed ? 'disputed'
+      : order.payment_status === 'paid' ? 'confirmed'
+      : paymentFactsKnown && paymentReported ? 'reported'
+      : paymentFactsKnown && paymentConfirmed ? 'confirmed'
+      : paymentFactsKnown && ['unpaid', 'rejected'].includes(order.payment_status || '') ? 'pending' : undefined,
     rated: ratingsLoadedFor === order.id ? Boolean(rating) : undefined,
   };
   const canClientReportManualPayment =
@@ -6745,7 +6752,7 @@ function OrderCard({
           counterpart={other?.full_name || 'Usuario MANITO'}
         />
       )}
-      {profile.role === 'client' && order.status === 'completed' && order.professional_id && !rating && (
+      {profile.role === 'client' && order.status === 'completed' && order.professional_id && ratingsLoadedFor === order.id && !rating && (
         <div className="v6-aftercare">
           <form className="v6-inline-form" data-pwa-tracked onChangeCapture={() => ratingForm.dirty()} onSubmit={submitRating}>
             <select value={ratingStars} onChange={(event) => setRatingStars(Number(event.target.value))} aria-label="Estrellas">
