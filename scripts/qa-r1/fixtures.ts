@@ -14,13 +14,22 @@ export function order(overrides: Partial<V6Order> = {}): V6Order {
 }
 
 const params = new URLSearchParams(location.search);
-const scenario = params.get('scenario') || 'wizard';
+// Optional race controls seeded by the test before load, so the URL can stay exactly as a real deep link.
+type RaceInit = { actor?: string; scenario?: string; orders?: Record<string, Array<Partial<V6Order>>>; holds?: Array<{ name: string; actorId?: string; skip?: number }> };
+function readRaceInit(): RaceInit {
+  try { return JSON.parse(sessionStorage.getItem('qa-r1:race') || '{}') as RaceInit; } catch { return {}; }
+}
+const race = readRaceInit();
+const scenario = params.get('scenario') || race.scenario || 'wizard';
 function syntheticActor(name: string | null): V6Profile {
   if (name === 'professional') return pro;
   if (name === 'professional-b') return { ...pro, id: 'r1-pro-b-synthetic', full_name: 'Profesional B sintetico R1' };
   return client;
 }
-const actor = syntheticActor(params.get('actor'));
+const actor = syntheticActor(params.get('actor') ?? race.actor ?? null);
+const ordersByActor = new Map<string, V6Order[]>(Object.entries(race.orders || {}).map(([actorId, rows]) => [actorId, rows.map(row => order(row))]));
+// Each entry holds exactly one future invocation (after `skip` matches) and snapshots its response at call time.
+const queuedHolds = (race.holds || []).map(hold => ({ name: hold.name, actorId: hold.actorId, skip: hold.skip ?? 0 }));
 const response = params.get('response') || 'expired';
 const future = new Date(Date.now() + 3600000).toISOString();
 const manual = order({ professional_id: null, professional: null, agreed_price: null, status: 'open', assignment_mode: 'manual', manual_requested_professional_id: pro.id, preferred_professional_id: pro.id, manual_response_status: response as V6Order['manual_response_status'], manual_response_deadline_at: future, eta_minutes: 20 });
@@ -32,7 +41,9 @@ export const state = {
   ratings: params.get('rated') === 'yes' ? [{ id: 'r1-rating', order_id: 'r1-order-synthetic', client_id: client.id, professional_id: pro.id, stars: 5, comment: 'Sintetico', created_at: stamp }] : [],
   pending: new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; args?: unknown[] }>(),
   hold: new Set<string>(), failures: new Set<string>(),
+  held: [] as Array<{ name: string; actorId: string; released: boolean; release: (fail?: boolean) => void }>,
 };
+const visibleOrders = () => ordersByActor.get(state.actor.id) ?? state.orders;
 if (params.get('long') === 'yes') state.orders = state.orders.map(row => ({ ...row, price: 123456789.12, estimated_price: 123456789.12, agreed_price: row.agreed_price == null ? null : 123456789.12, price_confirmation_proposed_amount: 123456789.12, address: 'Avenida Constitucion 12345, departamento 12 B, Mar del Plata', description: 'Reparacion sintetica: perdida de agua bajo la pileta, cambio de flexible y revision completa de las conexiones existentes.' }));
 if (params.has('status')) state.orders = state.orders.map(row => ({ ...row, status: params.get('status') as V6Order['status'], eta_minutes: Number(params.get('eta') ?? 20) }));
 if (params.has('orderPayment')) state.orders = state.orders.map(row => ({ ...row, payment_status: params.get('orderPayment') as V6Order['payment_status'] }));
@@ -77,7 +88,7 @@ const supabase = {
     return result;
   },
 };
-export function invoke(name: string, args: unknown[], recordCall = true) {
+export function invoke(name: string, args: unknown[], recordCall = true): unknown {
   if (recordCall) record(name, args);
   if (name === 'getV6Supabase') return supabase;
   if (name === 'isV6SupabaseConfigured') return true;
@@ -85,12 +96,24 @@ export function invoke(name: string, args: unknown[], recordCall = true) {
   if (name === 'disableWebPushForCurrentDevice') return Promise.resolve();
   if (name.startsWith('subscribeV6')) return channel;
   if (name === 'removeV6Channel') return undefined;
+  const queued = recordCall ? queuedHolds.findIndex(entry => entry.name === name && (!entry.actorId || entry.actorId === state.actor.id)) : -1;
+  if (queued >= 0) {
+    if (queuedHolds[queued].skip > 0) queuedHolds[queued].skip--;
+    else {
+      queuedHolds.splice(queued, 1);
+      const snapshot = invoke(name, args, false);
+      return new Promise((resolve, reject) => {
+        const gate = { name, actorId: state.actor.id, released: false, release(fail = false) { gate.released = true; if (fail) reject(new Error(`Synthetic failure: ${name}`)); else resolve(snapshot); } };
+        state.held.push(gate);
+      });
+    }
+  }
   if (state.hold.has(name)) return new Promise((resolve, reject) => state.pending.set(name, { resolve, reject, args }));
   if (state.failures.has(name)) return Promise.reject(new Error(`Synthetic failure: ${name}`));
   const values: Record<string, unknown> = {
     getOrRecoverV6Profile: state.actor, getV6Profile: state.actor, getV6MyCapabilities: { admin: false },
-    listV6Services: params.get('catalog') === 'empty' ? [] : [service], listV6Specialties: [], listV6Orders: state.orders,
-    getV6NotificationDestination: { notification_id: params.get('notification'), order_id: state.orders[0]?.id, action_key: 'open_order', entity_type: 'order', entity_id: state.orders[0]?.id },
+    listV6Services: params.get('catalog') === 'empty' ? [] : [service], listV6Specialties: [], listV6Orders: visibleOrders(),
+    getV6NotificationDestination: { notification_id: params.get('notification'), order_id: visibleOrders()[0]?.id, action_key: 'open_order', entity_type: 'order', entity_id: visibleOrders()[0]?.id },
     listV6Notifications: { items: [], unreadCount: 0 }, listV6ProfessionalServices: professional.services,
     listV6ProfessionalSpecialties: [], listV6PublicProfessionals: publicProfessionals,
     listV6ClientAddresses: [{ id: 'r1-address', client_id: client.id, label: 'Casa sintetica', line: 'Direccion sintetica 123', city: 'Mar del Plata', lat: -38, lng: -57.55, is_default: true }],
@@ -122,6 +145,8 @@ Object.assign(window, { __qa: {
     const url = new URL(location.href); url.searchParams.set('actor', name); history.replaceState({}, '', url);
     record('auth:syntheticSignIn', [state.actor.id]); emitSyntheticAuth('SIGNED_IN');
   },
+  held: () => state.held.map(({ name, actorId, released }) => ({ name, actorId, released })),
+  releaseHeld(index: number, fail = false) { const gate = state.held[index]; if (!gate || gate.released) throw new Error(`No held call #${index}`); gate.release(fail); },
   hold(name: string) { state.hold.add(name); },
   release(name: string, fail = false) { const pending = state.pending.get(name); if (!pending) throw new Error(`No pending ${name}`); state.hold.delete(name); state.pending.delete(name); if (fail) pending.reject(new Error(`Synthetic failure: ${name}`)); else pending.resolve(invoke(name, pending.args || [], false)); },
   eligibility(ids: string[]) { state.eligible = ids; state.eligibility = 'ready'; state.pending.get('eligibility')?.resolve({ data: ids, error: null }); state.pending.delete('eligibility'); },
