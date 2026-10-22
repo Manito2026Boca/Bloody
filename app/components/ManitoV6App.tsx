@@ -668,13 +668,22 @@ function orderTrackingText(order: V6Order) {
     `Estado: ${orderStatusText(order)}`,
     `Dirección: ${order.address}`,
     order.scheduled_at ? `Turno: ${shortDate(order.scheduled_at)}` : null,
-    order.eta_minutes ? `ETA: ${order.eta_minutes} min` : null,
+    orderHasCurrentEta(order) ? `Llegada estimada: ${order.eta_minutes} min` : null,
     order.professional?.full_name ? `Prestador: ${order.professional.full_name}` : 'Prestador: pendiente de asignación',
   ].filter(Boolean);
   return lines.join('\n');
 }
 
-function orderStatusText(order: V6Order, proposalsCount = 0) {
+function orderHasCurrentEta(order: V6Order) {
+  return Boolean(order.professional_id) && ['accepted', 'en_camino'].includes(order.status)
+    && Number.isFinite(order.eta_minutes) && Number(order.eta_minutes) > 0;
+}
+
+function orderStatusText(order: V6Order, proposalsCount = 0, role?: V6Role) {
+  if (order.status === 'pending_client_confirmation') return role === 'client'
+    ? 'Esperando tu confirmación'
+    : role === 'professional' ? 'Esperando confirmación del Cliente' : 'Esperando confirmación del precio';
+  if (['open', 'scheduled_open', 'matching_failed'].includes(order.status) && manualRequestNeedsClientDecision(order)) return 'Elegí cómo seguir';
   if (order.status === 'waiting_quotes' || (order.status === 'open' && order.mode === 'quote')) {
     return proposalsCount > 0 ? 'Propuestas recibidas' : 'Esperando presupuestos';
   }
@@ -687,7 +696,17 @@ function orderStatusText(order: V6Order, proposalsCount = 0) {
   return V6_STATUS_LABEL[order.status];
 }
 
-function orderNextStepText(order: V6Order, role: V6Role) {
+type OrderCompletionContext = {
+  payment?: 'confirmed' | 'reported' | 'disputed' | 'pending';
+  rated?: boolean;
+};
+
+function orderNextStepText(order: V6Order, role: V6Role, completionContext?: OrderCompletionContext) {
+  if (['open', 'scheduled_open', 'matching_failed'].includes(order.status) && manualRequestNeedsClientDecision(order)) {
+    return role === 'client'
+      ? 'La solicitud directa no se confirmó. Elegí otro profesional o revisá las opciones para seguir.'
+      : 'La solicitud directa no se confirmó. El Cliente debe decidir cómo seguir.';
+  }
   if (order.status === 'open' && order.mode === 'immediate') {
     if (order.assignment_mode === 'manual' && order.manual_response_status === 'pending') {
       return 'El profesional elegido tiene que responder antes del vencimiento.';
@@ -723,9 +742,20 @@ function orderNextStepText(order: V6Order, role: V6Role) {
     : order.service?.requires_completion_evidence
       ? 'Al terminar, cargá la evidencia requerida y pedí el PIN final.'
       : 'Al terminar, pedí al cliente el PIN final.';
-  if (order.status === 'completed') return role === 'client'
-    ? 'Revisá el pago y calificá al profesional.'
-    : 'Revisá que el pago figure correctamente.';
+  if (order.status === 'completed') {
+    if (completionContext?.payment === 'disputed') return 'El pago requiere revisión. Consultá el detalle registrado.';
+    if (completionContext?.payment === 'reported') return role === 'client'
+      ? 'Tu pago fue informado. Esperá la confirmación del profesional.'
+      : 'Revisá el pago informado por el Cliente.';
+    if (completionContext?.payment === 'pending') return role === 'client'
+      ? 'Revisá el pago pendiente en el detalle del trabajo.'
+      : 'El pago todavía está pendiente.';
+    if (completionContext?.payment === 'confirmed') {
+      if (role === 'client' && completionContext.rated === false) return 'El pago está confirmado. Podés calificar al profesional.';
+      if (role !== 'client' || completionContext.rated === true) return 'Trabajo finalizado y pago confirmado. El historial queda disponible.';
+    }
+    return 'Trabajo finalizado. Consultá el detalle del pago y la calificación.';
+  }
   if (order.status === 'cancelled') return 'El historial del servicio queda disponible en este trabajo.';
   return 'Abrí el trabajo para ver el próximo paso.';
 }
@@ -1219,6 +1249,19 @@ function manualResponseLabel(order: V6Order) {
     return `Esperando respuesta hasta ${shortDate(order.manual_response_deadline_at)}.`;
   }
   return null;
+}
+
+function manualResponseStatusText(order: V6Order) {
+  if (manualRequestIsExpiredByClock(order)) return 'Solicitud vencida';
+  const labels: Record<NonNullable<V6Order['manual_response_status']>, string> = {
+    pending: 'Esperando respuesta',
+    price_confirmation_pending: 'Esperando confirmación del precio',
+    accepted: 'Solicitud aceptada',
+    rejected: 'Solicitud rechazada',
+    expired: 'Solicitud vencida',
+    awaiting_client_choice: 'Elegí cómo seguir',
+  };
+  return order.manual_response_status ? labels[order.manual_response_status] : 'Sin respuesta registrada';
 }
 
 function evaluateProfessionalOrderMatch(
@@ -4008,7 +4051,7 @@ function ClientHome({
             <span className="v6-order-icon">{serviceIcon(activeClientOrder.service?.slug || '')}</span>
             <div>
               <small>TRABAJO ACTIVO</small>
-              <h1>{orderStatusText(activeClientOrder)}</h1>
+              <h1>{orderStatusText(activeClientOrder, 0, 'client')}</h1>
               <p>{serviceDisplayName(activeClientOrder.service)} · {activeClientOrder.address}</p>
             </div>
           </div>
@@ -5111,7 +5154,7 @@ function ProfessionalHome({
             <span className="v6-order-icon">{serviceIcon(focusOrder.service?.slug || '')}</span>
             <div>
               <small>{focusOrder.status === 'trabajando' ? 'TRABAJO EN CURSO' : focusOrder.status === 'pending_client_confirmation' || focusOrder.status === 'payment_pending' ? 'ESPERANDO AL CLIENTE' : 'TRABAJO ACTUAL'}</small>
-              <h1>{orderStatusText(focusOrder)}</h1>
+              <h1>{orderStatusText(focusOrder, 0, 'professional')}</h1>
               <p>{serviceDisplayName(focusOrder.service)} · {focusOrder.client?.full_name || 'Cliente MANITO'}</p>
               <span>{focusOrder.address}</span>
               {focusOrder.scheduled_at && <span>{shortDateTime(focusOrder.scheduled_at)}</span>}
@@ -5532,6 +5575,8 @@ function OrderCard({
   const [proposals, setProposals] = useState<V6OrderProposal[]>([]);
   const [extras, setExtras] = useState<V6OrderExtra[]>([]);
   const [payments, setPayments] = useState<V6Payment[]>([]);
+  const [paymentsLoadedFor, setPaymentsLoadedFor] = useState<string | null>(null);
+  const [ratingsLoadedFor, setRatingsLoadedFor] = useState<string | null>(null);
   const [photos, setPhotos] = useState<Array<V6OrderPhoto & { signedUrl: string | null }>>([]);
   const [evidenceStage, setEvidenceStage] = useState<V6OrderPhoto['stage']>('during');
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
@@ -5649,6 +5694,7 @@ function OrderCard({
     setProposals(nextProposals);
     setExtras(nextExtras);
     setPayments(nextPayments);
+    setPaymentsLoadedFor(order.id);
   }, [order.id]);
 
   const refreshPhotos = useCallback(async () => {
@@ -5681,8 +5727,10 @@ function OrderCard({
         if (results[0].status === 'fulfilled') setProposals(results[0].value);
         if (results[1].status === 'fulfilled') setExtras(results[1].value);
         if (results[2].status === 'fulfilled') setPayments(results[2].value);
+        setPaymentsLoadedFor(results[2].status === 'fulfilled' ? order.id : null);
         if (results[3].status === 'fulfilled') setPhotos(results[3].value);
         if (results[4].status === 'fulfilled') setRating(results[4].value[0] || null);
+        setRatingsLoadedFor(results[4].status === 'fulfilled' ? order.id : null);
         if (results.some(result => result.status === 'rejected')) {
           setNotice('No pudimos actualizar todos los datos del pedido. Revisá tu conexión.');
         }
@@ -6081,7 +6129,7 @@ function OrderCard({
 
   const canUploadEvidence = evidenceStageOptions.length > 0;
   const canChat = Boolean(order.professional_id);
-  const canShareTracking = !['completed', 'cancelled'].includes(order.status);
+  const canShareTracking = Boolean(order.professional_id) && !['completed', 'cancelled'].includes(order.status);
   const canClientCancel =
     profile.role === 'client' &&
     ['open', 'scheduled_open', 'waiting_quotes', 'matching_failed', 'payment_pending', 'accepted', 'en_camino', 'en_sitio'].includes(
@@ -6113,6 +6161,12 @@ function OrderCard({
   const paymentConfirmed = payments.some((payment) => payment.status === 'approved' || payment.status === 'confirmed');
   const paymentReported = latestPayment?.status === 'reported';
   const paymentDisputed = latestPayment?.status === 'disputed' || latestPayment?.status === 'rejected';
+  const completionContext: OrderCompletionContext = {
+    payment: paymentsLoadedFor === order.id
+      ? paymentDisputed ? 'disputed' : paymentConfirmed || order.payment_status === 'paid' ? 'confirmed' : paymentReported ? 'reported' : 'pending'
+      : order.payment_status === 'paid' ? 'confirmed' : undefined,
+    rated: ratingsLoadedFor === order.id ? Boolean(rating) : undefined,
+  };
   const canClientReportManualPayment =
     profile.role === 'client' &&
     order.status === 'completed' &&
@@ -6154,21 +6208,14 @@ function OrderCard({
           <p>{order.address} · {shortDate(order.created_at)}</p>
           {other && <small>{profile.role === 'client' ? 'Profesional' : 'Cliente'}: {other.full_name || 'Usuario'}</small>}
           {otherProfessional && <ProfessionalTrustSignals data={otherProfessional.professional_profile} detailed />}
-          <span className={`v6-status ${order.status}`}>{orderStatusText(order, proposals.length)}</span>
-          {order.professional_id ? (
+          <span className={`v6-status ${order.status}`}>{orderStatusText(order, proposals.length, profile.role)}</span>
+          {order.professional_id && !['completed', 'cancelled'].includes(order.status) && (
             <small className="v6-order-hint">
               <MessageCircle size={13} aria-hidden="true" />
               {profile.role === 'client'
                 ? 'Coordiná con el prestador por el chat del pedido.'
                 : 'Coordiná con el cliente por el chat del pedido.'}
             </small>
-          ) : (
-            profile.role === 'client' && (
-              <small className="v6-order-hint">
-                <MessageCircle size={13} aria-hidden="true" />
-                Cuando un prestador acepte, se habilita el chat.
-              </small>
-            )
           )}
         </div>
         <span className="v6-price-label">
@@ -6181,7 +6228,7 @@ function OrderCard({
       )}
       <div className="v6-order-guidance">
         <span>Próximo paso</span>
-        <p>{orderNextStepText(order, profile.role)}</p>
+        <p>{orderNextStepText(order, profile.role, completionContext)}</p>
         {clientPin && (
           <strong className="v6-pin-callout"><KeyRound size={18} aria-hidden="true" /> {clientPin.label}: {clientPin.value}</strong>
         )}
@@ -6293,7 +6340,7 @@ function OrderCard({
         <span>{paymentStatusLabel(order.payment_status)}</span>
         {order.recurring_plan_id && <span>Servicio recurrente</span>}
         {order.payment_method && <span>Pago {paymentLabel(order.payment_method)}</span>}
-        {order.eta_minutes && <span>ETA {order.eta_minutes} min</span>}
+        {orderHasCurrentEta(order) && <span>Llegada estimada: {order.eta_minutes} min</span>}
       </div>
       {manualLabel && (showManualPendingNotice || showManualClientDecision || canRejectManualRequest) && (
         <section className="v6-payment-box action">
@@ -6301,7 +6348,7 @@ function OrderCard({
             <strong>
               <Users size={16} aria-hidden="true" /> Solicitud directa
             </strong>
-            <span>{order.manual_response_status === 'awaiting_client_choice' ? 'Elegí cómo seguir' : order.manual_response_status || 'pendiente'}</span>
+            <span>{manualResponseStatusText(order)}</span>
           </div>
           <p>{manualLabel}</p>
           {showManualClientDecision && (
@@ -6443,15 +6490,15 @@ function OrderCard({
           Pago en revisión. MANITO conserva el historial del pedido, chat y evidencia para revisar la diferencia.
         </p>
       )}
-      {!['completed', 'cancelled'].includes(order.status) && (
+      {canChat && !['completed', 'cancelled'].includes(order.status) && (
         <p className="v6-note">
           Coordiná por el chat y aprobá adicionales desde MANITO para que el servicio quede registrado.
         </p>
       )}
-      {order.payment_method === 'wallet' && !['completed', 'cancelled'].includes(order.status) && (
+      {canChat && order.payment_method === 'wallet' && !['completed', 'cancelled'].includes(order.status) && (
         <p className="v6-note">
           {profile.role === 'client'
-            ? 'Pago con Cuenta DNI/billetera: cuando el prestador acepte, coordiná QR o link por el chat.'
+            ? 'Pago con Cuenta DNI/billetera: coordiná QR o link por el chat del trabajo.'
             : 'Este pedido prefiere Cuenta DNI/billetera. Compartí tu QR o link de pago por el chat antes de finalizar.'}
         </p>
       )}

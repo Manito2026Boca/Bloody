@@ -699,7 +699,7 @@ export const V6_STATUS_LABEL: Record<V6OrderStatus, string> = {
   open: 'Buscando profesional',
   scheduled_open: 'Buscando profesional para el día elegido',
   waiting_quotes: 'Esperando presupuestos',
-  pending_client_confirmation: 'Esperando tu confirmación',
+  pending_client_confirmation: 'Confirmación del precio pendiente',
   payment_pending: 'Pago pendiente',
   accepted: 'Profesional confirmado',
   en_camino: 'Está en camino',
