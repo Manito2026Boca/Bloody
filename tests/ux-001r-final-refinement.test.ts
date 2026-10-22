@@ -55,11 +55,16 @@ describe('UX-001R final refinement', () => {
   });
 
   it('makes direct-request notifications navigate to the owning work item', () => {
-    expect(app).toContain('async function openNotification(item: V6Notification)');
-    expect(app).toContain("order.manual_requested_professional_id === profile?.id");
-    expect(app).toContain('setFocusedOrderId(order.id)');
+    const start = app.indexOf('async function openNotification(');
+    expect(start).toBeGreaterThan(-1);
+    const handler = app.slice(start, app.indexOf('  useEffect(', start));
+    expect(handler).toMatch(/async function openNotification\(item:\s*V6Notification\s*[,)]/);
+    expect(handler).toContain('const accountId = profile?.id');
+    expect(handler).toContain('lastAuthUser.current !== accountId');
+    expect(handler).toContain('order.manual_requested_professional_id === accountId');
+    expect(handler).toContain('setFocusedOrderId(order.id)');
     expect(app).toContain('data-order-id={order.id}');
-    expect(app).toContain("setAppMode(professionalDestination ? 'professional' : 'client')");
+    expect(handler).toContain("setAppMode(professionalDestination ? 'professional' : 'client')");
   });
 
   it('clears identity-bound state and realtime channels when the account changes', () => {
