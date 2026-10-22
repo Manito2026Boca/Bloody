@@ -155,4 +155,34 @@ cases.push({ name: 'race-delayed-unavailable-intent-keeps-later-explicit-choice'
     assert.equal((await calls(page, 'setV6Availability')).length, 0);
   } });
 
+// 5. Same as 4, but the preference write is denied, so the explicit choice only exists in memory.
+// Stored preference is Client; the held unavailable lookup arrives after the user picks Professional.
+// Expected: the in-memory explicit Professional choice survives; the stored value stays Client (nothing saved).
+cases.push({ name: 'race-delayed-unavailable-intent-keeps-unsaved-explicit-choice', autoProfessional: false, query: { intent: 'order', order: orderA },
+  async init(context) {
+    await seedRace({ actor: 'professional', scenario: 'experience', holds: [{ name: 'listV6Orders', actorId: proId, skip: 1 }] })(context);
+    await seedLocal(proKey, 'client')(context);
+    await context.addInitScript(key => {
+      const setItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (name, value) {
+        if (String(name) === key) throw new DOMException('preference storage denied', 'SecurityError');
+        return setItem.call(this, name, value);
+      };
+    }, proKey);
+  },
+  async run(page) {
+    await heldCount(page, 1);
+    assert.equal(await toProfessional(page).count(), 1, 'pending intent must leave the default Client mode');
+    await toProfessional(page).click();
+    await toClient(page).waitFor();
+    assert.equal(await stored(page, proKey), 'client', 'denied write must not change the stored preference');
+    await page.evaluate(() => window.__qa.releaseHeld(0));
+    await page.getByText(unavailable, { exact: true }).waitFor();
+    await flush(page);
+    assert.equal(await toClient(page).count(), 1, 'delayed fallback undid the unsaved explicit Professional choice');
+    assert.equal(await toProfessional(page).count(), 0);
+    assert.equal(await stored(page, proKey), 'client');
+    assert.equal((await calls(page, 'setV6Availability')).length, 0);
+  } });
+
 await runCases(cases);

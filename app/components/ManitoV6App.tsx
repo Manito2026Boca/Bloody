@@ -1674,6 +1674,7 @@ export default function ManitoV6App() {
   const experienceHydratedUser = useRef<string | null>(null);
   const handledPushNotification = useRef<string | null>(null);
   const dataLoadEpoch = useRef(0);
+  const explicitModeRevision = useRef(0);
   const openWorkroom = useCallback((order: V6Order, workroomId?: string | null) => {
     setChatWorkroomId(workroomId || null);
     setChatOrder(order);
@@ -2012,20 +2013,32 @@ export default function ManitoV6App() {
       setTab('home');
       return;
     }
+    const epoch = dataLoadEpoch.current;
+    const accountId = profile.id;
+    const revision = explicitModeRevision.current;
+    const stale = () => epoch !== dataLoadEpoch.current || lastAuthUser.current !== accountId;
+    const choiceChanged = () => revision !== explicitModeRevision.current;
     void (async () => {
+      let destinationApplied = false;
       try {
         const availableOrders = await listV6Orders();
+        if (stale()) return;
         const order = availableOrders.find((item) => item.id === intent.orderId);
         if (!order) {
           setNotice('Este trabajo no está disponible para esta cuenta. Revisá tus trabajos.');
+          if (choiceChanged()) return;
+          setAppMode(readPreferredExperience(accountId));
           setTab('orders');
           return;
         }
         setOrders(availableOrders);
+        if (choiceChanged()) return;
+        destinationApplied = true;
         setAppMode(order.professional_id === profile.id || order.manual_requested_professional_id === profile.id
           ? 'professional' : 'client');
         if (intent.kind === 'workroom') {
           const rooms = await listV6Workrooms();
+          if (stale() || choiceChanged()) return;
           const room = rooms.find((item) => item.order_id === order.id);
           if (!room) {
             setNotice('La conversación no está disponible ahora. Abrí el trabajo para volver a intentar.');
@@ -2039,7 +2052,10 @@ export default function ManitoV6App() {
           setTab('orders');
         }
       } catch {
+        if (stale()) return;
         setNotice('No pudimos abrir ese trabajo. Buscalo en Trabajos para volver a intentar.');
+        if (choiceChanged()) return;
+        if (!destinationApplied) setAppMode(readPreferredExperience(accountId));
         setTab('orders');
       }
     })();
@@ -2159,7 +2175,9 @@ export default function ManitoV6App() {
     return [...merged.values()];
   }, [orders, pendingDirectRequests, professionalOrders, profile?.id]);
   async function refreshNotificationCenter() {
+    const epoch = dataLoadEpoch.current;
     const next = await listV6Notifications();
+    if (epoch !== dataLoadEpoch.current) return;
     setNotifications(next.items);
     setUnreadNotificationCount(next.unreadCount);
     setNotificationRefreshKey((value) => value + 1);
@@ -2186,59 +2204,80 @@ export default function ManitoV6App() {
     }
   }
 
-  async function openNotification(item: V6Notification) {
+  // Resolves to false only when the notification has no authorized destination for this account.
+  async function openNotification(item: V6Notification, startRevision = explicitModeRevision.current): Promise<boolean> {
+    const epoch = dataLoadEpoch.current;
+    const accountId = profile?.id;
+    const stale = () => epoch !== dataLoadEpoch.current || !accountId || lastAuthUser.current !== accountId;
     if (!item.read_at) {
       const readAt = new Date().toISOString();
       setNotifications((current) => current.map((entry) => entry.id === item.id ? { ...entry, read_at: readAt } : entry));
       setUnreadNotificationCount((count) => Math.max(0, count - 1));
-      void markV6NotificationRead(item.id).catch(() => { void refreshNotificationCenter(); });
+      void markV6NotificationRead(item.id).catch(() => { if (!stale()) void refreshNotificationCenter(); });
     }
 
     setNotificationsOpen(false);
-    if (!item.order_id) return;
+    if (!item.order_id) return false;
     let order = orders.find((entry) => entry.id === item.order_id);
     if (!order && item.action_key === 'open_chat' && item.entity_type === 'workroom' && item.entity_id) {
       order = await getV6WorkroomOrder(item.entity_id).catch(() => undefined);
+      if (stale()) return true;
     }
     if (!order) {
       const refreshedOrders = await listV6Orders().catch(() => []);
+      if (stale()) return true;
       if (refreshedOrders.length) setOrders(refreshedOrders);
       order = refreshedOrders.find((entry) => entry.id === item.order_id);
     }
     if (!order) {
       setNotice('Este aviso ya no tiene un trabajo disponible.');
-      return;
+      return false;
     }
-    const professionalDestination = order.professional_id === profile?.id
-      || order.manual_requested_professional_id === profile?.id;
+    if (startRevision !== explicitModeRevision.current) return true;
+    const professionalDestination = order.professional_id === accountId
+      || order.manual_requested_professional_id === accountId;
     setAppMode(professionalDestination ? 'professional' : 'client');
     if (item.action_key === 'open_chat') {
       setChatWorkroomId(item.entity_type === 'workroom' ? item.entity_id : null);
       setChatOrder(order);
-      return;
+      return true;
     }
     setFocusedOrderId(order.id);
     setTab('orders');
+    return true;
   }
 
   useEffect(() => {
     if (!profile) return;
     const notificationId = new URLSearchParams(window.location.search).get('notification');
-    if (!notificationId || handledPushNotification.current === notificationId) return;
-    handledPushNotification.current = notificationId;
+    const handledKey = `${profile.id}:${notificationId}`;
+    if (!notificationId || handledPushNotification.current === handledKey) return;
+    handledPushNotification.current = handledKey;
+    // The notification owns the experience choice from here on, even while profile loading continues.
+    experienceHydratedUser.current = profile.id;
+    const epoch = dataLoadEpoch.current;
+    const accountId = profile.id;
+    const revision = explicitModeRevision.current;
+    const stale = () => epoch !== dataLoadEpoch.current || lastAuthUser.current !== accountId;
+    const restorePreference = () => {
+      if (!stale() && revision === explicitModeRevision.current) setAppMode(readPreferredExperience(accountId));
+    };
 
     void (async () => {
       try {
         const destination = await getV6NotificationDestination(notificationId);
+        if (stale()) return;
         if (!destination) {
           setNotice('Este aviso ya no está disponible para esta cuenta.');
+          restorePreference();
           return;
         }
         const nextPage = await listV6Notifications();
+        if (stale()) return;
         setNotifications(nextPage.items);
         setUnreadNotificationCount(nextPage.unreadCount);
         const stored = nextPage.items.find((item) => item.id === notificationId);
-        await openNotification(stored || {
+        const opened = await openNotification(stored || {
           id: destination.notification_id,
           recipient_id: profile.id,
           actor_id: null,
@@ -2255,13 +2294,18 @@ export default function ManitoV6App() {
           dedupe_key: null,
           action_pending: false,
           created_at: new Date().toISOString(),
-        });
+        }, revision);
+        if (!opened) restorePreference();
       } catch {
+        if (stale()) return;
         setNotice('No pudimos abrir ese aviso. Revisá tus notificaciones dentro de MANITO.');
+        restorePreference();
       } finally {
-        const cleanUrl = new URL(window.location.href);
-        cleanUrl.searchParams.delete('notification');
-        window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+        if (!stale()) {
+          const cleanUrl = new URL(window.location.href);
+          cleanUrl.searchParams.delete('notification');
+          window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+        }
       }
     })();
   }, [profile?.id]);
@@ -2385,6 +2429,7 @@ export default function ManitoV6App() {
             experience={appMode}
             canUseProfessional
             onChange={(nextMode) => {
+              explicitModeRevision.current++;
               savePreferredExperience(profile.id, nextMode);
               setAppMode(nextMode);
               setTab('home');
