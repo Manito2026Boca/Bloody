@@ -3212,10 +3212,18 @@ a.v6-evidence-link {
 
 .v6-order {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
   box-shadow: none;
 }
+
+.v6-order > * { min-width: 0; }
+
+.v6-order .v6-payment-box > div { flex-wrap: wrap; }
+.v6-order .v6-payment-box > .v6-inline-form { display: grid; }
+.v6-order .v6-payment-box span { white-space: normal; }
+.v6-order .v6-inline-form select { min-width: 0; max-width: 100%; }
 
 .v6-section .v6-order + .v6-order {
   margin-top: 10px;
@@ -5777,9 +5785,12 @@ a.v6-evidence-link {
     grid-template-columns: 40px minmax(0, 1fr);
   }
 
-  .v6-order-top > b {
+  .v6-order-top > b,
+  .v6-order-top > .v6-price-label {
     grid-column: 2;
     justify-self: start;
+    justify-items: start;
+    text-align: left;
   }
 
   .v6-notification-panel {
