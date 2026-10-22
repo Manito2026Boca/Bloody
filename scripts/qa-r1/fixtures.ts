@@ -15,14 +15,19 @@ export function order(overrides: Partial<V6Order> = {}): V6Order {
 
 const params = new URLSearchParams(location.search);
 const scenario = params.get('scenario') || 'wizard';
-const actor = params.get('actor') === 'professional' ? pro : client;
+function syntheticActor(name: string | null): V6Profile {
+  if (name === 'professional') return pro;
+  if (name === 'professional-b') return { ...pro, id: 'r1-pro-b-synthetic', full_name: 'Profesional B sintetico R1' };
+  return client;
+}
+const actor = syntheticActor(params.get('actor'));
 const response = params.get('response') || 'expired';
 const future = new Date(Date.now() + 3600000).toISOString();
 const manual = order({ professional_id: null, professional: null, agreed_price: null, status: 'open', assignment_mode: 'manual', manual_requested_professional_id: pro.id, preferred_professional_id: pro.id, manual_response_status: response as V6Order['manual_response_status'], manual_response_deadline_at: future, eta_minutes: 20 });
 const reservation = order({ professional_id: null, professional: null, reserved_professional: pro, status: 'pending_client_confirmation', agreed_price: null, price_confirmation_status: 'pending', price_confirmation_professional_id: pro.id, price_confirmation_deadline_at: future, price_confirmation_estimated_amount: 18000, price_confirmation_proposed_amount: 20000, price_confirmation_scope: 'Reparacion sintetica' });
 export const state = {
   scenario, actor, calls: [] as Array<{ name: string; args: unknown[] }>, unexpected: [] as string[],
-  orders: scenario === 'wizard' || scenario === 'recommendations' ? [] : [scenario === 'manual' ? manual : scenario === 'reservation' ? reservation : scenario === 'edit' ? order({ professional_id: null, professional: null, agreed_price: null, status: 'waiting_quotes', mode: 'quote' }) : order({ status: scenario === 'completed' ? 'completed' : 'accepted', payment_status: params.get('paid') === 'yes' ? 'paid' : 'unpaid', completed_at: scenario === 'completed' ? stamp : null })],
+  orders: ['wizard', 'recommendations', 'experience'].includes(scenario) ? [] : [scenario === 'manual' ? manual : scenario === 'reservation' ? reservation : scenario === 'edit' ? order({ professional_id: null, professional: null, agreed_price: null, status: 'waiting_quotes', mode: 'quote' }) : order({ status: scenario === 'completed' ? 'completed' : 'accepted', payment_status: params.get('paid') === 'yes' ? 'paid' : 'unpaid', completed_at: scenario === 'completed' ? stamp : null })],
   eligible: params.get('eligibility') === 'empty' ? [] : [pro.id], eligibility: params.get('eligibility') || 'ready',
   ratings: params.get('rated') === 'yes' ? [{ id: 'r1-rating', order_id: 'r1-order-synthetic', client_id: client.id, professional_id: pro.id, stars: 5, comment: 'Sintetico', created_at: stamp }] : [],
   pending: new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; args?: unknown[] }>(),
@@ -37,6 +42,7 @@ if (params.get('paymentLoad') === 'error') state.failures.add('listV6PaymentsFor
 if (params.get('ratingLoad') === 'error') state.failures.add('listV6OrderRatings');
 if (params.get('paymentLoad') === 'pending') state.hold.add('listV6PaymentsForOrder');
 if (params.get('ratingLoad') === 'pending') state.hold.add('listV6OrderRatings');
+if (params.get('catalog') === 'error') state.failures.add('listV6Services');
 const paymentState = params.get('payment') || (params.get('paid') === 'yes' ? 'confirmed' : null);
 const payments = paymentState ? [{ id: 'r1-payment', order_id: 'r1-order-synthetic', client_id: client.id, professional_id: pro.id, source_type: 'original', provider: 'cash', amount: 18000, manito_fee: 0, professional_amount: 18000, currency: 'ARS', status: paymentState, payment_method: 'cash', created_at: stamp, updated_at: stamp }] : [];
 if (params.get('paymentHistory') === 'approved-refunded') payments.push({ ...payments[0], id: 'r1-historical-approved', status: 'approved', created_at: '2026-10-21T12:00:00Z' });
@@ -45,8 +51,19 @@ const publicProfessionals = params.get('candidates') === 'filtered' ? [excludedP
 function record(name: string, args: unknown[]) { state.calls.push({ name, args }); }
 function unexpected(name: string): never { state.unexpected.push(name); throw new Error(`Unconfigured isolated API: ${name}`); }
 const channel = { on() { return this; }, subscribe() { return this; }, unsubscribe() {} };
+type SyntheticSession = { user: { id: string; email: string; user_metadata: Record<string, never> } };
+const authListeners = new Set<(event: string, session: SyntheticSession | null) => void>();
+let signedIn = true;
+function syntheticSession(): SyntheticSession | null {
+  return signedIn ? { user: { id: state.actor.id, email: `${state.actor.id}@example.invalid`, user_metadata: {} } } : null;
+}
+function emitSyntheticAuth(event: string) { for (const listener of authListeners) listener(event, syntheticSession()); }
 const supabase = {
-  auth: { async getSession() { return { data: { session: { user: { id: actor.id, email: 'synthetic@example.invalid', user_metadata: {} } } } }; }, onAuthStateChange() { return { data: { subscription: { unsubscribe() {} } } }; } },
+  auth: {
+    async getSession() { return { data: { session: syntheticSession() } }; },
+    onAuthStateChange(listener: (event: string, session: SyntheticSession | null) => void) { authListeners.add(listener); return { data: { subscription: { unsubscribe() { authListeners.delete(listener); } } } }; },
+    async signOut() { record('auth:signOut', []); signedIn = false; emitSyntheticAuth('SIGNED_OUT'); return { error: null }; },
+  },
   channel() { return channel; }, removeAllChannels() {},
   rpc(name: string, args: unknown) {
     record(`rpc:${name}`, [args]);
@@ -65,13 +82,15 @@ export function invoke(name: string, args: unknown[], recordCall = true) {
   if (name === 'getV6Supabase') return supabase;
   if (name === 'isV6SupabaseConfigured') return true;
   if (name === 'webPushState') return 'unsupported';
+  if (name === 'disableWebPushForCurrentDevice') return Promise.resolve();
   if (name.startsWith('subscribeV6')) return channel;
   if (name === 'removeV6Channel') return undefined;
   if (state.hold.has(name)) return new Promise((resolve, reject) => state.pending.set(name, { resolve, reject, args }));
   if (state.failures.has(name)) return Promise.reject(new Error(`Synthetic failure: ${name}`));
   const values: Record<string, unknown> = {
-    getOrRecoverV6Profile: actor, getV6Profile: actor, getV6MyCapabilities: { admin: false },
-    listV6Services: [service], listV6Specialties: [], listV6Orders: state.orders,
+    getOrRecoverV6Profile: state.actor, getV6Profile: state.actor, getV6MyCapabilities: { admin: false },
+    listV6Services: params.get('catalog') === 'empty' ? [] : [service], listV6Specialties: [], listV6Orders: state.orders,
+    getV6NotificationDestination: { notification_id: params.get('notification'), order_id: state.orders[0]?.id, action_key: 'open_order', entity_type: 'order', entity_id: state.orders[0]?.id },
     listV6Notifications: { items: [], unreadCount: 0 }, listV6ProfessionalServices: professional.services,
     listV6ProfessionalSpecialties: [], listV6PublicProfessionals: publicProfessionals,
     listV6ClientAddresses: [{ id: 'r1-address', client_id: client.id, label: 'Casa sintetica', line: 'Direccion sintetica 123', city: 'Mar del Plata', lat: -38, lng: -57.55, is_default: true }],
@@ -97,6 +116,12 @@ export function invoke(name: string, args: unknown[], recordCall = true) {
 Object.assign(window, { __qa: {
   state,
   calls: () => state.calls,
+  signOut: () => supabase.auth.signOut(),
+  signIn(name: 'client' | 'professional' | 'professional-b') {
+    state.actor = syntheticActor(name); signedIn = true;
+    const url = new URL(location.href); url.searchParams.set('actor', name); history.replaceState({}, '', url);
+    record('auth:syntheticSignIn', [state.actor.id]); emitSyntheticAuth('SIGNED_IN');
+  },
   hold(name: string) { state.hold.add(name); },
   release(name: string, fail = false) { const pending = state.pending.get(name); if (!pending) throw new Error(`No pending ${name}`); state.hold.delete(name); state.pending.delete(name); if (fail) pending.reject(new Error(`Synthetic failure: ${name}`)); else pending.resolve(invoke(name, pending.args || [], false)); },
   eligibility(ids: string[]) { state.eligible = ids; state.eligibility = 'ready'; state.pending.get('eligibility')?.resolve({ data: ids, error: null }); state.pending.delete('eligibility'); },

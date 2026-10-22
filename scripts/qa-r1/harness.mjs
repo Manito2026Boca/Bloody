@@ -94,14 +94,15 @@ export async function runCases(cases) {
       page.on('response', response => { if (response.status() >= 400) failedResources.push({ url: response.url(), status: response.status() }); });
       const result = { name: test.name, manifest: harness.manifestId, runId, status: 'PASS' };
       try {
+        if (test.init) await test.init(context, page);
         await page.goto(`${harness.base}/?${new URLSearchParams(test.query || {})}`);
         await page.locator('.v6-bottom').waitFor();
-        if (test.query?.actor === 'professional') {
+        if (test.query?.actor === 'professional' && test.autoProfessional !== false) {
           await page.getByRole('button', { name: 'Cambiar a experiencia Profesional', exact: true }).click();
           await page.getByRole('heading', { name: 'Hoy', exact: true }).waitFor();
           await settle(page);
         }
-        await test.run(page, result);
+        await test.run(page, result, { context, base: harness.base });
       } catch (error) { result.status = 'FAIL'; result.error = error.message; }
       finally {
         result.calls = await page.evaluate(() => window.__qa?.state.calls || []).catch(() => []);

@@ -16,6 +16,7 @@ import { getMyProviderIdentity, getMyProviderActivityRequirements } from '../lib
 import type { OwnProviderIdentity, ActivityRequirement } from '../lib/providerIdentity';
 import { providerDocuments } from '../lib/providerActivity';
 import { pwaAuthenticatedRouteReadiness } from '../lib/pwaUpdateSafety';
+import { readPreferredExperience, savePreferredExperience } from '../lib/experiencePreference';
 import {
   ExperienceSwitch,
   ManitoBottomNavigation,
@@ -1670,6 +1671,7 @@ export default function ManitoV6App() {
     routeSafety.set(pwaAuthenticatedRouteReadiness(loading, profileLoading, !!session, !!profile));
   }, [loading, profileLoading, session, profile, routeSafety]);
   const lastAuthUser = useRef<string | null>(null);
+  const experienceHydratedUser = useRef<string | null>(null);
   const handledPushNotification = useRef<string | null>(null);
   const dataLoadEpoch = useRef(0);
   const openWorkroom = useCallback((order: V6Order, workroomId?: string | null) => {
@@ -1777,6 +1779,7 @@ export default function ManitoV6App() {
   const resetSession = useCallback(async () => {
     dataLoadEpoch.current++;
     lastAuthUser.current = null;
+    experienceHydratedUser.current = null;
     try {
       await disableWebPushForCurrentDevice();
     } catch {
@@ -1851,6 +1854,7 @@ export default function ManitoV6App() {
         const nextUserId = nextSession?.user.id || null;
         const userChanged = lastAuthUser.current !== nextUserId;
         if (userChanged) {
+          experienceHydratedUser.current = null;
           dataLoadEpoch.current++;
           setProfileLoading(Boolean(nextUserId));
           setProfile(null);
@@ -1964,8 +1968,8 @@ export default function ManitoV6App() {
     void syncExistingWebPush().catch(() => undefined);
   }, [profile?.id]);
 
-  useEffect(() => {
-    if (!profile || profileLoading || services.length === 0) return;
+  useLayoutEffect(() => {
+    if (!profile || profileLoading) return;
     const origins = resolveDomainOrigins({
       configuredAppOrigin: process.env.NEXT_PUBLIC_APP_URL,
       runtimeOrigin: window.location.origin,
@@ -1976,14 +1980,28 @@ export default function ManitoV6App() {
     try {
       intent = consumePendingDomainIntent({
         origins,
-        knownServices: new Set(services.map((service) => service.slug)),
+        knownServices: new Set([...serviceGroups.flatMap(group => group.slugs), ...services.map(service => service.slug)]),
       }, window.sessionStorage);
-    } catch { return; }
-    if (!intent || intent.kind === 'notification') return;
+    } catch { intent = null; }
+    if (intent?.kind === 'notification' || new URLSearchParams(window.location.search).has('notification')) {
+      experienceHydratedUser.current = profile.id;
+      return;
+    }
+    if (!intent) {
+      if (experienceHydratedUser.current !== profile.id) {
+        setAppMode(readPreferredExperience(profile.id));
+        experienceHydratedUser.current = profile.id;
+      }
+      return;
+    }
+    experienceHydratedUser.current = profile.id;
     if (intent.kind === 'service') {
-      const service = services.find((item) => item.slug === intent.service);
-      if (!service) return;
       setAppMode('client');
+      const service = services.find((item) => item.slug === intent.service);
+      if (!service) {
+        setNotice('No pudimos cargar ese servicio. Buscalo en Inicio para volver a intentar.');
+        return;
+      }
       setClientSelectedService(service);
       setClientIntentMode(intent.mode || null);
       setTab('home');
@@ -2367,6 +2385,7 @@ export default function ManitoV6App() {
             experience={appMode}
             canUseProfessional
             onChange={(nextMode) => {
+              savePreferredExperience(profile.id, nextMode);
               setAppMode(nextMode);
               setTab('home');
             }}
@@ -6281,6 +6300,25 @@ function OrderCard({
       {order.status === 'trabajando' && (
         <ClosureCheckpoint order={order} extras={extras} photos={photos} />
       )}
+      {order.status === 'trabajando' && (order.client_id === profile.id || order.professional_id === profile.id) && (
+        <details className="v6-inline-details" aria-label="Ayuda durante el trabajo">
+          <summary>Tengo un problema</summary>
+          <p>Una vez iniciado, el trabajo no se puede cancelar desde la app.</p>
+          <p>Dejá constancia de lo ocurrido en el chat del trabajo y conservá fotos en Fotos y evidencia. El PIN final se usa para finalizar el trabajo, no para cancelarlo ni pedir ayuda.</p>
+          <p>La app todavía no tiene un canal de asistencia para trabajos en curso. Protección MANITO permite solicitar revisión después de finalizar, cuando corresponda; no ofrece atención inmediata.</p>
+          <div className="v6-actions compact">
+            <button className="v6-secondary" type="button" onClick={() => setChatOrder(order, workroom?.id)}><MessageCircle size={16} aria-hidden="true" /> Abrir chat del trabajo</button>
+            <button className="v6-secondary" type="button" onClick={() => {
+              const panel = document.getElementById(`order-protection-info-${order.id}`);
+              if (panel instanceof HTMLDetailsElement) {
+                panel.open = true;
+                panel.querySelector('summary')?.focus();
+                panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
+              }
+            }}>Ver información de Protección</button>
+          </div>
+        </details>
+      )}
       <div className="v6-order-guidance">
         <span>Próximo paso</span>
         <p>{orderNextStepText(order, profile.role, completionContext)}</p>
@@ -6443,7 +6481,7 @@ function OrderCard({
           )}
         </section>
       )}
-      <details className="v6-inline-details v6-commercial-details">
+      <details className="v6-inline-details v6-commercial-details" id={`order-protection-info-${order.id}`}>
         <summary>Pago y Protección MANITO</summary>
       <section className="v6-payment-box">
         <div>
