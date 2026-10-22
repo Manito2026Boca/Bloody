@@ -3178,6 +3178,8 @@ function ClientHome({
 
   async function createOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    if (requestStep !== 'review' || !(submitter instanceof HTMLButtonElement) || submitter.dataset.requestAction !== 'publish') return;
     if (requestSafety.blocked()) return;
     if (creatingOrder) return;
     if (!selectedService) {
@@ -3685,7 +3687,10 @@ function ClientHome({
 
         <RequestProgress steps={requestStepLabels} current={requestStepIndex} />
 
-        <form className="v6-request-form" data-pwa-tracked onChangeCapture={() => requestSafety.dirty()} onSubmit={createOrder}>
+        <form className="v6-request-form" data-pwa-tracked onChangeCapture={() => requestSafety.dirty()} onSubmit={createOrder}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && event.target instanceof HTMLInputElement) event.preventDefault();
+          }}>
           {requestStep === 'need' && (
             <section className="v6-request-stage">
               <div className="v6-stage-heading">
@@ -3983,9 +3988,9 @@ function ClientHome({
           <footer className="v6-request-actions">
             <button className="v6-secondary" type="button" onClick={previousRequestStep}>Atrás</button>
             {requestStep !== 'review' ? (
-              <button className="v6-primary" type="button" disabled={confirmingLocation} onClick={() => void nextRequestStep()}>{confirmingLocation ? 'Confirmando ubicación...' : 'Continuar'}</button>
+              <button key="request-continue" className="v6-primary" type="button" disabled={confirmingLocation} onClick={() => void nextRequestStep()}>{confirmingLocation ? 'Confirmando ubicación...' : 'Continuar'}</button>
             ) : (
-              <button className="v6-primary" type="submit" disabled={creatingOrder}>
+              <button key="request-publish" className="v6-primary" type="submit" data-request-action="publish" disabled={creatingOrder}>
                 {creatingOrder ? (editingOrder ? 'Guardando...' : 'Publicando...') : editingOrder ? 'Guardar y volver a buscar' : mode === 'quote' ? 'Publicar solicitud de presupuesto' : mode === 'scheduled' ? 'Enviar solicitud programada' : 'Buscar profesional ahora'}
               </button>
             )}
