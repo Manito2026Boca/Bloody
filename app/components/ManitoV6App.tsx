@@ -5057,6 +5057,23 @@ function ProfessionalHome({
     }
   }
 
+  const [reservationClock, setReservationClock] = useState(() => Date.now());
+  const ownReservations = activeOrders.filter((order) =>
+    order.status === 'pending_client_confirmation' && !order.professional_id &&
+    order.price_confirmation_professional_id === profile.id);
+  useEffect(() => {
+    const updateClock = () => setReservationClock(Date.now());
+    const deadlines = ownReservations.map(order => Date.parse(order.price_confirmation_deadline_at || ''))
+      .filter(deadline => Number.isFinite(deadline) && deadline > Date.now());
+    const timer = deadlines.length ? window.setTimeout(updateClock, Math.min(Math.min(...deadlines) - Date.now() + 50, 2_147_000_000)) : null;
+    window.addEventListener('focus', updateClock);
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      window.removeEventListener('focus', updateClock);
+    };
+  }, [activeOrders, profile.id, reservationClock]);
+  const pendingReservations = ownReservations.filter(order => !order.price_confirmation_deadline_at ||
+    Date.parse(order.price_confirmation_deadline_at) > Math.max(reservationClock, Date.now()));
   const contractedOrders = activeOrders.filter((order) =>
     order.professional_id === profile.id && !['completed', 'cancelled'].includes(order.status));
   const focusOrder = contractedOrders
@@ -5188,6 +5205,21 @@ function ProfessionalHome({
         </section>
       )}
 
+      {pendingReservations.length > 0 && (
+        <section className="v6-section v6-waiting-client" aria-label="Reservas pendientes de confirmación">
+          <div className="v6-section-head"><div><small>ESPERANDO AL CLIENTE</small><h2>Reservas pendientes</h2></div><span>{pendingReservations.length}</span></div>
+          {pendingReservations.map(order => (
+            <article className="v6-direct-request" key={order.id} data-order-id={order.id}>
+              <strong>{serviceDisplayName(order.service)}</strong>
+              <p>Esperando confirmación del Cliente. El trabajo todavía no está contratado.</p>
+              <span>Precio propuesto: {estimatedMoney(order.price_confirmation_proposed_amount)}</span>
+              {order.price_confirmation_deadline_at && <small>Reserva hasta {shortDateTime(order.price_confirmation_deadline_at)}</small>}
+              <button className="v6-secondary" type="button" onClick={() => onOpenOrder(order)}>Ver reserva</button>
+            </article>
+          ))}
+        </section>
+      )}
+
       {pendingProposalRooms.length > 0 && (
         <section className="v6-section v6-waiting-client">
           <div className="v6-section-head"><div><small>ESPERANDO AL CLIENTE</small><h2>Presupuestos enviados</h2></div><span>{pendingProposalRooms.length}</span></div>
@@ -5201,7 +5233,7 @@ function ProfessionalHome({
         </section>
       )}
 
-      {!directRequests.length && !focusOrder && !nextOrder && !pendingProposalRooms.length && canOperate && (
+      {!directRequests.length && !focusOrder && !nextOrder && !pendingReservations.length && !pendingProposalRooms.length && canOperate && (
         <section className="v6-today-empty">
           <Clock size={22} aria-hidden="true" />
           <div><strong>No tenés trabajos programados para hoy.</strong><p>{profile.is_available ? 'Te avisaremos cuando aparezca una solicitud compatible.' : 'Tus trabajos aceptados siguen en Agenda aunque pauses los pedidos Ahora.'}</p></div>
@@ -5593,6 +5625,7 @@ function OrderCard({
   const [submittingExtra, setSubmittingExtra] = useState(false);
   const extraRequestInFlight = useRef(false);
   const advancingOrder = useRef(false);
+  const [advancing, setAdvancing] = useState(false);
   const [pinActionError, setPinActionError] = useState<string | null>(null);
   const [pinEntryOpen, setPinEntryOpen] = useState(false);
   const [pinValue, setPinValue] = useState('');
@@ -5799,6 +5832,7 @@ function OrderCard({
     }
     if (advancingOrder.current) return;
     advancingOrder.current = true;
+    setAdvancing(true);
     setPinActionError(null);
     if (needsPin) pinForm.begin();
     try {
@@ -5822,6 +5856,7 @@ function OrderCard({
       else setError(message);
     } finally {
       advancingOrder.current = false;
+      setAdvancing(false);
     }
   }
 
@@ -6233,7 +6268,7 @@ function OrderCard({
           <strong className="v6-pin-callout"><KeyRound size={18} aria-hidden="true" /> {clientPin.label}: {clientPin.value}</strong>
         )}
         {profile.role === 'professional' && canProfessionalAdvanceOrder(order, profile.id) && (
-          <button className="v6-primary" type="button" onClick={advance}>{nextAction.label}</button>
+          <button className="v6-primary" type="button" disabled={advancing} aria-busy={advancing} onClick={advance}>{advancing ? 'Procesando...' : nextAction.label}</button>
         )}
 
         {profile.role === 'professional' && pinEntryOpen && (nextAction.kind === 'start_with_pin' || nextAction.kind === 'complete_with_pin') && (
@@ -6252,8 +6287,8 @@ function OrderCard({
               />
             </label>
             <div className="v6-actions compact">
-              <button className="v6-primary" type="submit">Validar PIN</button>
-              <button className="v6-secondary" type="button" onClick={() => { pinForm.discard(); setPinEntryOpen(false); setPinValue(''); setPinActionError(null); }}>Cancelar</button>
+              <button className="v6-primary" type="submit" disabled={advancing} aria-busy={advancing}>{advancing ? 'Procesando...' : 'Validar PIN'}</button>
+              <button className="v6-secondary" type="button" disabled={advancing} onClick={() => { pinForm.discard(); setPinEntryOpen(false); setPinValue(''); setPinActionError(null); }}>Cancelar</button>
             </div>
           </form>
         )}
