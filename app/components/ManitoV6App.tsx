@@ -3670,6 +3670,7 @@ function ClientHome({
         setError('Elegí la especialidad que mejor describe el trabajo.');
         return;
       }
+      setError(null);
       setRequestStep('place');
       return;
     }
@@ -3686,6 +3687,7 @@ function ClientHome({
         setError('Elegí la localidad del servicio o usá GPS.');
         return;
       }
+      if (confirmedCoordinates) setError(null);
       setRequestStep('mode');
       return;
     }
@@ -3698,6 +3700,7 @@ function ClientHome({
         setError(selectedService ? unsupportedModeMessage(selectedService, mode) : 'Elegí un servicio para continuar.');
         return;
       }
+      setError(null);
       setRequestStep('resolution');
       return;
     }
@@ -3714,6 +3717,7 @@ function ClientHome({
         setError('Elegí un profesional disponible o usá búsqueda automática.');
         return;
       }
+      setError(null);
       setRequestStep('review');
     }
   }
