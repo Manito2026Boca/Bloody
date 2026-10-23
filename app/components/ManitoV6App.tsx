@@ -6200,6 +6200,7 @@ function OrderCard({
 
   async function uploadOrderEvidence(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!evidenceFile) {
       setError('Elegí una foto para subir al seguimiento.');
       return;
@@ -6228,7 +6229,7 @@ function OrderCard({
       });
       await refreshPhotos();
       setEvidenceFile(null);
-      event.currentTarget.reset();
+      form.reset();
       setNotice('Evidencia agregada al seguimiento.');
       evidenceForm.saved();
     } catch (caught) {
