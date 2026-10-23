@@ -28,7 +28,8 @@ const done = name => { result.completedStages.push(name); result.stage = name; }
 class Stop extends Error { constructor(status, reason) { super(reason); this.status = status; this.reason = reason; } }
 const stop = (status, reason) => { throw new Stop(status, reason); };
 
-const scrub = text => String(text ?? '')
+const secrets = []; // supplied QA passwords, memory only, never output
+const scrub = text => secrets.reduce((s, secret) => s.split(secret).join('<redacted>'), String(text ?? ''))
   .replace(/https?:\/\/\S+/g, '<url>').replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '<jwt>')
   .replace(/[\w.+-]+@[\w.-]+/g, '<email>').replace(/\d{4,}/g, '#').replace(/\s+/g, ' ').trim().slice(0, 120);
 
@@ -46,6 +47,8 @@ async function readConfig() {
     && cfg.accounts[0]?.email === CLIENT_EMAIL && cfg.accounts[1]?.email === PRO_EMAIL
     && cfg.accounts.every(a => typeof a.password === 'string' && a.password.length > 0 && UUID.test(a.userId || ''));
   if (!ok) stop('FAIL', 'config_rejected');
+  for (const a of cfg.accounts) if (!secrets.includes(a.password)) secrets.push(a.password);
+  secrets.sort((a, b) => b.length - a.length);
   return cfg;
 }
 
