@@ -3034,7 +3034,7 @@ function ClientHome({
   setProblemQuery: (query: string) => void;
   setOrders: (orders: V6Order[]) => void;
   setChatOrder: (order: V6Order, workroomId?: string | null) => void;
-  setError: (message: string) => void;
+  setError: (message: string | null) => void;
   setNotice: (message: string) => void;
   onNavigate: (tab: Tab) => void;
   editingOrder: V6Order | null;
